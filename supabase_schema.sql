@@ -1,0 +1,147 @@
+-- PostgreSQL / Supabase Schema for Individual Optimization & Learning Management System
+
+-- 1. 学校マスター
+CREATE TABLE IF NOT EXISTS schools (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('elementary', 'junior_high')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 2. 生徒アカウント
+CREATE TABLE IF NOT EXISTS students (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id TEXT NOT NULL UNIQUE, -- 例: student12345
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE, -- 例: student12345@tentoru-student.com
+    grade TEXT NOT NULL, -- 例: '小5', '中3'
+    school_id UUID REFERENCES schools(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'normal' CHECK (status IN ('normal', 'fast', 'warning')), -- 状態（爆速、遅れ/パンクアラートなど）
+    start_unit_id UUID, -- 学習スタート位置の単元ID
+    period_count INTEGER NOT NULL DEFAULT 2 CHECK (period_count BETWEEN 2 AND 10),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 3. 学校単位のマスターカリキュラム単元
+CREATE TABLE IF NOT EXISTS curriculum_units (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL, -- 数学、英語、国語、理科、社会など
+    name TEXT NOT NULL, -- 単元名
+    sequence_order INTEGER NOT NULL, -- 並び順。年度途中に講師が変更可能
+    google_drive_url TEXT, -- 印刷物用のGoogleドライブURL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (school_id, subject, id),
+    UNIQUE (school_id, subject, sequence_order) DEFERRABLE INITIALLY DEFERRED
+);
+
+-- studentsのstart_unit_idの外部キー制約を追加
+ALTER TABLE students ADD CONSTRAINT fk_start_unit FOREIGN KEY (start_unit_id) REFERENCES curriculum_units(id) ON DELETE SET NULL;
+
+-- 4. 生徒ごとの学習タスク (Todo)
+CREATE TABLE IF NOT EXISTS learning_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    unit_id UUID NOT NULL REFERENCES curriculum_units(id) ON DELETE CASCADE,
+    scheduled_date DATE NOT NULL,
+    period INTEGER, -- 1〜4時間目のコマ割り設定。1: 1時間目, 2: 2時間目, 3: 3時間目, 4: 4時間目
+    status TEXT NOT NULL DEFAULT 'unstarted' CHECK (status IN ('unstarted', 'skipped', 'completed', 'failed')),
+    video_watched BOOLEAN NOT NULL DEFAULT FALSE,
+    test_passed BOOLEAN NOT NULL DEFAULT FALSE,
+    office_note TEXT, -- 事務用備考欄。提出物の有無など
+    actual_completed_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (student_id, unit_id)
+);
+
+-- 5. 詳細な学習ログ
+CREATE TABLE IF NOT EXISTS learning_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    unit_id UUID NOT NULL REFERENCES curriculum_units(id) ON DELETE CASCADE,
+    log_type TEXT NOT NULL CHECK (log_type IN ('video_view', 'test_result')),
+    duration_seconds INTEGER DEFAULT 0,
+    score INTEGER, -- テスト点数
+    total_questions INTEGER,
+    incorrect_genres TEXT[], -- 間違えたジャンル
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 6. 定期テスト・模試記録
+CREATE TABLE IF NOT EXISTS test_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    record_type TEXT NOT NULL CHECK (record_type IN ('regular_test', 'mock_exam')),
+    subject TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    rank_change TEXT CHECK (rank_change IN ('up', 'down', 'keep')),
+    rate_change NUMERIC(5,2), -- 上昇・下降率 (%)
+    next_target_score INTEGER,
+    improvement_plan TEXT, -- 改善点
+    target_school_code TEXT, -- 志望校コード（模試用）
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 7. 志望校コード表
+CREATE TABLE IF NOT EXISTS school_codes_master (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    deviation_value INTEGER NOT NULL -- 基準偏差値
+);
+
+-- 8. 判定点数一覧
+CREATE TABLE IF NOT EXISTS exam_thresholds_master (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_code TEXT NOT NULL REFERENCES school_codes_master(code) ON DELETE CASCADE,
+    min_score INTEGER NOT NULL,
+    max_score INTEGER NOT NULL,
+    probability INTEGER NOT NULL CHECK (probability BETWEEN 0 AND 100),
+    UNIQUE (school_code, min_score, max_score)
+);
+
+-- 9. AI指導報告書
+CREATE TABLE IF NOT EXISTS ai_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    month TEXT NOT NULL, -- 例: '2026-06'
+    analysis_text TEXT NOT NULL, -- AIポジティブ分析
+    teacher_notes TEXT, -- 講師手動追加の二者面談結果・目標
+    original_ai_text TEXT, -- 修正前のAIテキスト（学習用）
+    final_text TEXT, -- 最終テキスト
+    image_url TEXT, -- 画像化された報告書のURL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (student_id, month)
+);
+
+-- 10. AIプロンプト設定
+CREATE TABLE IF NOT EXISTS prompt_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    prompt_template TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 11. 講師による手動修正履歴
+CREATE TABLE IF NOT EXISTS teacher_corrections_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    original_text TEXT NOT NULL,
+    corrected_text TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 初期プロンプト設定の挿入
+INSERT INTO prompt_settings (prompt_template) VALUES (
+    'あなたは個別指導塾の優秀な校舎長です。以下の学習ログ情報に基づいて、保護者に向けた「今月の頑張り・行動の成長」についての指導報告書を作成してください。
+
+条件:
+1. 点数が悪くても、行動の成長や努力した点（例：動画視聴時間、テストの受講回数など）に焦点を当て、ポジティブなトーンで執筆してください。
+2. 専門用語は避け、保護者にも分かりやすい日本語で書いてください。
+3. 文字数は250〜400文字程度としてください。
+4. 相手の強みを褒めちぎるスタイルを維持してください。
+
+学習ログデータ：
+- 動画視聴時間合計: {video_duration}分
+- テスト合格単元数: {passed_units_count}単元
+- テスト平均正答率: {average_score}%
+- 苦手・間違えたジャンル: {incorrect_genres}'
+) ON CONFLICT DO NOTHING;

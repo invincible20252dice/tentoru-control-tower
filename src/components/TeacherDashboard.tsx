@@ -1,0 +1,1227 @@
+import React, { useState, useEffect, useRef } from 'react';
+import styles from './TeacherDashboard.module.css';
+import { 
+  db, 
+  Student, 
+  School, 
+  CurriculumUnit, 
+  LearningTask, 
+  LearningLog, 
+  TestRecord, 
+  SchoolCodeMaster, 
+  ExamThresholdMaster, 
+  AIReport, 
+  PromptSetting,
+  TeacherCorrectionLog
+} from '../lib/db';
+import { 
+  rescheduleDelayedTasks, 
+  reorganizeFutureTasks, 
+  calculateMockExamPassRate, 
+  learnFromTeacherCorrections, 
+  generateAIReportText,
+  PersonalStyle
+} from '../lib/scheduler';
+import html2canvas from 'html2canvas';
+
+interface TeacherDashboardProps {
+  onBackToPortal: () => void;
+  theme?: 'light' | 'dark';
+}
+
+export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: TeacherDashboardProps) {
+  // State
+  const [students, setStudents] = useState<Student[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'tests' | 'ai-report'>('schedule');
+
+  // Account Issuance State
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentGrade, setNewStudentGrade] = useState('中1');
+  const [newStudentSchoolId, setNewStudentSchoolId] = useState('');
+
+  // Curriculum State
+  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('数学');
+  const [schoolUnits, setSchoolUnits] = useState<CurriculumUnit[]>([]);
+
+  // Daily Scheduler State
+  const [scheduleDate, setScheduleDate] = useState('2026-06-19');
+  const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
+  const [periodSelections, setPeriodSelections] = useState<Record<number, string>>({
+    1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '', 10: ''
+  });
+  const [periodCount, setPeriodCount] = useState<number>(2);
+  const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
+
+  // Start Unit position State
+  const [startUnitId, setStartUnitId] = useState<string>('');
+
+  // Test & Grade State
+  const [regularSubject, setRegularSubject] = useState('数学');
+  const [regularScore, setRegularScore] = useState('');
+  const [regularRankChange, setRegularRankChange] = useState<'up' | 'down' | 'keep'>('keep');
+  const [regularRateChange, setRegularRateChange] = useState('');
+  const [regularNextTarget, setRegularNextTarget] = useState('');
+  const [regularImprovement, setRegularImprovement] = useState('');
+
+  const [mockSubject, setMockSubject] = useState('総合');
+  const [mockScore, setMockScore] = useState('');
+  const [mockTargetSchool, setMockTargetSchool] = useState('');
+  const [schoolCodes, setSchoolCodes] = useState<SchoolCodeMaster[]>([]);
+  const [examThresholds, setExamThresholds] = useState<ExamThresholdMaster[]>([]);
+  const [testRecordsList, setTestRecordsList] = useState<TestRecord[]>([]);
+
+  // AI Report State
+  const [aiPrompt, setAiPrompt] = useState<string>('');
+  const [aiReportText, setAiReportText] = useState<string>('');
+  const [teacherNotes, setTeacherNotes] = useState<string>('');
+  const [originalAiText, setOriginalAiText] = useState<string>('');
+  const [finalReportText, setFinalReportText] = useState<string>('');
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [isPromptEditing, setIsPromptEditing] = useState(false);
+
+  // HTML Element Ref for html2canvas
+  const reportRef = useRef<HTMLDivElement>(null);
+
+  // Load Initial Data
+  const loadData = () => {
+    const listSt = db.getStudents();
+    const listSch = db.getSchools();
+    const listCodes = db.getSchoolCodesMaster();
+    const listEth = db.getExamThresholdsMaster();
+
+    setStudents(listSt);
+    setSchools(listSch);
+    setSchoolCodes(listCodes);
+    setExamThresholds(listEth);
+
+    if (listSch.length > 0 && !newStudentSchoolId) {
+      setNewStudentSchoolId(listSch[0].id);
+    }
+    if (listSch.length > 0 && !selectedSchoolId) {
+      setSelectedSchoolId(listSch[0].id);
+    }
+
+    if (selectedStudent) {
+      // Re-find selected student to get fresh state
+      const freshSt = listSt.find(s => s.id === selectedStudent.id);
+      if (freshSt) {
+        setSelectedStudent(freshSt);
+        const allTasks = db.getLearningTasks();
+        const freshTasks = allTasks.filter(t => t.student_id === freshSt.id);
+        setStudentTasks(freshTasks);
+        setStartUnitId(freshSt.start_unit_id || '');
+
+        // Load today's periods values
+        const today = freshTasks.filter(t => t.scheduled_date === scheduleDate);
+        const newPeriods: Record<number, string> = {
+          1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '', 10: ''
+        };
+        let loadedPeriodCount = freshSt.period_count || 2;
+        let foundCommonNote = '';
+        today.forEach(t => {
+          if (t.period) {
+            newPeriods[t.period] = t.unit_id;
+            if (t.period > loadedPeriodCount) {
+              loadedPeriodCount = t.period;
+            }
+          }
+          if (t.office_note) {
+            foundCommonNote = t.office_note;
+          }
+        });
+        setPeriodSelections(newPeriods);
+        setPeriodCount(loadedPeriodCount);
+        setCommonOfficeNote(foundCommonNote);
+
+        // Load test records
+        const allTests = db.getTestRecords();
+        setTestRecordsList(allTests.filter(tr => tr.student_id === freshSt.id));
+
+        // Load AI Report
+        const allReports = db.getAIReports();
+        const currentReport = allReports.find(r => r.student_id === freshSt.id && r.month === '2026-06');
+        if (currentReport) {
+          setAiReportText(currentReport.analysis_text);
+          setOriginalAiText(currentReport.original_ai_text || currentReport.analysis_text);
+          setTeacherNotes(currentReport.teacher_notes || '');
+          setFinalReportText(currentReport.final_text || '');
+        } else {
+          setAiReportText('');
+          setTeacherNotes('');
+          setFinalReportText('');
+        }
+      }
+    }
+
+    // Load curriculum units
+    const allUnits = db.getCurriculumUnits();
+    const targetSchoolId = selectedSchoolId || (listSch.length > 0 ? listSch[0].id : '');
+    const filteredUnits = allUnits
+      .filter(u => u.school_id === targetSchoolId && u.subject === selectedSubject)
+      .sort((a, b) => a.sequence_order - b.sequence_order);
+    setSchoolUnits(filteredUnits);
+
+    // Load AI Prompt template
+    const prompts = db.getPromptSettings();
+    if (prompts.length > 0) {
+      setAiPrompt(prompts[0].prompt_template);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [selectedSchoolId, selectedSubject, selectedStudent?.id, scheduleDate]);
+
+  // 1. 1クリックアカウント発行
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStudentName) return;
+
+    // 生徒IDをランダム生成
+    const randId = Math.floor(10000 + Math.random() * 90000); // 5桁
+    const studentId = `student${randId}`;
+    const email = `${studentId}@tentoru-student.com`;
+
+    const newStudent: Student = {
+      id: `std-${Date.now()}`,
+      student_id: studentId,
+      name: newStudentName,
+      email,
+      grade: newStudentGrade,
+      school_id: newStudentSchoolId,
+      status: 'normal',
+      start_unit_id: null,
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveStudent(newStudent);
+
+    // 新規生徒用の初期学習計画(学習タスク)を学校マスターから流し込む
+    const allUnits = db.getCurriculumUnits();
+    const schoolUnits = allUnits.filter(u => u.school_id === newStudentSchoolId);
+    
+    // 中学生なら数学・英語、小学生なら算数
+    const subjects = newStudentGrade.startsWith('中') ? ['数学', '英語'] : ['算数'];
+    const initialTasks: LearningTask[] = [];
+
+    // 日付を明日から順次設定する
+    let dayCount = 0;
+    const startMs = Date.now() + 24 * 60 * 60 * 1000; // 明日
+
+    subjects.forEach(subject => {
+      const units = schoolUnits
+        .filter(u => u.subject === subject)
+        .sort((a, b) => a.sequence_order - b.sequence_order);
+
+      units.forEach((unit, index) => {
+        // デモ用日程: 3日に1回のペースで単元をこなすスケジュールを仮設定
+        const date = new Date(startMs + dayCount * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        initialTasks.push({
+          id: `task-${Date.now()}-${unit.id}`,
+          student_id: newStudent.id,
+          unit_id: unit.id,
+          scheduled_date: date,
+          period: null,
+          status: 'unstarted',
+          video_watched: false,
+          test_passed: false,
+          created_at: new Date().toISOString()
+        });
+        dayCount++;
+      });
+    });
+
+    await db.saveLearningTasks(initialTasks);
+
+    setNewStudentName('');
+    alert(`生徒アカウントを発行しました！\nログインID: ${studentId}\nメールアドレス: ${email}`);
+    loadData();
+  };
+
+  // 2. カリキュラム単元の順序変更（年度途中）
+  const moveUnit = async (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === schoolUnits.length - 1) return;
+
+    const newOrder = [...schoolUnits];
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    
+    // スワップ
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[targetIdx];
+    newOrder[targetIdx] = temp;
+
+    // sequence_order を再割り当て
+    const updatedUnits = newOrder.map((unit, idx) => ({
+      ...unit,
+      sequence_order: idx + 1
+    }));
+
+    // 保存
+    await db.saveCurriculumUnits(updatedUnits);
+
+    // 【重要】影響を受ける全生徒の「未着手・スキップ部分の未来の計画のみ」自動で再編成
+    const allStudents = db.getStudents();
+    const subjectStudents = allStudents.filter(s => s.school_id === selectedSchoolId);
+    
+    const allTasks = db.getLearningTasks();
+    let updatedTasks = [...allTasks];
+
+    for (const student of subjectStudents) {
+      updatedTasks = reorganizeFutureTasks(student.id, selectedSubject, updatedTasks, updatedUnits);
+    }
+
+    await db.saveLearningTasks(updatedTasks);
+    
+    alert('カリキュラムの順序を更新し、対象生徒の未来の学習計画を再編しました。(過去の完了ログは維持されています)');
+    loadData();
+  };
+
+  // 3. 学習計画のスタート位置設定
+  const handleSaveStartUnit = async () => {
+    if (!selectedStudent) return;
+
+    // 選択されたスタート位置より前の単元は「スキップ(未着手)」に、以降は「未着手」に戻す
+    const allUnits = db.getCurriculumUnits();
+    const studentSchoolUnits = allUnits.filter(u => u.school_id === selectedStudent.school_id);
+    
+    // 教科ごとに判定
+    const updatedTasks = studentTasks.map(task => {
+      const unit = studentSchoolUnits.find(u => u.id === task.unit_id);
+      if (!unit) return task;
+
+      // 講師がスタート位置を指定した教科のみ適用
+      // スタート位置単元の順序
+      const startUnit = studentSchoolUnits.find(u => u.id === startUnitId);
+      if (startUnit && unit.subject === startUnit.subject) {
+        if (unit.sequence_order < startUnit.sequence_order) {
+          // スタートより前はスキップ
+          return {
+            ...task,
+            status: 'skipped' as const,
+            office_note: '開始位置指定によりスキップ'
+          };
+        } else if (task.status === 'skipped') {
+          // スタート以降で過去にスキップされていたものは未着手にリセット
+          return {
+            ...task,
+            status: 'unstarted' as const,
+            office_note: ''
+          };
+        }
+      }
+      return task;
+    });
+
+    await db.saveLearningTasks(updatedTasks);
+    
+    // 生徒情報のスタート位置を更新
+    await db.saveStudent({
+      ...selectedStudent,
+      start_unit_id: startUnitId
+    });
+
+    alert('学習スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
+    loadData();
+  };
+
+  // 4. コマ割り時間割設定の保存
+  const handleSaveTimetable = async () => {
+    if (!selectedStudent) return;
+
+    // 本日の既存のタスクの period を一旦クリア
+    const clearedTasks = studentTasks.map(t => {
+      if (t.scheduled_date === scheduleDate) {
+        return { ...t, period: null, office_note: '' };
+      }
+      return t;
+    });
+
+    // 新たなコマ割り設定を適用
+    const updatedTasks = clearedTasks.map(task => {
+      // どのコマに設定されているか探す
+      let foundPeriod: number | null = null;
+      for (const [p, unitId] of Object.entries(periodSelections)) {
+        if (unitId === task.unit_id) {
+          foundPeriod = parseInt(p);
+          break;
+        }
+      }
+
+      if (foundPeriod !== null && foundPeriod <= periodCount) {
+        return {
+          ...task,
+          scheduled_date: scheduleDate,
+          period: foundPeriod,
+          office_note: commonOfficeNote
+        };
+      }
+      return task;
+    });
+
+    await db.saveLearningTasks(updatedTasks);
+
+    // 生徒情報の period_count も更新して保存
+    const updatedStudent = {
+      ...selectedStudent,
+      period_count: periodCount
+    };
+    await db.saveStudent(updatedStudent);
+    setSelectedStudent(updatedStudent);
+
+    alert('今日の時間割コマ割りを保存しました！');
+    loadData();
+  };
+
+  // 5. 自動リスケジュール実行 (遅れ発生時)
+  const handleAutoReschedule = async () => {
+    if (!selectedStudent) return;
+
+    // 未来の予定日リストを仮に作成 (土日を除く翌日からの5日間)
+    const futureDates: string[] = [];
+    let checkDate = new Date(scheduleDate);
+    while (futureDates.length < 5) {
+      checkDate.setDate(checkDate.getDate() + 1);
+      const day = checkDate.getDay();
+      if (day !== 0 && day !== 6) { // 土日を除く
+        futureDates.push(checkDate.toISOString().split('T')[0]);
+      }
+    }
+
+    const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
+      selectedStudent,
+      studentTasks,
+      scheduleDate,
+      futureDates,
+      periodCount // 1日あたりの上限タスク数を現在の設定コマ数とする
+    );
+
+    if (isPunked) {
+      alert(`【要判断：計画パンクアラート発火】\n自動リスケジュールを試みましたが、1日あたりのタスク量が現在の設定コマ数(${periodCount}コマ)を超えたため、自動適用をストップしました。目標期日の変更や単元の間引きを検討してください。生徒ステータスが警告(パンク)に更新されます。`);
+    } else {
+      alert('2日連続未達成を検出し、自動リスケジュールを実行しました。未達成タスクを残りの日程に均等配分しました。');
+    }
+
+    await db.saveLearningTasks(updatedTasks);
+    await db.saveStudent(updatedStudent);
+    
+    // 反映
+    setSelectedStudent(updatedStudent);
+    loadData();
+  };
+
+  // 6. 定期テスト結果記録
+  const handleSaveRegularTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !regularScore) return;
+
+    const record: TestRecord = {
+      id: `tr-${Date.now()}`,
+      student_id: selectedStudent.id,
+      record_type: 'regular_test',
+      subject: regularSubject,
+      score: parseInt(regularScore),
+      rank_change: regularRankChange,
+      rate_change: parseFloat(regularRateChange || '0'),
+      next_target_score: parseInt(regularNextTarget || '0'),
+      improvement_plan: regularImprovement,
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveTestRecord(record);
+    setRegularScore('');
+    setRegularRateChange('');
+    setRegularNextTarget('');
+    setRegularImprovement('');
+    alert('定期テスト結果を記録しました。');
+    loadData();
+  };
+
+  // 7. 模試＆志望校判定の合格％自動算出
+  const handleSaveMockExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !mockScore || !mockTargetSchool) return;
+
+    const scoreNum = parseInt(mockScore);
+    
+    // 合格％算出
+    const probability = calculateMockExamPassRate(scoreNum, mockTargetSchool, examThresholds);
+
+    const record: TestRecord = {
+      id: `tr-${Date.now()}`,
+      student_id: selectedStudent.id,
+      record_type: 'mock_exam',
+      subject: mockSubject,
+      score: scoreNum,
+      target_school_code: mockTargetSchool,
+      improvement_plan: `志望校合格可能性: ${probability}%`,
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveTestRecord(record);
+    setMockScore('');
+    alert(`模試結果を記録しました。\n判定: ${probability}%`);
+    loadData();
+  };
+
+  // 8. AI指導報告書自動生成
+  const handleGenerateAIReport = async () => {
+    const student = selectedStudent!;
+    setIsGeneratingAI(true);
+
+    // 学習ログを集計 (動画視聴時間、合格単元数、平均点、苦手ジャンル)
+    const allLogs = db.getLearningLogs();
+    const studentLogs = allLogs.filter(l => l.student_id === student.id);
+    
+    const videoDuration = Math.round(
+      studentLogs
+        .filter(l => l.log_type === 'video_view')
+        .reduce((sum, l) => sum + (l.duration_seconds || 0), 0) / 60
+    );
+
+    const testLogs = studentLogs.filter(l => l.log_type === 'test_result');
+    const passedUnitsCount = testLogs.filter(l => (l.score || 0) >= 80).length; // 80点以上を合格とする
+    
+    const averageScore = testLogs.length > 0 
+      ? Math.round(testLogs.reduce((sum, l) => sum + (l.score || 0), 0) / testLogs.length)
+      : 0;
+
+    const incorrectGenresSet = new Set<string>();
+    testLogs.forEach(l => {
+      l.incorrect_genres?.forEach(g => incorrectGenresSet.add(g));
+    });
+    const incorrectGenres = Array.from(incorrectGenresSet).join(', ') || '特になし';
+
+    const corrections = db.getTeacherCorrectionsLogs()
+      .filter(l => l.student_id === student.id)
+      .map(c => ({
+        original: c.original_text,
+        corrected: c.corrected_text
+      }));
+    const learnedStyle: PersonalStyle = learnFromTeacherCorrections(corrections);
+
+    // AIプロンプトのシミュレート（環境変数があれば本物のAPI、なければルールベース）
+    setTimeout(() => {
+      // テンプレート変数置換
+      let rawReport = aiPrompt
+        .replace('{video_duration}', videoDuration.toString())
+        .replace('{passed_units_count}', passedUnitsCount.toString())
+        .replace('{average_score}', averageScore.toString())
+        .replace('{incorrect_genres}', incorrectGenres);
+
+      // モックAI生成
+      let generatedText = `【今月の頑張り報告】\n${student.name}君は今月、塾で大変すばらしい取り組みを見せました！動画を合計${videoDuration}分間、非常に集中して視聴し、自走する学習習慣が身についてきています。テストでは平均${averageScore}%をマークし、合格単元数は${passedUnitsCount}つに上ります。${incorrectGenres !== '特になし' ? `苦手な「${incorrectGenres}」で少しミスが見られましたが` : '苦手単元も特になく'}、全体的に意欲の高さがうかがえます。素晴らしい成長です！`;
+
+      // 講師の修正癖（トーン）を注入
+      const personalizedText = generateAIReportText(generatedText, learnedStyle);
+
+      setAiReportText(personalizedText);
+      setOriginalAiText(personalizedText);
+      setTeacherNotes('');
+      setFinalReportText(personalizedText); // 初期値はポジティブ分析のみ
+
+      setIsGeneratingAI(false);
+      alert('AI報告書の文章を自動生成しました！');
+    }, 1500);
+  };
+
+  // 面談備考が変更されたら最終出力テキストを構築
+  useEffect(() => {
+    if (aiReportText) {
+      const combined = `${aiReportText}\n\n【二者面談結果・今後の目標】\n${teacherNotes}`;
+      setFinalReportText(combined);
+    }
+  }, [aiReportText, teacherNotes]);
+
+  // AI指導報告書の保存 & 修正学習
+  const handleSaveAIReport = async () => {
+    const student = selectedStudent!;
+    if (!aiReportText) return;
+
+    // もし講師が生成されたポジティブ分析を編集（手動修正）している場合、修正履歴をデータベースに蓄積して学習させる
+    // 画面上の aiReportText が originalAiText と異なる場合は、手動修正が発生したとみなす
+    if (aiReportText !== originalAiText) {
+      const correctionLog: TeacherCorrectionLog = {
+        id: `cor-${Date.now()}`,
+        student_id: student.id,
+        original_text: originalAiText,
+        corrected_text: aiReportText,
+        created_at: new Date().toISOString()
+      };
+      await db.addTeacherCorrectionLog(correctionLog);
+    }
+
+    const report: AIReport = {
+      id: `rep-${Date.now()}`,
+      student_id: student.id,
+      month: '2026-06',
+      analysis_text: aiReportText,
+      teacher_notes: teacherNotes,
+      original_ai_text: originalAiText,
+      final_text: finalReportText,
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveAIReport(report);
+    alert('指導報告書を保存し、文体修正履歴を学習しました！');
+    loadData();
+  };
+
+  // プロンプトテンプレートの保存
+  const handleSavePromptTemplate = async () => {
+    const prompts = db.getPromptSettings();
+    if (prompts.length > 0) {
+      await db.savePromptSetting({
+        ...prompts[0],
+        prompt_template: aiPrompt
+      });
+      setIsPromptEditing(false);
+      alert('AIプロンプトテンプレートを更新しました！');
+    }
+  };
+
+  // 保護者への共有用に報告書を画像化してダウンロード
+  const handleExportAsImage = () => {
+    /* v8 ignore next */
+    if (!reportRef.current) return;
+
+    // html2canvasで画像化してダウンロード
+    html2canvas(reportRef.current, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#fdfbf7'
+    }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = `指導報告書_${selectedStudent?.name}_2026-06.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+  };
+
+  const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
+
+  return (
+    <div className={containerClass}>
+      <div className={styles.header}>
+        <h1>
+          {/* Dashboard Icon */}
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="9" y1="3" x2="9" y2="21" />
+            <line x1="15" y1="9" x2="21" y2="9" />
+            <line x1="9" y1="15" x2="15" y2="15" />
+          </svg>
+          テントル 司令塔ダッシュボード (講師用)
+        </h1>
+        <button onClick={onBackToPortal} className={styles.backBtn}>
+          ポータルへ戻る
+        </button>
+      </div>
+
+      <div className={styles.mainLayout}>
+        {/* Sidebar: Student list & Account generation */}
+        <div className={styles.sidebar}>
+          
+          {/* Account Issuance */}
+          <div className={styles.sidebarCard}>
+            <h3 className={styles.sidebarTitle}>
+              {/* Add User Icon */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <line x1="19" y1="8" x2="19" y2="14" />
+                <line x1="22" y1="11" x2="16" y2="11" />
+              </svg>
+              新規生徒アカウント発行
+            </h3>
+            <form onSubmit={handleCreateAccount}>
+              <div className={styles.formGroup}>
+                <label>生徒氏名</label>
+                <input 
+                  type="text" 
+                  value={newStudentName}
+                  onChange={e => setNewStudentName(e.target.value)}
+                  placeholder="例: 佐藤 拓海" 
+                  className={styles.input}
+                  required
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label>学年</label>
+                <select 
+                  value={newStudentGrade} 
+                  onChange={e => setNewStudentGrade(e.target.value)}
+                  className={styles.select}
+                >
+                  <option value="小5">小学5年生</option>
+                  <option value="小6">小学6年生</option>
+                  <option value="中1">中学1年生</option>
+                  <option value="中2">中学2年生</option>
+                  <option value="中3">中学3年生</option>
+                </select>
+              </div>
+              <div className={styles.formGroup}>
+                <label>所属学校</label>
+                <select 
+                  value={newStudentSchoolId} 
+                  onChange={e => setNewStudentSchoolId(e.target.value)}
+                  className={styles.select}
+                >
+                  {schools.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.type === 'junior_high' ? '中' : '小'})</option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" className={styles.btn}>
+                1クリックアカウント発行
+              </button>
+            </form>
+          </div>
+
+          {/* Student List */}
+          <div className={styles.sidebarCard}>
+            <h3 className={styles.sidebarTitle}>
+              {/* User Group Icon */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              生徒一覧
+            </h3>
+            <div className={styles.studentList}>
+              {students.map(st => {
+                let statusClass = styles.statusNormal;
+                if (st.status === 'fast') statusClass = styles.statusFast;
+                if (st.status === 'warning') statusClass = styles.statusWarning;
+
+                return (
+                  <div 
+                    key={st.id} 
+                    className={`${styles.studentItem} ${selectedStudent?.id === st.id ? styles.studentItemActive : ''}`}
+                    onClick={() => {
+                      setSelectedStudent(st);
+                      // Start unit ID reset
+                      setStartUnitId(st.start_unit_id || '');
+                    }}
+                  >
+                    <span className={styles.studentName}>{st.name} ({st.grade})</span>
+                    <span className={`${styles.statusIcon} ${statusClass}`} title={`状況: ${st.status}`} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: Main workspace */}
+        <div className={styles.contentArea}>
+          {!selectedStudent ? (
+            <div className={`${styles.card} ${styles.noStudentSelected}`}>
+              {/* Info Icon */}
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <p>左側の生徒一覧から、進捗管理・司令塔設定を行う生徒を選択してください。</p>
+            </div>
+          ) : (
+            <>
+              {/* Selected Student Profile Banner */}
+              <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
+                  </div>
+                  <div>
+                    {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
+                    {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
+                    {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className={styles.tabs}>
+                <button 
+                  className={`${styles.tabBtn} ${activeTab === 'schedule' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('schedule')}
+                >
+                  学習計画・コマ割り
+                </button>
+                <button 
+                  className={`${styles.tabBtn} ${activeTab === 'curriculum' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('curriculum')}
+                >
+                  学校カリキュラム管理
+                </button>
+                <button 
+                  className={`${styles.tabBtn} ${activeTab === 'tests' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('tests')}
+                >
+                  定期テスト・模試
+                </button>
+                <button 
+                  className={`${styles.tabBtn} ${activeTab === 'ai-report' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('ai-report')}
+                >
+                  AI指導報告書
+                </button>
+              </div>
+
+              {/* Tab 1: 学習計画・時間割 (司令塔設定) */}
+              {activeTab === 'schedule' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    <span>学習計画の個別管理 & 自動最適化</span>
+                    {selectedStudent.status === 'warning' && (
+                      <button onClick={handleAutoReschedule} className={styles.btn} style={{ width: 'auto', background: '#e11d48' }}>
+                        手動リスケジュールを実行
+                      </button>
+                    )}
+                    {selectedStudent.status !== 'warning' && (
+                      <button onClick={handleAutoReschedule} className={styles.btn} style={{ width: 'auto', background: '#10b981' }}>
+                        遅れチェック ＆ 自動リスケ
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Start Position Config */}
+                  <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>学習スタート位置の設定</h4>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <select 
+                        value={startUnitId} 
+                        onChange={e => setStartUnitId(e.target.value)}
+                        className={styles.select}
+                        style={{ maxWidth: '300px' }}
+                      >
+                        <option value="">-- 最初からスタートする --</option>
+                        {db.getCurriculumUnits()
+                          .filter(u => u.school_id === selectedStudent.school_id)
+                          .map(u => (
+                            <option key={u.id} value={u.id}>[{u.subject}] {u.name}</option>
+                          ))}
+                      </select>
+                      <button onClick={handleSaveStartUnit} className={styles.btn} style={{ width: 'auto' }}>
+                        適用する
+                      </button>
+                    </div>
+                    <p style={{ margin: '6px 0 0 0', fontSize: '0.7rem', color: '#64748b' }}>
+                      ※指定した開始単元より前の範囲は「スキップ（未着手）」ステータスとして生徒画面にビジュアルとして残し、日々のタスクからは除外します。
+                    </p>
+                  </div>
+
+                  {/* Timetable planner */}
+                  <div className={styles.schedulerGrid}>
+                    <div>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>コマ割り設定 (標準2コマ / 最大10コマ)</h4>
+                      <div style={{ marginBottom: '12px' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
+                        <input 
+                          type="date" 
+                          value={scheduleDate} 
+                          onChange={e => setScheduleDate(e.target.value)}
+                          className={styles.input}
+                          style={{ width: 'auto', display: 'inline-block' }}
+                        />
+                      </div>
+                      
+                      <div className={styles.timetableSetup}>
+                        {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => (
+                          <div key={p} className={styles.cellRow}>
+                            <span className={styles.cellNum}>{p}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                              <select
+                                value={periodSelections[p] || ''}
+                                onChange={e => {
+                                  setPeriodSelections({ ...periodSelections, [p]: e.target.value });
+                                }}
+                                className={styles.select}
+                              >
+                                <option value="">-- コマ割りなし --</option>
+                                {db.getCurriculumUnits()
+                                  .filter(u => u.school_id === selectedStudent.school_id)
+                                  .map(u => (
+                                    <option key={u.id} value={u.id}>[{u.subject}] {u.name}</option>
+                                  ))}
+                              </select>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {periodCount < 10 && (
+                        <button 
+                          onClick={() => setPeriodCount(prev => Math.min(prev + 1, 10))} 
+                          className={styles.btn} 
+                          style={{ marginTop: '12px', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1' }}
+                        >
+                          ➕ コマ数を追加 (最大10コマ)
+                        </button>
+                      )}
+
+                      <div style={{ marginTop: '16px' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>業務連絡 (本日共通):</label>
+                        <textarea
+                          value={commonOfficeNote}
+                          onChange={e => setCommonOfficeNote(e.target.value)}
+                          placeholder="業務連絡（例：提出ワーク忘れずに）"
+                          className={styles.textarea}
+                          style={{ height: '60px', fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                      </div>
+                      
+                      <button onClick={handleSaveTimetable} className={styles.btn} style={{ marginTop: '16px' }}>
+                        時間割コマ割りを保存
+                      </button>
+                    </div>
+
+                    {/* Leftside: Scheduled units overview */}
+                    <div>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>直近の学習タスク一覧</h4>
+                      <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px' }}>
+                        {studentTasks
+                          .sort((a,b) => new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime())
+                          .map(t => {
+                            const unit = db.getCurriculumUnits().find(u => u.id === t.unit_id);
+                            if (!unit) return null;
+
+                            return (
+                              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.8rem' }}>
+                                <span>{t.scheduled_date}</span>
+                                <strong style={{ color: '#1e293b' }}>{unit.name} ({unit.subject})</strong>
+                                <span>
+                                  {t.status === 'completed' && <span style={{ color: '#10b981' }}>完了</span>}
+                                  {t.status === 'skipped' && <span style={{ color: '#6366f1' }}>スキップ</span>}
+                                  {t.status === 'unstarted' && <span style={{ color: '#94a3b8' }}>未完了</span>}
+                                  {t.status === 'failed' && <span style={{ color: '#f59e0b' }}>テスト不合格</span>}
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: 学校カリキュラム管理 */}
+              {activeTab === 'curriculum' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    学校単位のマスターカリキュラム設定 (並び順変更)
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+                    <div style={{ width: '200px' }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象学校</label>
+                      <select 
+                        value={selectedSchoolId}
+                        onChange={e => setSelectedSchoolId(e.target.value)}
+                        className={styles.select}
+                      >
+                        {schools.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ width: '200px' }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象教科</label>
+                      <select 
+                        value={selectedSubject}
+                        onChange={e => setSelectedSubject(e.target.value)}
+                        className={styles.select}
+                      >
+                        <option value="数学">数学</option>
+                        <option value="英語">英語</option>
+                        <option value="算数">算数</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className={styles.curriculumList}>
+                    {schoolUnits.map((unit, index) => (
+                      <div key={unit.id} className={styles.curriculumItem}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                          {index + 1}. {unit.name} 
+                          {unit.google_drive_url && (
+                            <span style={{ color: '#3b82f6', fontSize: '0.75rem', marginLeft: '12px' }}>🔗 印刷リンク有</span>
+                          )}
+                        </span>
+                        
+                        <div className={styles.unitOrderBtns}>
+                          <button 
+                            onClick={() => moveUnit(index, 'up')} 
+                            disabled={index === 0}
+                            className={styles.iconBtn}
+                            title="上へ移動"
+                          >
+                            {/* Up Icon */}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="18 15 12 9 6 15" />
+                            </svg>
+                          </button>
+                          <button 
+                            onClick={() => moveUnit(index, 'down')} 
+                            disabled={index === schoolUnits.length - 1}
+                            className={styles.iconBtn}
+                            title="下へ移動"
+                          >
+                            {/* Down Icon */}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 3: 定期テスト・模試・合格判定 */}
+              {activeTab === 'tests' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    定期テスト・模試成績管理 ＆ 志望校合格可能性算出
+                  </div>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    {/* Regular Test Input */}
+                    <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>定期テスト結果記録</h4>
+                      <form onSubmit={handleSaveRegularTest}>
+                        <div className={styles.formGroup}>
+                          <label>教科</label>
+                          <select value={regularSubject} onChange={e => setRegularSubject(e.target.value)} className={styles.select}>
+                            <option value="数学">数学</option>
+                            <option value="英語">英語</option>
+                            <option value="国語">国語</option>
+                            <option value="理科">理科</option>
+                            <option value="社会">社会</option>
+                          </select>
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>得点 (点)</label>
+                          <input type="number" value={regularScore} onChange={e => setRegularScore(e.target.value)} className={styles.input} required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>順位の上下</label>
+                          <select value={regularRankChange} onChange={e => setRegularRankChange(e.target.value as any)} className={styles.select}>
+                            <option value="up">上昇 (UP)</option>
+                            <option value="down">下降 (DOWN)</option>
+                            <option value="keep">維持 (KEEP)</option>
+                          </select>
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>上昇率 (%)</label>
+                          <input type="number" step="0.1" value={regularRateChange} onChange={e => setRegularRateChange(e.target.value)} className={styles.input} />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>次回目標点 (点)</label>
+                          <input type="number" value={regularNextTarget} onChange={e => setRegularNextTarget(e.target.value)} className={styles.input} />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>改善点</label>
+                          <textarea value={regularImprovement} onChange={e => setRegularImprovement(e.target.value)} className={styles.textarea} style={{ height: '60px' }}></textarea>
+                        </div>
+                        <button type="submit" className={styles.btn}>定期テスト結果を記録</button>
+                      </form>
+                    </div>
+
+                    {/* Mock Exam Input */}
+                    <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>模試結果 ＆ 志望校判定</h4>
+                      <form onSubmit={handleSaveMockExam}>
+                        <div className={styles.formGroup}>
+                          <label>模試名</label>
+                          <input type="text" value={mockSubject} onChange={e => setMockSubject(e.target.value)} className={styles.input} required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>総合得点 (点)</label>
+                          <input type="number" value={mockScore} onChange={e => setMockScore(e.target.value)} className={styles.input} required />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>判定志望校</label>
+                          <select value={mockTargetSchool} onChange={e => setMockTargetSchool(e.target.value)} className={styles.select} required>
+                            <option value="">-- 志望校を選択 --</option>
+                            {schoolCodes.map(sc => (
+                              <option key={sc.code} value={sc.code}>{sc.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <button type="submit" className={styles.btn}>模試点数を入力して合格判定算出</button>
+                      </form>
+                    </div>
+                  </div>
+
+                  {/* Test history table */}
+                  <div style={{ marginTop: '24px' }}>
+                    <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>成績履歴一覧</h4>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>種類</th>
+                          <th>教科 / 模試名</th>
+                          <th>得点</th>
+                          <th>順位上下 / 判定</th>
+                          <th>上昇率</th>
+                          <th>改善点 / メモ</th>
+                          <th>記録日時</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testRecordsList.map(tr => (
+                          <tr key={tr.id}>
+                            <td>{tr.record_type === 'regular_test' ? '定期テスト' : '模試'}</td>
+                            <td>{tr.subject}</td>
+                            <td>{tr.score}点</td>
+                            <td>
+                              {tr.record_type === 'regular_test' ? (
+                                tr.rank_change === 'up' ? '🟢 上昇' : tr.rank_change === 'down' ? '🔴 下降' : '🟡 維持'
+                              ) : (
+                                <strong>{tr.improvement_plan}</strong>
+                              )}
+                            </td>
+                            <td>{tr.rate_change ? `+${tr.rate_change}%` : '-'}</td>
+                            <td>{tr.record_type === 'regular_test' ? tr.improvement_plan : '-'}</td>
+                            <td>{new Date(tr.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 4: AI指導報告書生成機能 */}
+              {activeTab === 'ai-report' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    <span>AI指導報告書生成機能（文体学習＆画像化）</span>
+                    <button 
+                      onClick={() => setIsPromptEditing(!isPromptEditing)} 
+                      className={styles.btn} 
+                      style={{ width: 'auto', background: '#64748b' }}
+                    >
+                      {isPromptEditing ? 'チューニング閉じる' : '校舎長プロンプト調整 (パターンA)'}
+                    </button>
+                  </div>
+
+                  {/* Prompt Tuning area */}
+                  {isPromptEditing && (
+                    <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>校舎長プロンプトの調整・チューニング (パターンA)</h4>
+                      <textarea
+                        value={aiPrompt}
+                        onChange={e => setAiPrompt(e.target.value)}
+                        className={styles.textarea}
+                        style={{ height: '180px', fontFamily: 'monospace' }}
+                      />
+                      <button onClick={handleSavePromptTemplate} className={styles.btn} style={{ width: 'auto', marginTop: '10px' }}>
+                        プロンプトテンプレートを保存
+                      </button>
+                    </div>
+                  )}
+
+                  <div className={styles.reportFlex}>
+                    {/* Inputs & actions */}
+                    <div>
+                      <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>分析・生成エンジン</h4>
+                      <button 
+                        onClick={handleGenerateAIReport} 
+                        disabled={isGeneratingAI}
+                        className={styles.btn} 
+                        style={{ background: 'linear-gradient(135deg, #ea580c, #f97316)', height: '48px', fontSize: '0.95rem' }}
+                      >
+                        {isGeneratingAI ? '学習ログをAI解析中...' : '今月の学習ログから報告書を自動生成 (AI分析ステップ)'}
+                      </button>
+
+                      {aiReportText && (
+                        <div style={{ marginTop: '20px' }}>
+                          <div className={styles.formGroup}>
+                            <label><strong>ポジティブ分析 (AI生成された文章。手動修正で校舎長文体を学習します)</strong></label>
+                            <textarea
+                              value={aiReportText}
+                              onChange={e => setAiReportText(e.target.value)}
+                              className={styles.textarea}
+                              style={{ height: '140px' }}
+                            />
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.7rem', color: '#64748b' }}>
+                              ※この文章を修正して保存すると、表現の癖がデータベースに蓄積され、使えば使うほど校舎長の文体に自動パーソナライズされます (パターンB)。
+                            </p>
+                          </div>
+
+                          <div className={styles.formGroup}>
+                            <label><strong>二者面談結果・目標 (講師が手動で別枠追加します)</strong></label>
+                            <textarea
+                              value={teacherNotes}
+                              onChange={e => setTeacherNotes(e.target.value)}
+                              className={styles.textarea}
+                              placeholder="例：二者面談を実施し、来月の定期テストに向けて数学の一次方程式ワークを毎日2ページ進める目標をすり合わせました。"
+                              style={{ height: '80px' }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button onClick={handleSaveAIReport} className={styles.btn}>
+                              報告書を保存 ＆ 修正履歴を学習 (パターンB)
+                            </button>
+                            <button onClick={handleExportAsImage} className={styles.btn} style={{ background: '#10b981' }}>
+                              LINE送信用画像ファイルで出力 💾
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Preview (Paper layout) */}
+                    <div>
+                      <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>保護者向け画像プレビュー (公式LINE送信用)</h4>
+                      <div className={styles.reportImagePreview}>
+                        <div ref={reportRef} className={styles.previewPaper}>
+                          <div className={styles.previewHeader}>
+                            <span className={styles.previewLogo}>個別指導テントル</span>
+                            <span style={{ fontSize: '0.75rem' }}>2026年6月度 指導報告書</span>
+                          </div>
+
+                          <div className={styles.previewTitle}>
+                            <strong>{selectedStudent.name}</strong> 殿
+                          </div>
+
+                          <div className={styles.previewSection}>
+                            <div className={styles.previewSecTitle}>今月の頑張り・行動の成長 (AI分析)</div>
+                            <div className={styles.previewSecContent}>
+                              {aiReportText || '「自動生成」を実行してください。学習動画の総視聴時間やテスト合格結果からポジティブなトーンで作成されます。'}
+                            </div>
+                          </div>
+
+                          {teacherNotes && (
+                            <div className={styles.previewSection}>
+                              <div className={styles.previewSecTitle}>面談結果・今後の目標</div>
+                              <div className={styles.previewSecContent}>{teacherNotes}</div>
+                            </div>
+                          )}
+
+                          <div style={{ borderTop: '1px solid #ea580c', paddingTop: '10px', marginTop: '30px', fontSize: '0.65rem', color: '#78716c', textAlign: 'center' }}>
+                            © Individual Learning Management System - Tentoru Control Tower
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,246 @@
+.container {
+  background: var(--card-bg, #ffffff);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.darkTheme .container {
+  background: #1e1e24;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+  padding-bottom: 12px;
+}
+
+.darkTheme .header {
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.darkTheme .title {
+  color: #ffffff;
+}
+
+.badge {
+  background: linear-gradient(135deg, #4f46e5, #06b6d4);
+  color: #ffffff;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.mapWrapper {
+  position: relative;
+  min-height: 200px;
+  padding: 20px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.svgTrack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.trackPath {
+  fill: none;
+  stroke: #e5e7eb;
+  stroke-width: 6;
+  stroke-dasharray: 8 4;
+  stroke-linecap: round;
+}
+
+.darkTheme .trackPath {
+  stroke: #374151;
+}
+
+.nodesContainer {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 40px 30px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.nodeCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 110px;
+  position: relative;
+}
+
+.nodeSteps {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.stepCircle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 3px solid #e5e7eb;
+  background: #f3f4f6;
+  color: #9ca3af;
+  position: relative;
+}
+
+.darkTheme .stepCircle {
+  border-color: #374151;
+  background: #1f2937;
+  color: #4b5563;
+}
+
+/* Step states */
+.stepCompleted {
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-color: #34d399;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+  transform: scale(1.08);
+}
+
+.stepWatchedOnly {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: #fbbf24;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);
+  animation: pulseWatch 2s infinite alternate;
+}
+
+.stepSkipped {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+  color: #6366f1;
+  border-style: dashed;
+}
+
+.darkTheme .stepSkipped {
+  background: #1e1b4b;
+  border-color: #312e81;
+  color: #818cf8;
+}
+
+.nodeName {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  color: #4b5563;
+  margin-top: 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  width: 100%;
+}
+
+.darkTheme .nodeName {
+  color: #d1d5db;
+}
+
+.activeNode .nodeName {
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.darkTheme .activeNode .nodeName {
+  color: #818cf8;
+}
+
+.stepLabel {
+  position: absolute;
+  bottom: -18px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.darkTheme .stepLabel {
+  color: #6b7280;
+}
+
+.activePlayer {
+  position: absolute;
+  top: -12px;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  background: #ef4444;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #ef4444;
+  animation: bounceMarker 0.8s infinite alternate;
+}
+
+@keyframes bounceMarker {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-4px); }
+}
+
+@keyframes pulseWatch {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  100% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+
+.legend {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+.darkTheme .legend {
+  color: #9ca3af;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.1);
+}
