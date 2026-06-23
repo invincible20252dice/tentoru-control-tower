@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
-import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult } from '../lib/db';
+import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult, HomeworkResult } from '../lib/db';
 import SugorokuMap from './SugorokuMap';
 
 interface StudentDashboardProps {
@@ -14,8 +14,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [units, setUnits] = useState<CurriculumUnit[]>([]);
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>([]);
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-06-19'); // デモ用初期日付
-  const [miniTestResult, setMiniTestResult] = useState<MiniTestResult | null>(null);
-  const [studentScoreInput, setStudentScoreInput] = useState<string>('');
+  const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>([]);
+  const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>([]);
+  const [studentScores, setStudentScores] = useState<Record<string, string>>({});
 
   const loadData = () => {
     const allTasks = db.getLearningTasks();
@@ -32,11 +33,21 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     today.sort((a, b) => (a.period || 0) - (b.period || 0));
     setTodayTasks(today);
 
-    // 今日の小テスト・宿題結果
+    // 今日の小テスト結果
     const miniResults = db.getMiniTestResults();
-    const todayMini = miniResults.find(r => r.student_id === student.id && r.date === currentDateStr);
-    setMiniTestResult(todayMini || null);
-    setStudentScoreInput(todayMini && todayMini.score !== null ? todayMini.score.toString() : '');
+    const todayMini = miniResults.filter(r => r.student_id === student.id && r.date === currentDateStr);
+    setMiniTestResults(todayMini);
+    
+    const initialScores: Record<string, string> = {};
+    todayMini.forEach(r => {
+      initialScores[r.id] = r.score !== null ? r.score.toString() : '';
+    });
+    setStudentScores(initialScores);
+
+    // 今日の宿題結果
+    const hwResults = db.getHomeworkResults();
+    const todayHw = hwResults.filter(r => r.student_id === student.id && r.date === currentDateStr);
+    setHomeworkResults(todayHw);
   };
 
   useEffect(() => {
@@ -44,18 +55,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   }, [student.id, currentDateStr]);
 
   // 生徒による小テスト結果の送信
-  const handleSaveStudentScore = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!miniTestResult) return;
+  const handleSaveStudentScore = async (testId: string, scoreInput: string) => {
+    const test = miniTestResults.find(r => r.id === testId);
+    if (!test) return;
 
-    const scoreVal = studentScoreInput === '' ? null : parseInt(studentScoreInput);
+    const scoreVal = scoreInput === '' ? null : parseInt(scoreInput);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
       alert('0〜100の点数を入力してください。');
       return;
     }
 
     const updated = {
-      ...miniTestResult,
+      ...test,
       score: scoreVal
     };
     await db.saveMiniTestResult(updated);
@@ -282,50 +293,69 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           </h2>
 
           {/* 本日のテスト表示 */}
-          {miniTestResult && miniTestResult.test_content && (
+          {miniTestResults.length > 0 && (
             <div style={{ margin: '12px 0', padding: '16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fee2e2' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                 📝 本日のテスト
               </h3>
-              <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#374151' }}>{miniTestResult.test_content}</p>
-              
-              <form onSubmit={handleSaveStudentScore} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={studentScoreInput}
-                  onChange={e => setStudentScoreInput(e.target.value)}
-                  placeholder="点数を入力"
-                  className={styles.input}
-                  style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
-                />
-                <button
-                  type="submit"
-                  className={styles.btn}
-                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                >
-                  結果を保存
-                </button>
-              </form>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {miniTestResults.map(test => (
+                  <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }}>
+                    <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>{test.test_content}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={studentScores[test.id] ?? ''}
+                        onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
+                        placeholder="点数を入力"
+                        className={styles.input}
+                        style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveStudentScore(test.id, studentScores[test.id] ?? '')}
+                        className={styles.btn}
+                        style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                      >
+                        結果を保存
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {/* 宿題表示 */}
-          {miniTestResult && miniTestResult.homework_content && (
+          {homeworkResults.length > 0 && (
             <div style={{ margin: '12px 0', padding: '16px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700 }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700 }}>
                 📚 今日の宿題
               </h3>
-              <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
-                {miniTestResult.homework_content}
-              </p>
-              {miniTestResult.homework_deadline && (
-                <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
-                  提出期限: {miniTestResult.homework_deadline}
-                </div>
-              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {homeworkResults.map(hw => (
+                  <div key={hw.id} style={{ borderBottom: '1px dashed #dcfce7', paddingBottom: '12px' }}>
+                    <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap', fontWeight: 600 }}>
+                      {hw.homework_content}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {hw.homework_deadline && (
+                        <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
+                          提出期限: {hw.homework_deadline}
+                        </div>
+                      )}
+                      <div>
+                        {hw.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ background: '#10b981', color: '#fff' }}>提出済み</span>}
+                        {hw.status === 'skipped' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ background: '#64748b', color: '#fff' }}>スキップ</span>}
+                        {hw.status === 'incomplete' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ background: '#ef4444', color: '#fff' }}>未完</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

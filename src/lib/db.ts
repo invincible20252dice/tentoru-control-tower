@@ -119,8 +119,16 @@ export interface MiniTestResult {
   date: string; // YYYY-MM-DD
   test_content: string; // 自由記述テスト内容
   score: number | null; // 結果点数
-  homework_content: string; // 宿題内容
-  homework_deadline: string; // 宿題期限 (YYYY-MM-DD)
+  created_at: string;
+}
+
+export interface HomeworkResult {
+  id: string;
+  student_id: string;
+  date: string; // YYYY-MM-DD
+  homework_content: string;
+  homework_deadline: string; // YYYY-MM-DD
+  status: 'incomplete' | 'completed' | 'skipped';
   created_at: string;
 }
 
@@ -441,7 +449,7 @@ class DatabaseService {
       { id: 'task-5-2', student_id: 'std-1', unit_id: 'unit-201-2', scheduled_date: '2026-06-18', period: 2, status: 'completed', video_watched: true, test_passed: true, office_note: '', actual_completed_date: '2026-06-18', created_at: new Date().toISOString() },
       { id: 'task-5-3', student_id: 'std-1', unit_id: 'unit-201-3', scheduled_date: '2026-06-18', period: 2, status: 'completed', video_watched: true, test_passed: true, office_note: '', actual_completed_date: '2026-06-18', created_at: new Date().toISOString() },
       
-      { id: 'task-6-1', student_id: 'std-1', unit_id: 'unit-202-1', scheduled_date: '2026-06-19', period: 3, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
+      { id: 'task-6-1', student_id: 'std-1', unit_id: 'unit-202-1', scheduled_date: '2026-06-19', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-2', student_id: 'std-1', unit_id: 'unit-202-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-3', student_id: 'std-1', unit_id: 'unit-202-3', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
 
@@ -754,6 +762,65 @@ class DatabaseService {
     }
   }
 
+  public async deleteMiniTestResult(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('mini_test_results').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      let list = this.getMiniTestResults();
+      list = list.filter(r => r.id !== id);
+      this.saveMockData('mini_test_results', list);
+    }
+  }
+
+  // 13. HomeworkResults CRUD
+  public getHomeworkResults(): HomeworkResult[] {
+    return this.getMockData('homework_results', []);
+  }
+
+  public async saveHomeworkResult(result: HomeworkResult): Promise<HomeworkResult> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('homework_results').upsert(result).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getHomeworkResults();
+      const idx = list.findIndex(r => r.id === result.id);
+      if (idx >= 0) list[idx] = result;
+      else list.push(result);
+      this.saveMockData('homework_results', list);
+      return result;
+    }
+  }
+
+  public async saveHomeworkResults(results: HomeworkResult[]): Promise<HomeworkResult[]> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('homework_results').upsert(results).select();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getHomeworkResults();
+      results.forEach(result => {
+        const idx = list.findIndex(r => r.id === result.id);
+        if (idx >= 0) list[idx] = result;
+        else list.push(result);
+      });
+      this.saveMockData('homework_results', list);
+      return results;
+    }
+  }
+
+  public async deleteHomeworkResult(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('homework_results').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      let list = this.getHomeworkResults();
+      list = list.filter(r => r.id !== id);
+      this.saveMockData('homework_results', list);
+    }
+  }
+
   // Clear mock data if needed (for testing or reset)
   public clearMockData(): void {
     if (!this.isBrowser()) return;
@@ -769,6 +836,7 @@ class DatabaseService {
     localStorage.removeItem('tentoru_prompt_settings');
     localStorage.removeItem('tentoru_teacher_corrections_log');
     localStorage.removeItem('tentoru_mini_test_results');
+    localStorage.removeItem('tentoru_homework_results');
   }
 }
 

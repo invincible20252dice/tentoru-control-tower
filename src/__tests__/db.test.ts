@@ -308,6 +308,21 @@ describe('Database Service CRUD Tests', () => {
     const cor = { id: 'sup-1', student_id: 'S', original_text: 'S', corrected_text: 'S', created_at: '' };
     const savedCor = await db.addTeacherCorrectionLog(cor);
     expect(savedCor.id).toBe('sup-id');
+
+    const miniRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', test_content: 'S', score: 100, created_at: '' };
+    const savedMini = await db.saveMiniTestResult(miniRes);
+    expect(savedMini.id).toBe('sup-id');
+
+    await db.deleteMiniTestResult('sup-1');
+
+    const hwRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', homework_content: 'S', homework_deadline: '2026-06-20', status: 'incomplete' as const, created_at: '' };
+    const savedHw = await db.saveHomeworkResult(hwRes);
+    expect(savedHw.id).toBe('sup-id');
+
+    const savedHws = await db.saveHomeworkResults([hwRes]);
+    expect(savedHws).toBeDefined();
+
+    await db.deleteHomeworkResult('sup-1');
   });
 
   // Supabase error paths simulation
@@ -369,6 +384,15 @@ describe('Database Service CRUD Tests', () => {
 
     const cor = { id: 'sup-1', student_id: 'S', original_text: 'S', corrected_text: 'S', created_at: '' };
     await expect(db.addTeacherCorrectionLog(cor)).rejects.toThrow('Database Error');
+
+    const miniRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', test_content: 'S', score: 100, created_at: '' };
+    await expect(db.saveMiniTestResult(miniRes)).rejects.toThrow('Database Error');
+    await expect(db.deleteMiniTestResult('sup-1')).rejects.toThrow('Database Error');
+
+    const hwRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', homework_content: 'S', homework_deadline: '2026-06-20', status: 'incomplete' as const, created_at: '' };
+    await expect(db.saveHomeworkResult(hwRes)).rejects.toThrow('Database Error');
+    await expect(db.saveHomeworkResults([hwRes])).rejects.toThrow('Database Error');
+    await expect(db.deleteHomeworkResult('sup-1')).rejects.toThrow('Database Error');
   });
 
   // JSON parse error cover
@@ -423,5 +447,64 @@ describe('Database Service CRUD Tests', () => {
     const updatedSchool = { id: 'sch-1', name: '更新された校舎', type: 'junior_high' as const, created_at: '' };
     const saved2 = await db.saveSchool(updatedSchool);
     expect(saved2.name).toBe('更新された校舎');
+  });
+
+  it('should manage mini test results and homework results in Mock mode', async () => {
+    // MiniTestResult CRUD
+    const mini = {
+      id: 'mini-test-1',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      test_content: 'テスト内容',
+      score: null,
+      created_at: new Date().toISOString()
+    };
+    const savedMini = await db.saveMiniTestResult(mini);
+    expect(savedMini.id).toBe('mini-test-1');
+
+    const miniResults = db.getMiniTestResults();
+    expect(miniResults.find(m => m.id === 'mini-test-1')).toBeDefined();
+
+    // overwrite
+    const updatedMini = await db.saveMiniTestResult({ ...mini, score: 90 });
+    expect(updatedMini.score).toBe(90);
+
+    await db.deleteMiniTestResult('mini-test-1');
+    expect(db.getMiniTestResults().find(m => m.id === 'mini-test-1')).toBeUndefined();
+
+    // HomeworkResult CRUD
+    const hw = {
+      id: 'hw-test-1',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      homework_content: '宿題内容',
+      homework_deadline: '2026-06-20',
+      status: 'incomplete' as const,
+      created_at: new Date().toISOString()
+    };
+    const savedHw = await db.saveHomeworkResult(hw);
+    expect(savedHw.id).toBe('hw-test-1');
+
+    const hwResults = db.getHomeworkResults();
+    expect(hwResults.find(h => h.id === 'hw-test-1')).toBeDefined();
+
+    // overwrite
+    const updatedHw = await db.saveHomeworkResult({ ...hw, status: 'completed' as const });
+    expect(updatedHw.status).toBe('completed');
+
+    // saveHomeworkResults
+    const hw2 = { ...hw, id: 'hw-test-2' };
+    const savedHws = await db.saveHomeworkResults([hw2]);
+    expect(savedHws[0].id).toBe('hw-test-2');
+    expect(db.getHomeworkResults().find(h => h.id === 'hw-test-2')).toBeDefined();
+
+    // saveHomeworkResults overwrite
+    const hw2_updated = { ...hw2, homework_content: '更新された宿題2' };
+    const savedHwsUpdated = await db.saveHomeworkResults([hw2_updated]);
+    expect(savedHwsUpdated[0].homework_content).toBe('更新された宿題2');
+
+    await db.deleteHomeworkResult('hw-test-1');
+    expect(db.getHomeworkResults().find(h => h.id === 'hw-test-1')).toBeUndefined();
+    await db.deleteHomeworkResult('hw-test-2');
   });
 });

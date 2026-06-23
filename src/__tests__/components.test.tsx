@@ -120,7 +120,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText(/佐藤 拓海 さんの学習画面/)).toBeInTheDocument();
 
     // Watch video for failed status task (Line 43 status !== 'unstarted')
-    const watchFailedBtn = screen.getAllByText('動画を視聴する (10分)')[2];
+    const watchFailedBtn = screen.getAllByText('動画を視聴する (10分)')[1];
     fireEvent.click(watchFailedBtn);
     await waitFor(() => {
       expect(screen.getByText('動画視聴済み')).toBeInTheDocument();
@@ -844,13 +844,35 @@ describe('UI Components Render & Interaction Tests', () => {
     const officeNoteTextarea = screen.getByPlaceholderText('業務連絡（例：提出ワーク忘れずに）');
     fireEvent.change(officeNoteTextarea, { target: { value: '持ち物：実験道具' } });
 
-    const testInput = screen.getByPlaceholderText('例: 不規則動詞テスト50問、二次方程式10問');
-    const hwContentInput = screen.getByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
-    const hwDeadlineInput = screen.getByLabelText(/期限:/);
+    // テストを2つ追加して1つ削除
+    const addTestBtn = screen.getByText('➕ テストを追加');
+    fireEvent.click(addTestBtn);
+    fireEvent.click(addTestBtn);
+    const testInputs = screen.getAllByPlaceholderText('例: 二次方程式10問');
+    fireEvent.change(testInputs[0], { target: { value: '数学小テスト（一次方程式）' } });
+    fireEvent.change(testInputs[1], { target: { value: '削除するテスト' } });
+    const deleteTestBtn = testInputs[1].closest('div')!.querySelector('button')!;
+    fireEvent.click(deleteTestBtn); // 2つ目のテストを削除
 
-    fireEvent.change(testInput, { target: { value: '数学小テスト（一次方程式）' } });
-    fireEvent.change(hwContentInput, { target: { value: '数学ワークP45' } });
-    fireEvent.change(hwDeadlineInput, { target: { value: '2026-06-25' } });
+    // 宿題を2つ追加して1つ削除
+    const addHwBtn = screen.getByText('➕ 宿題を追加');
+    fireEvent.click(addHwBtn);
+    fireEvent.click(addHwBtn);
+    const hwContentInputs = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    // 親要素経由で2つの日付入力フィールドを取得
+    const hwDeadlineInputs = hwContentInputs[0].closest('div')!.parentElement!.parentElement!.querySelectorAll('input[type="date"]');
+    
+    fireEvent.change(hwContentInputs[0], { target: { value: '数学ワークP45' } });
+    fireEvent.change(hwDeadlineInputs[0], { target: { value: '2026-06-25' } });
+    fireEvent.change(hwContentInputs[1], { target: { value: '削除する宿題' } });
+    fireEvent.change(hwDeadlineInputs[1], { target: { value: '2026-06-26' } });
+    
+    const deleteHwBtn = hwContentInputs[1].closest('div')!.querySelector('button')!;
+    fireEvent.click(deleteHwBtn); // 2つ目の宿題を削除
+
+    const testInput = testInputs[0];
+    const hwContentInput = hwContentInputs[0];
+    const hwDeadlineInput = hwDeadlineInputs[0];
 
     const saveBtn = screen.getByText('時間割コマ割りを保存');
     fireEvent.click(saveBtn);
@@ -859,13 +881,37 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     const miniResults = db.getMiniTestResults();
-    const result = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
-    expect(result).toBeDefined();
-    expect(result?.test_content).toBe('数学小テスト（一次方程式）');
-    expect(result?.homework_content).toBe('数学ワークP45');
-    expect(result?.homework_deadline).toBe('2026-06-25');
+    const testResult = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(testResult).toBeDefined();
+    expect(testResult?.test_content).toBe('数学小テスト（一次方程式）');
+
+    const hwResults = db.getHomeworkResults();
+    const hwResult = hwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(hwResult).toBeDefined();
+    expect(hwResult?.homework_content).toBe('数学ワークP45');
+    expect(hwResult?.homework_deadline).toBe('2026-06-25');
 
     unmountTeacher();
+
+    // 宿題の status: 'skipped' と 'incomplete' のブランチをカバーするための宿題データを流し込む
+    await db.saveHomeworkResult({
+      id: 'hw-skipped',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      homework_content: 'スキップ宿題',
+      homework_deadline: '2026-06-26',
+      status: 'skipped',
+      created_at: new Date().toISOString()
+    });
+    await db.saveHomeworkResult({
+      id: 'hw-incomplete',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      homework_content: '未完の宿題',
+      homework_deadline: '', // 期限なしのブランチもカバー
+      status: 'incomplete',
+      created_at: new Date().toISOString()
+    });
 
     const testStudent: Student = {
       id: 'std-1',
@@ -886,17 +932,22 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('📚 今日の宿題')).toBeInTheDocument();
     expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
     expect(screen.getByText('提出期限: 2026-06-25')).toBeInTheDocument();
+    expect(screen.getByText('スキップ宿題')).toBeInTheDocument();
+    expect(screen.getByText('未完の宿題')).toBeInTheDocument();
+    expect(screen.getByText('提出期限: 2026-06-26')).toBeInTheDocument();
+    expect(screen.getAllByText('スキップ').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('未完').length).toBeGreaterThan(0);
 
     const scoreInput = screen.getByPlaceholderText('点数を入力');
-    const scoreForm = scoreInput.closest('form')!;
+    const saveScoreBtn = screen.getByText('結果を保存');
     fireEvent.change(scoreInput, { target: { value: '150' } });
-    fireEvent.submit(scoreForm);
+    fireEvent.click(saveScoreBtn);
     await waitFor(() => {
       expect(alertMock).toHaveBeenLastCalledWith('0〜100の点数を入力してください。');
     });
 
     fireEvent.change(scoreInput, { target: { value: '88' } });
-    fireEvent.submit(scoreForm);
+    fireEvent.click(saveScoreBtn);
     await waitFor(() => {
       expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
     });
@@ -916,12 +967,31 @@ describe('UI Components Render & Interaction Tests', () => {
     const { unmount: unmountTeacher2 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
     const studentItem2 = screen.getByText(/佐藤 拓海/);
     fireEvent.click(studentItem2);
+    
     const tabMiniTestsBtn = screen.getByText('小テスト結果');
     fireEvent.click(tabMiniTestsBtn);
-
     expect(screen.getByText('数学小テスト（一次方程式）')).toBeInTheDocument();
+
+    const tabHomeworksBtn = screen.getByText('宿題提出状況');
+    fireEvent.click(tabHomeworksBtn);
     expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
-    
+
+    // 宿題提出状況の更新・保存テスト
+    const hwRow = screen.getByText('数学ワークP45').closest('tr')!;
+    const hwSelect = hwRow.querySelector('select')!;
+    fireEvent.change(hwSelect, { target: { value: 'completed' } });
+    const hwSaveBtn = hwRow.querySelector('button')!;
+    fireEvent.click(hwSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('宿題提出状況を保存しました！');
+    });
+
+    const finalHwResults = db.getHomeworkResults();
+    const finalHwResult = finalHwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(finalHwResult?.status).toBe('completed');
+
+    // 小テスト点数の更新テスト
+    fireEvent.click(tabMiniTestsBtn);
     const scoreCellInput = screen.getByDisplayValue('88');
     fireEvent.change(scoreCellInput, { target: { value: '150' } });
     const teacherSaveBtn = scoreCellInput.closest('tr')!.querySelector('button')!;
@@ -940,6 +1010,15 @@ describe('UI Components Render & Interaction Tests', () => {
     const finalResult = finalMiniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
     expect(finalResult?.score).toBe(95);
 
+    // 既存のテスト/宿題の再保存（削除されないブランチのカバー）
+    const tabScheduleBtn = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(tabScheduleBtn);
+    const saveBtn2 = screen.getByText('時間割コマ割りを保存');
+    fireEvent.click(saveBtn2);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
     unmountTeacher2();
   });
 
@@ -954,6 +1033,10 @@ describe('UI Components Render & Interaction Tests', () => {
     const tabMiniTestsBtn = screen.getByText('小テスト結果');
     fireEvent.click(tabMiniTestsBtn);
     expect(screen.getByText('記録された小テスト結果はありません。')).toBeInTheDocument();
+
+    const tabHomeworksBtn = screen.getByText('宿題提出状況');
+    fireEvent.click(tabHomeworksBtn);
+    expect(screen.getByText('記録された宿題はありません。')).toBeInTheDocument();
 
     // 1. カリキュラム順序変更 (moveUnit) のテスト
     // 「学校カリキュラム管理」タブを開く
@@ -1080,8 +1163,6 @@ describe('UI Components Render & Interaction Tests', () => {
       date: '2026-06-19',
       test_content: '変則テスト',
       score: null,
-      homework_content: '',
-      homework_deadline: '',
       created_at: new Date().toISOString()
     });
 
@@ -1097,8 +1178,6 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // 反映とフォールバックの確認
     expect(screen.getByText('不明な生徒')).toBeInTheDocument();
-    const cellNones = screen.getAllByText('なし');
-    expect(cellNones.length).toBeGreaterThan(0);
 
     unmount();
   });

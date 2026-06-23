@@ -13,7 +13,8 @@ import {
   AIReport, 
   PromptSetting,
   TeacherCorrectionLog,
-  MiniTestResult
+  MiniTestResult,
+  HomeworkResult
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -35,7 +36,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'tests' | 'ai-report'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report'>('schedule');
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
@@ -68,13 +69,16 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
 
   // 宿題・テスト用の State
-  const [homeworkContent, setHomeworkContent] = useState<string>('');
-  const [homeworkDeadline, setHomeworkDeadline] = useState<string>('');
-  const [todayTestContent, setTodayTestContent] = useState<string>('');
+  const [todayTests, setTodayTests] = useState<{ id: string; content: string }[]>([]);
+  const [todayHomeworks, setTodayHomeworks] = useState<{ id: string; content: string; deadline: string }[]>([]);
 
   // 小テスト結果リスト
   const [miniTestResultsList, setMiniTestResultsList] = useState<MiniTestResult[]>([]);
   const [tempScores, setTempScores] = useState<Record<string, string>>({});
+
+  // 宿題提出状況リスト
+  const [homeworkResultsList, setHomeworkResultsList] = useState<HomeworkResult[]>([]);
+  const [tempHomeworkStatuses, setTempHomeworkStatuses] = useState<Record<string, 'incomplete' | 'completed' | 'skipped'>>({});
 
   // Start Unit position State
   const [startUnitId, setStartUnitId] = useState<string>('');
@@ -173,18 +177,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
         setPeriodCount(loadedPeriodCount);
         setCommonOfficeNote(foundCommonNote);
 
-        // Load MiniTestResult for today
+        // Load MiniTestResults (multiple) for today
         const miniResults = db.getMiniTestResults();
-        const todayMiniResult = miniResults.find(r => r.student_id === freshSt.id && r.date === scheduleDate);
-        if (todayMiniResult) {
-          setHomeworkContent(todayMiniResult.homework_content);
-          setHomeworkDeadline(todayMiniResult.homework_deadline);
-          setTodayTestContent(todayMiniResult.test_content);
-        } else {
-          setHomeworkContent('');
-          setHomeworkDeadline('');
-          setTodayTestContent('');
-        }
+        const todayMiniResults = miniResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
+        setTodayTests(todayMiniResults.map(r => ({ id: r.id, content: r.test_content })));
+
+        // Load HomeworkResults (multiple) for today
+        const hwResults = db.getHomeworkResults();
+        const todayHwResults = hwResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
+        setTodayHomeworks(todayHwResults.map(r => ({ id: r.id, content: r.homework_content, deadline: r.homework_deadline })));
 
         // Load test records
         const allTests = db.getTestRecords();
@@ -228,6 +229,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       scoresMap[r.id] = r.score !== null ? r.score.toString() : '';
     });
     setTempScores(scoresMap);
+
+    // Load all homework results
+    const allHwResults = db.getHomeworkResults();
+    setHomeworkResultsList(allHwResults);
+    const hwStatusMap: Record<string, 'incomplete' | 'completed' | 'skipped'> = {};
+    allHwResults.forEach(r => {
+      hwStatusMap[r.id] = r.status;
+    });
+    setTempHomeworkStatuses(hwStatusMap);
   };
 
   useEffect(() => {
@@ -456,21 +466,58 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     const allTasksToSave = [...clearedTasks, ...newCustomTasks];
     await db.saveLearningTasks(allTasksToSave);
 
-    // 宿題と本日のテスト結果を MiniTestResult として保存
+    // 複数のテスト結果 (MiniTestResult) を一括同期保存
     const miniResults = db.getMiniTestResults();
-    const existingMiniResult = miniResults.find(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
-    
-    const miniResultData: MiniTestResult = {
-      id: existingMiniResult?.id || `mini-${selectedStudent.id}-${scheduleDate}`,
-      student_id: selectedStudent.id,
-      date: scheduleDate,
-      test_content: todayTestContent,
-      score: existingMiniResult ? existingMiniResult.score : null,
-      homework_content: homeworkContent,
-      homework_deadline: homeworkDeadline,
-      created_at: existingMiniResult?.created_at || new Date().toISOString()
-    };
-    await db.saveMiniTestResult(miniResultData);
+    const existingMiniResultsForToday = miniResults.filter(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
+
+    const savedTestIds = new Set<string>();
+    for (const test of todayTests) {
+      if (!test.content.trim()) continue;
+      const existing = existingMiniResultsForToday.find(r => r.id === test.id || r.test_content === test.content);
+      const testData: MiniTestResult = {
+        id: existing?.id || (test.id.startsWith('temp-') ? `mini-${selectedStudent.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` : test.id),
+        student_id: selectedStudent.id,
+        date: scheduleDate,
+        test_content: test.content,
+        score: existing ? existing.score : null,
+        created_at: existing?.created_at || new Date().toISOString()
+      };
+      await db.saveMiniTestResult(testData);
+      savedTestIds.add(testData.id);
+    }
+
+    for (const existing of existingMiniResultsForToday) {
+      if (!savedTestIds.has(existing.id)) {
+        await db.deleteMiniTestResult(existing.id);
+      }
+    }
+
+    // 複数の宿題結果 (HomeworkResult) を一括同期保存
+    const hwResults = db.getHomeworkResults();
+    const existingHwResultsForToday = hwResults.filter(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
+
+    const savedHwIds = new Set<string>();
+    for (const hw of todayHomeworks) {
+      if (!hw.content.trim()) continue;
+      const existing = existingHwResultsForToday.find(r => r.id === hw.id || r.homework_content === hw.content);
+      const hwData: HomeworkResult = {
+        id: existing?.id || (hw.id.startsWith('temp-') ? `hw-${selectedStudent.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` : hw.id),
+        student_id: selectedStudent.id,
+        date: scheduleDate,
+        homework_content: hw.content,
+        homework_deadline: hw.deadline,
+        status: existing ? existing.status : 'incomplete',
+        created_at: existing?.created_at || new Date().toISOString()
+      };
+      await db.saveHomeworkResult(hwData);
+      savedHwIds.add(hwData.id);
+    }
+
+    for (const existing of existingHwResultsForToday) {
+      if (!savedHwIds.has(existing.id)) {
+        await db.deleteHomeworkResult(existing.id);
+      }
+    }
 
     // 生徒情報の period_count も更新して保存
     const updatedStudent = {
@@ -499,6 +546,44 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     await db.saveMiniTestResult(updated);
     alert('小テスト点数を保存しました！');
     loadData();
+  };
+
+  // 宿題提出状況の保存
+  const handleSaveHomeworkStatus = async (result: HomeworkResult) => {
+    const statusVal = tempHomeworkStatuses[result.id] || 'incomplete';
+    const updated = {
+      ...result,
+      status: statusVal
+    };
+    await db.saveHomeworkResult(updated);
+    alert('宿題提出状況を保存しました！');
+    loadData();
+  };
+
+  // テストの動的追加・更新・削除
+  const handleAddTest = () => {
+    setTodayTests([...todayTests, { id: `temp-${Date.now()}-${Math.random()}`, content: '' }]);
+  };
+
+  const handleUpdateTest = (id: string, val: string) => {
+    setTodayTests(todayTests.map(t => t.id === id ? { ...t, content: val } : t));
+  };
+
+  const handleRemoveTest = (id: string) => {
+    setTodayTests(todayTests.filter(t => t.id !== id));
+  };
+
+  // 宿題の動的追加・更新・削除
+  const handleAddHomework = () => {
+    setTodayHomeworks([...todayHomeworks, { id: `temp-${Date.now()}-${Math.random()}`, content: '', deadline: '' }]);
+  };
+
+  const handleUpdateHomework = (id: string, field: 'content' | 'deadline', val: string) => {
+    setTodayHomeworks(todayHomeworks.map(h => h.id === id ? { ...h, [field]: val } : h));
+  };
+
+  const handleRemoveHomework = (id: string) => {
+    setTodayHomeworks(todayHomeworks.filter(h => h.id !== id));
   };
 
   // 5. 自動リスケジュール実行 (遅れ発生時)
@@ -893,6 +978,12 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   小テスト結果
                 </button>
                 <button 
+                  className={`${styles.tabBtn} ${activeTab === 'homeworks' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('homeworks')}
+                >
+                  宿題提出状況
+                </button>
+                <button 
                   className={`${styles.tabBtn} ${activeTab === 'tests' ? styles.tabBtnActive : ''}`}
                   onClick={() => setActiveTab('tests')}
                 >
@@ -1063,46 +1154,93 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         </button>
                       )}
 
-                      {/* 本日のテスト */}
+                      {/* 本日のテスト (複数追加対応) */}
                       <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px', color: '#0f172a' }}>本日のテスト (自由記述):</label>
-                        <input
-                          type="text"
-                          value={todayTestContent}
-                          onChange={e => setTodayTestContent(e.target.value)}
-                          placeholder="例: 不規則動詞テスト50問、二次方程式10問"
-                          className={styles.input}
-                          style={{ fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                        />
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0f172a' }}>本日のテスト (自由記述):</label>
+                        {todayTests.length === 0 ? (
+                          <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録されたテストはありません。</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+                            {todayTests.map((test) => (
+                              <div key={test.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <input
+                                  type="text"
+                                  value={test.content}
+                                  onChange={e => handleUpdateTest(test.id, e.target.value)}
+                                  placeholder="例: 二次方程式10問"
+                                  className={styles.input}
+                                  style={{ fontSize: '0.8rem', flex: 1, padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTest(test.id)}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 8px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                  削除
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleAddTest}
+                          className={styles.btn}
+                          style={{ width: 'auto', padding: '4px 12px', background: '#3b82f6', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          ➕ テストを追加
+                        </button>
                       </div>
 
-                      {/* 宿題 */}
+                      {/* 宿題 (複数追加対応) */}
                       <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px', color: '#0f172a' }}>宿題:</label>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div>
-                            <span style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '2px' }}>内容:</span>
-                            <textarea
-                              value={homeworkContent}
-                              onChange={e => setHomeworkContent(e.target.value)}
-                              placeholder="宿題の内容を入力（例：ワークP24-25）"
-                              className={styles.textarea}
-                              style={{ height: '50px', fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                            />
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0f172a' }}>宿題:</label>
+                        {todayHomeworks.length === 0 ? (
+                          <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録された宿題はありません。</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
+                            {todayHomeworks.map((hw) => (
+                              <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', background: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <textarea
+                                    value={hw.content}
+                                    onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
+                                    placeholder="宿題の内容を入力（例：ワークP24-25）"
+                                    className={styles.textarea}
+                                    style={{ height: '40px', fontSize: '0.8rem', flex: 1, padding: '4px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveHomework(hw.id)}
+                                    className={styles.btn}
+                                    style={{ width: 'auto', padding: '4px 8px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer', alignSelf: 'flex-start' }}
+                                  >
+                                    削除
+                                  </button>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>期限:</span>
+                                  <input
+                                    type="date"
+                                    value={hw.deadline}
+                                    onChange={e => handleUpdateHomework(hw.id, 'deadline', e.target.value)}
+                                    className={styles.input}
+                                    style={{ fontSize: '0.8rem', padding: '4px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', width: 'auto' }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          <div>
-                            <label style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '2px' }}>
-                              期限:
-                              <input
-                                type="date"
-                                value={homeworkDeadline}
-                                onChange={e => setHomeworkDeadline(e.target.value)}
-                                className={styles.input}
-                                style={{ fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', marginTop: '2px' }}
-                              />
-                            </label>
-                          </div>
-                        </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleAddHomework}
+                          className={styles.btn}
+                          style={{ width: 'auto', padding: '4px 12px', background: '#3b82f6', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          ➕ 宿題を追加
+                        </button>
                       </div>
 
                       <div style={{ marginTop: '16px' }}>
@@ -1242,8 +1380,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             <th style={{ padding: '10px' }}>日付</th>
                             <th style={{ padding: '10px' }}>生徒名</th>
                             <th style={{ padding: '10px' }}>テスト内容</th>
-                            <th style={{ padding: '10px' }}>宿題内容</th>
-                            <th style={{ padding: '10px' }}>期限</th>
                             <th style={{ padding: '10px', width: '120px' }}>点数</th>
                             <th style={{ padding: '10px', width: '80px' }}>操作</th>
                           </tr>
@@ -1258,8 +1394,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                   <td style={{ padding: '10px' }}>{r.date}</td>
                                   <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
                                   <td style={{ padding: '10px' }}>{r.test_content}</td>
-                                  <td style={{ padding: '10px' }}>{r.homework_content || 'なし'}</td>
-                                  <td style={{ padding: '10px' }}>{r.homework_deadline || 'なし'}</td>
                                   <td style={{ padding: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                       <input
@@ -1285,6 +1419,77 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                       onClick={() => handleSaveMiniTestScore(r)}
                                       className={styles.btn}
                                       style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#3b82f6' }}
+                                    >
+                                      保存
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: 宿題提出状況 */}
+              {activeTab === 'homeworks' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    宿題提出状況管理
+                  </div>
+                  
+                  {homeworkResultsList.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                      記録された宿題はありません。
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                            <th style={{ padding: '10px' }}>日付</th>
+                            <th style={{ padding: '10px' }}>生徒名</th>
+                            <th style={{ padding: '10px' }}>宿題内容</th>
+                            <th style={{ padding: '10px' }}>提出期限</th>
+                            <th style={{ padding: '10px', width: '150px' }}>提出状況</th>
+                            <th style={{ padding: '10px', width: '80px' }}>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {homeworkResultsList
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                            .map(r => {
+                              const student = students.find(s => s.id === r.student_id);
+                              return (
+                                <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ padding: '10px' }}>{r.date}</td>
+                                  <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
+                                  <td style={{ padding: '10px' }}>{r.homework_content}</td>
+                                  <td style={{ padding: '10px' }}>{r.homework_deadline || 'なし'}</td>
+                                  <td style={{ padding: '10px' }}>
+                                    <select
+                                      value={tempHomeworkStatuses[r.id] ?? 'incomplete'}
+                                      onChange={e => {
+                                        setTempHomeworkStatuses({
+                                          ...tempHomeworkStatuses,
+                                          [r.id]: e.target.value as any
+                                        });
+                                      }}
+                                      className={styles.select}
+                                      style={{ padding: '4px 6px', fontSize: '0.8rem' }}
+                                    >
+                                      <option value="incomplete">未完</option>
+                                      <option value="completed">提出済み</option>
+                                      <option value="skipped">スキップ</option>
+                                    </select>
+                                  </td>
+                                  <td style={{ padding: '10px' }}>
+                                    <button
+                                      onClick={() => handleSaveHomeworkStatus(r)}
+                                      className={styles.btn}
+                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#10b981' }}
                                     >
                                       保存
                                     </button>
