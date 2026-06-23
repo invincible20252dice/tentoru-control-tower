@@ -39,9 +39,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
+
+  // 検索フィルター用のState
+  const [filterSchoolId, setFilterSchoolId] = useState<string>('');
+  const [filterGrade, setFilterGrade] = useState<string>('');
+  const [filterCategory, setFilterCategory] = useState<'all' | 'junior_high' | 'elementary'>('all');
+  const [filterName, setFilterName] = useState<string>('');
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
@@ -843,196 +849,345 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       </div>
 
       <div className={styles.mainLayout}>
-        {/* Sidebar: Student list & Account generation */}
+        {/* Sidebar: Vertical Navigation Menu */}
         <div className={styles.sidebar}>
           
-          {/* Account Issuance */}
-          <div className={styles.sidebarCard}>
-            <h3 className={styles.sidebarTitle}>
-              {/* Add User Icon */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <line x1="19" y1="8" x2="19" y2="14" />
-                <line x1="22" y1="11" x2="16" y2="11" />
-              </svg>
-              新規生徒アカウント発行
-            </h3>
-            <form onSubmit={handleCreateAccount}>
-              <div className={styles.formGroup}>
-                <label>生徒氏名</label>
-                <input 
-                  type="text" 
-                  value={newStudentName}
-                  onChange={e => setNewStudentName(e.target.value)}
-                  placeholder="例: 佐藤 拓海" 
-                  className={styles.input}
-                  required
-                />
-              </div>
-              <div className={styles.formGroup}>
-                <label>学年</label>
-                <select 
-                  value={newStudentGrade} 
-                  onChange={e => setNewStudentGrade(e.target.value)}
-                  className={styles.select}
-                >
-                  <option value="小5">小学5年生</option>
-                  <option value="小6">小学6年生</option>
-                  <option value="中1">中学1年生</option>
-                  <option value="中2">中学2年生</option>
-                  <option value="中3">中学3年生</option>
-                </select>
-              </div>
-              <div className={styles.formGroup}>
-                <label>所属学校</label>
-                <select 
-                  value={newStudentSchoolId} 
-                  onChange={e => setNewStudentSchoolId(e.target.value)}
-                  className={styles.select}
-                >
-                  {schools.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.type === 'junior_high' ? '中' : '小'})</option>
-                  ))}
-                </select>
-              </div>
-              <button type="submit" className={styles.btn}>
-                1クリックアカウント発行
-              </button>
-            </form>
-          </div>
-
-          {/* Student List */}
-          <div className={styles.sidebarCard}>
-            <h3 className={styles.sidebarTitle}>
+          {/* Student Management Group */}
+          <div className={styles.menuGroup}>
+            <div className={styles.menuTitle}>生徒管理</div>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'student-list' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('student-list')}
+            >
               {/* User Group Icon */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
               生徒一覧
-            </h3>
-            <div className={styles.studentList}>
-              {students.map(st => {
-                let statusClass = styles.statusNormal;
-                if (st.status === 'fast') statusClass = styles.statusFast;
-                if (st.status === 'warning') statusClass = styles.statusWarning;
-
-                const sub = st.grade.startsWith('中') ? '数学' : '算数';
-                const allTasks = db.getLearningTasks();
-                const { gapWeeks } = calculateProgressGap(st, allTasks, milestonePlans, allCurriculumUnits, scheduleDate, sub);
-                
-                let gapBadge = null;
-                if (gapWeeks < 0) {
-                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#fef2f2', color: '#dc2626', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fee2e2' }}>{Math.abs(gapWeeks)}週遅れ ⚠️</span>;
-                } else if (gapWeeks > 0) {
-                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#f0fdf4', color: '#16a34a', padding: '2px 6px', borderRadius: '4px', border: '1px solid #dcfce7' }}>{gapWeeks}週進み ⚡</span>;
-                } else {
-                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
-                }
-
-                return (
-                  <div 
-                    key={st.id} 
-                    className={`${styles.studentItem} ${selectedStudent?.id === st.id ? styles.studentItemActive : ''}`}
-                    onClick={() => {
-                      setSelectedStudent(st);
-                      // Start unit ID reset
-                      setStartUnitId(st.start_unit_id || '');
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className={styles.studentName}>{st.name} ({st.grade})</span>
-                        <span className={`${styles.statusIcon} ${statusClass}`} title={`状況: ${st.status}`} />
-                      </div>
-                      <div style={{ marginTop: '4px' }}>
-                        {gapBadge}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'create-student' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('create-student')}
+            >
+              {/* Add User Icon */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <line x1="19" y1="8" x2="19" y2="14" />
+                <line x1="22" y1="11" x2="16" y2="11" />
+              </svg>
+              新規生徒アカウント発行
+            </button>
           </div>
+
+          {/* Individual Settings Group */}
+          <div className={styles.menuGroup}>
+            <div className={styles.menuTitle}>個別指導・学習計画設定</div>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'schedule' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('schedule')}
+            >
+              学習計画・コマ割り
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'milestones' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('milestones')}
+            >
+              年間計画（マイルストーン）
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'curriculum' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('curriculum')}
+            >
+              学校カリキュラム管理
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'mini-tests' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('mini-tests')}
+            >
+              小テスト結果
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'homeworks' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('homeworks')}
+            >
+              宿題提出状況
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'tests' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('tests')}
+            >
+              定期テスト・模試
+            </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'ai-report' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('ai-report')}
+            >
+              AI指導報告書
+            </button>
+          </div>
+
+          {/* Selected Student Panel Preview */}
+          {selectedStudent && (
+            <div className={styles.sidebarCard} style={{ marginTop: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>選択中の生徒:</span>
+                <button
+                  onClick={() => {
+                    setSelectedStudent(null);
+                    setActiveTab('student-list');
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#ef4444',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    padding: 0,
+                    textDecoration: 'underline'
+                  }}
+                >
+                  解除
+                </button>
+              </div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{selectedStudent.name} ({selectedStudent.grade})</div>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Main workspace */}
         <div className={styles.contentArea}>
-          {!selectedStudent ? (
-            <div className={`${styles.card} ${styles.noStudentSelected}`}>
-              {/* Info Icon */}
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              <p>左側の生徒一覧から、進捗管理・司令塔設定を行う生徒を選択してください。</p>
-            </div>
-          ) : (
-            <>
-              {/* Selected Student Profile Banner */}
-              <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
-                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
+          
+          {/* Student List View */}
+          {activeTab === 'student-list' && (
+            <div className={styles.card}>
+              <div className={styles.cardTitle}>生徒一覧</div>
+
+              {/* Search Filters */}
+              <div className={styles.filterArea}>
+                <div className={styles.filterGrid}>
+                  <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                    <label htmlFor="filter-school" style={{ fontSize: '0.75rem', fontWeight: 600 }}>中学校・小学校</label>
+                    <select
+                      id="filter-school"
+                      value={filterSchoolId}
+                      onChange={e => setFilterSchoolId(e.target.value)}
+                      className={styles.select}
+                    >
+                      <option value="">すべて</option>
+                      {schools.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div>
-                    {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
-                    {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
-                    {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+
+                  <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                    <label htmlFor="filter-grade" style={{ fontSize: '0.75rem', fontWeight: 600 }}>学年</label>
+                    <select
+                      id="filter-grade"
+                      value={filterGrade}
+                      onChange={e => setFilterGrade(e.target.value)}
+                      className={styles.select}
+                    >
+                      <option value="">すべて</option>
+                      <option value="小5">小学5年生</option>
+                      <option value="小6">小学6年生</option>
+                      <option value="中1">中学1年生</option>
+                      <option value="中2">中学2年生</option>
+                      <option value="中3">中学3年生</option>
+                    </select>
+                  </div>
+
+                  <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>区分トグル</label>
+                    <div className={styles.segmentControl}>
+                      <button
+                        type="button"
+                        className={`${styles.segmentBtn} ${filterCategory === 'all' ? styles.segmentBtnActive : ''}`}
+                        onClick={() => setFilterCategory('all')}
+                      >
+                        すべて
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.segmentBtn} ${filterCategory === 'junior_high' ? styles.segmentBtnActive : ''}`}
+                        onClick={() => setFilterCategory('junior_high')}
+                      >
+                        中学生
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.segmentBtn} ${filterCategory === 'elementary' ? styles.segmentBtnActive : ''}`}
+                        onClick={() => setFilterCategory('elementary')}
+                      >
+                        小学生
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                    <label htmlFor="filter-name" style={{ fontSize: '0.75rem', fontWeight: 600 }}>生徒名検索</label>
+                    <input
+                      id="filter-name"
+                      type="text"
+                      placeholder="名前を入力..."
+                      value={filterName}
+                      onChange={e => setFilterName(e.target.value)}
+                      className={styles.input}
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Tabs */}
-              <div className={styles.tabs}>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'schedule' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('schedule')}
-                >
-                  学習計画・コマ割り
+              {/* Student Cards Grid */}
+              <div className={styles.studentGrid}>
+                {students
+                  .filter(st => {
+                    if (filterSchoolId && st.school_id !== filterSchoolId) return false;
+                    if (filterGrade && st.grade !== filterGrade) return false;
+                    
+                    const school = schools.find(s => s.id === st.school_id);
+                    if (filterCategory === 'junior_high' && (!school || school.type !== 'junior_high')) return false;
+                    if (filterCategory === 'elementary' && (!school || school.type !== 'elementary')) return false;
+                    
+                    if (filterName && !st.name.includes(filterName)) return false;
+                    return true;
+                  })
+                  .map(st => {
+                    let statusClass = styles.statusNormal;
+                    if (st.status === 'fast') statusClass = styles.statusFast;
+                    if (st.status === 'warning') statusClass = styles.statusWarning;
+
+                    const sub = st.grade.startsWith('中') ? '数学' : '算数';
+                    const allTasks = db.getLearningTasks();
+                    const { gapWeeks } = calculateProgressGap(st, allTasks, milestonePlans, allCurriculumUnits, scheduleDate, sub);
+                    
+                    let gapBadge = null;
+                    if (gapWeeks < 0) {
+                      gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#fef2f2', color: '#dc2626', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fee2e2' }}>{Math.abs(gapWeeks)}週遅れ ⚠️</span>;
+                    } else if (gapWeeks > 0) {
+                      gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#f0fdf4', color: '#16a34a', padding: '2px 6px', borderRadius: '4px', border: '1px solid #dcfce7' }}>{gapWeeks}週進み ⚡</span>;
+                    } else {
+                      gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
+                    }
+
+                    const schoolName = schools.find(s => s.id === st.school_id)?.name || '未所属';
+
+                    return (
+                      <div
+                        key={st.id}
+                        className={styles.studentCard}
+                        onClick={() => {
+                          setSelectedStudent(st);
+                          setStartUnitId(st.start_unit_id || '');
+                          setActiveTab('schedule');
+                        }}
+                      >
+                        <div>
+                          <div className={styles.studentCardHeader}>
+                            <span className={styles.studentCardName}>{st.name} ({st.grade})</span>
+                            <span className={`${styles.statusIcon} ${statusClass}`} title={`状況: ${st.status}`} />
+                          </div>
+                          <div className={styles.studentCardSchool}>{schoolName}</div>
+                        </div>
+                        <div className={styles.studentCardFooter}>
+                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}>進捗状況:</span>
+                          {gapBadge}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {/* Account Generation Form View */}
+          {activeTab === 'create-student' && (
+            <div className={styles.card}>
+              <div className={styles.cardTitle}>新規生徒アカウント発行</div>
+              <form onSubmit={handleCreateAccount} style={{ maxWidth: '500px' }}>
+                <div className={styles.formGroup}>
+                  <label>生徒氏名</label>
+                  <input 
+                    type="text" 
+                    value={newStudentName}
+                    onChange={e => setNewStudentName(e.target.value)}
+                    placeholder="例: 佐藤 拓海" 
+                    className={styles.input}
+                    required
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label>学年</label>
+                  <select 
+                    value={newStudentGrade} 
+                    onChange={e => setNewStudentGrade(e.target.value)}
+                    className={styles.select}
+                  >
+                    <option value="小5">小学5年生</option>
+                    <option value="小6">小学6年生</option>
+                    <option value="中1">中学1年生</option>
+                    <option value="中2">中学2年生</option>
+                    <option value="中3">中学3年生</option>
+                  </select>
+                </div>
+                <div className={styles.formGroup}>
+                  <label>所属学校</label>
+                  <select 
+                    value={newStudentSchoolId} 
+                    onChange={e => setNewStudentSchoolId(e.target.value)}
+                    className={styles.select}
+                  >
+                    {schools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.type === 'junior_high' ? '中' : '小'})</option>
+                    ))}
+                  </select>
+                </div>
+                <button type="submit" className={styles.btn} style={{ marginTop: '16px' }}>
+                  1クリックアカウント発行
                 </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'milestones' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('milestones')}
+              </form>
+            </div>
+          )}
+
+          {/* Student Specific Tab Screens */}
+          {activeTab !== 'student-list' && activeTab !== 'create-student' && (
+            !selectedStudent ? (
+              <div className={`${styles.card} ${styles.noStudentSelected}`}>
+                {/* Info Icon */}
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <p>生徒が選択されていません。左のメニューから「生徒一覧」を表示し、生徒を選択してください。</p>
+                <button
+                  onClick={() => setActiveTab('student-list')}
+                  className={styles.btn}
+                  style={{ width: 'auto', marginTop: '16px', background: '#4f46e5' }}
                 >
-                  年間計画（マイルストーン）
-                </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'curriculum' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('curriculum')}
-                >
-                  学校カリキュラム管理
-                </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'mini-tests' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('mini-tests')}
-                >
-                  小テスト結果
-                </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'homeworks' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('homeworks')}
-                >
-                  宿題提出状況
-                </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'tests' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('tests')}
-                >
-                  定期テスト・模試
-                </button>
-                <button 
-                  className={`${styles.tabBtn} ${activeTab === 'ai-report' ? styles.tabBtnActive : ''}`}
-                  onClick={() => setActiveTab('ai-report')}
-                >
-                  AI指導報告書
+                  生徒一覧へ
                 </button>
               </div>
+            ) : (
+              <>
+                {/* Selected Student Profile Banner */}
+                <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
+                      <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
+                    </div>
+                    <div>
+                      {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
+                      {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
+                      {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+                    </div>
+                  </div>
+                </div>
 
               {/* Tab 1: 学習計画・時間割 (司令塔設定) */}
               {activeTab === 'schedule' && (
@@ -1926,6 +2081,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                 </div>
               )}
             </>
+          )
           )}
         </div>
       </div>

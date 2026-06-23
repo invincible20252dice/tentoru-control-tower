@@ -318,6 +318,10 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
 
     // 1. Create a student account
+    // Switch to create student tab
+    const createStudentTabBtn = screen.getAllByText('新規生徒アカウント発行')[0];
+    fireEvent.click(createStudentTabBtn);
+
     const inputName = screen.getByPlaceholderText('例: 佐藤 拓海');
     
     // 名前が空の状態でアカウント発行を試みてガードを通す
@@ -349,6 +353,10 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('生徒アカウントを発行しました'));
     });
 
+    // Go back to student list view
+    const studentListTabBtn = screen.getAllByText('生徒一覧')[0];
+    fireEvent.click(studentListTabBtn);
+
     // Select newly created student to cover Line 690 (st.start_unit_id || '') empty check
     const studentItemTaro = screen.getByText(/山田 太郎/);
     fireEvent.click(studentItemTaro);
@@ -370,6 +378,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
 
     // 2. Select student to load details
+    fireEvent.click(studentListTabBtn);
     const studentItem = screen.getByText(/佐藤 拓海/);
     fireEvent.click(studentItem);
     await waitFor(() => {
@@ -377,6 +386,7 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     // Select std-2 (Suzuki Yui) who does not have an AI report for 2026-06 to cover line 144 else branch
+    fireEvent.click(studentListTabBtn);
     const studentItemYui = screen.getByText(/鈴木 結衣/);
     fireEvent.click(studentItemYui);
     await waitFor(() => {
@@ -412,7 +422,9 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(tabScheduleYui);
 
     // Select std-1 back to continue original flow
-    fireEvent.click(studentItem);
+    fireEvent.click(studentListTabBtn);
+    const studentItemBack = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentItemBack);
     await waitFor(() => {
       expect(screen.getByText(/佐藤 拓海 \(ID: student101\)/)).toBeInTheDocument();
     });
@@ -1197,8 +1209,12 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     // 表示更新のため生徒を切り替えて戻す
+    const studentListTabBtn = screen.getAllByText('生徒一覧')[0];
+    fireEvent.click(studentListTabBtn);
     const yuiItem = screen.getByText(/鈴木 結衣/);
     fireEvent.click(yuiItem);
+    
+    fireEvent.click(studentListTabBtn);
     const takumiItem = screen.getByText(/佐藤 拓海/);
     fireEvent.click(takumiItem);
 
@@ -1242,5 +1258,129 @@ describe('UI Components Render & Interaction Tests', () => {
     await db.saveLearningTasks(db.getLearningTasks()); // シード初期タスクの復元
 
     unmount();
+  });
+
+  it('should support student search filters and navigation fallbacks in TeacherDashboard', async () => {
+    // 準備：モックデータをクリアし、シードデータをロードして初期状態を構築
+    db.clearMockData();
+    db.getSchools(); // これにより sch-1 (中学校) と sch-2 (小学校) が正しくシード登録されます
+    db.getCurriculumUnits();
+    db.getMilestonePlans();
+
+    // 田中太郎をシードデータの中学校(sch-1)に所属させ、シード単元(unit-101-1)をstart_unit_idに設定
+    const studentA: Student = {
+      id: 'std-A', student_id: 'student-A', name: '田中 太郎', email: 'a@test.com',
+      grade: 'chugaku3', school_id: 'sch-1', status: 'normal', start_unit_id: 'unit-101-1', created_at: ''
+    };
+    // grade を中3にする (日本語表記は '中3' だが、 grade フィールドの値は '中3' でシードデータと同じにする)
+    studentA.grade = '中3';
+
+    const studentB: Student = {
+      id: 'std-B', student_id: 'student-B', name: '鈴木 花子', email: 'b@test.com',
+      grade: '小5', school_id: 'sch-2', status: 'normal', start_unit_id: null, created_at: ''
+    };
+    await db.saveStudent(studentA);
+    await db.saveStudent(studentB);
+
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+
+    // 1. 初期表示で生徒一覧とフィルターが表示されることを確認
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
+
+    // 2. 学校フィルターの適用
+    const schoolSelect = screen.getByLabelText('中学校・小学校');
+    fireEvent.change(schoolSelect, { target: { value: 'sch-1' } });
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.queryByText('鈴木 花子 (小5)')).not.toBeInTheDocument();
+
+    // 元に戻す
+    fireEvent.change(schoolSelect, { target: { value: '' } });
+
+    // 3. 学年フィルターの適用
+    const gradeSelect = screen.getByLabelText('学年');
+    fireEvent.change(gradeSelect, { target: { value: '小5' } });
+    expect(screen.queryByText('田中 太郎 (中3)')).not.toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
+
+    // 元に戻す
+    fireEvent.change(gradeSelect, { target: { value: '' } });
+
+    // 4. 区分トグルフィルターの適用
+    const juniorBtn = screen.getByRole('button', { name: '中学生' });
+    const elementaryBtn = screen.getByRole('button', { name: '小学生' });
+    const allBtn = screen.getByRole('button', { name: 'すべて' });
+
+    // 中学生トグル
+    fireEvent.click(juniorBtn);
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.queryByText('鈴木 花子 (小5)')).not.toBeInTheDocument();
+
+    // 小学生トグル
+    fireEvent.click(elementaryBtn);
+    expect(screen.queryByText('田中 太郎 (中3)')).not.toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
+
+    // すべてトグル
+    fireEvent.click(allBtn);
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
+
+    // 5. 名前部分一致キーワードフィルターの適用
+    const nameInput = screen.getByPlaceholderText('名前を入力...');
+    fireEvent.change(nameInput, { target: { value: '田中' } });
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.queryByText('鈴木 花子 (小5)')).not.toBeInTheDocument();
+
+    // 検索窓クリア
+    fireEvent.change(nameInput, { target: { value: '' } });
+
+    // 6. 生徒の選択と自動遷移
+    const card = screen.getByText('田中 太郎 (中3)');
+    fireEvent.click(card);
+    // スケジュール画面に遷移し、田中太郎が選択されていること
+    expect(screen.getByText(/田中 太郎 \(ID: student-A\)/)).toBeInTheDocument();
+
+    // 7. 解除ボタンでの解除と生徒一覧への戻り
+    const clearBtn = screen.getByText('解除');
+    fireEvent.click(clearBtn);
+    expect(screen.queryByText(/田中 太郎 \(ID: student-A\)/)).not.toBeInTheDocument();
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+
+    // 8. 未選択時に個別メニューをクリックした場合のフォールバックUIの確認
+    const scheduleMenuBtn = screen.getByRole('button', { name: '学習計画・コマ割り' });
+    fireEvent.click(scheduleMenuBtn);
+    // フォールバック画面が表示される
+    expect(screen.getByText('生徒が選択されていません。左のメニューから「生徒一覧」を表示し、生徒を選択してください。')).toBeInTheDocument();
+
+    // 「生徒一覧へ」ボタンクリック
+    const goToListBtn = screen.getByRole('button', { name: '生徒一覧へ' });
+    fireEvent.click(goToListBtn);
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+
+    // 9. 中学生かつ start_unit_id ありの状態でマイルストーン計画を表示させてブランチカバー
+    const cardA = screen.getByText('田中 太郎 (中3)');
+    fireEvent.click(cardA);
+
+    const milestoneMenuBtn = screen.getByRole('button', { name: '年間計画（マイルストーン）' });
+    fireEvent.click(milestoneMenuBtn);
+    // テーブルの中の「田中 太郎 現在地」が表示されるのを明示的に待ちます
+    await screen.findByText(/田中 太郎 現在地/);
+    expect(screen.getAllByText(/単元1/).length).toBeGreaterThan(0);
+
+    // 10. 小学生の状態でマイルストーン計画を表示させて教科の算数ブランチカバー
+    const studentListTabBtn2 = screen.getAllByText('生徒一覧')[0];
+    fireEvent.click(studentListTabBtn2);
+    const cardB = screen.getByText('鈴木 花子 (小5)');
+    fireEvent.click(cardB);
+
+    fireEvent.click(milestoneMenuBtn);
+    // 教科セレクトボックスで「算数」が表示されていることを確認
+    expect(screen.getByRole('option', { name: '算数' })).toBeInTheDocument();
+
+    unmount();
+    db.clearMockData();
+    db.getSchools();
+    db.getStudents();
   });
 });
