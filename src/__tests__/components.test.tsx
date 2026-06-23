@@ -893,7 +893,16 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmountTeacher();
 
-    // 宿題の status: 'skipped' と 'incomplete' のブランチをカバーするための宿題データを流し込む
+    // 宿題の status: 'skipped', 'incomplete', 'completed' のブランチをカバーするための宿題データを流し込む
+    await db.saveHomeworkResult({
+      id: 'hw-completed',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      homework_content: '提出済みの宿題',
+      homework_deadline: '2026-06-27',
+      status: 'completed',
+      created_at: new Date().toISOString()
+    });
     await db.saveHomeworkResult({
       id: 'hw-skipped',
       student_id: 'std-1',
@@ -934,9 +943,12 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('提出期限: 2026-06-25')).toBeInTheDocument();
     expect(screen.getByText('スキップ宿題')).toBeInTheDocument();
     expect(screen.getByText('未完の宿題')).toBeInTheDocument();
+    expect(screen.getByText('提出済みの宿題')).toBeInTheDocument();
     expect(screen.getByText('提出期限: 2026-06-26')).toBeInTheDocument();
+    expect(screen.getByText('提出期限: 2026-06-27')).toBeInTheDocument();
     expect(screen.getAllByText('スキップ').length).toBeGreaterThan(0);
     expect(screen.getAllByText('未完').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('提出済み').length).toBeGreaterThan(0);
 
     const scoreInput = screen.getByPlaceholderText('点数を入力');
     const saveScoreBtn = screen.getByText('結果を保存');
@@ -1010,14 +1022,32 @@ describe('UI Components Render & Interaction Tests', () => {
     const finalResult = finalMiniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
     expect(finalResult?.score).toBe(95);
 
-    // 既存のテスト/宿題の再保存（削除されないブランチのカバー）
+    // 既存のテスト/宿題の削除保存テスト（DBからの削除ブランチのカバー）
     const tabScheduleBtn = screen.getByText('学習計画・コマ割り');
     fireEvent.click(tabScheduleBtn);
+    
+    // 既存のテスト入力欄とその削除ボタンを取得
+    const testInputs2 = screen.getAllByPlaceholderText('例: 二次方程式10問');
+    const deleteTestBtn2 = testInputs2[0].closest('div')!.querySelector('button')!;
+    fireEvent.click(deleteTestBtn2); // 数学小テストを削除
+
+    // 既存の宿題入力欄とその削除ボタンを取得
+    const hwContentInputs2 = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    const deleteHwBtn2 = hwContentInputs2[0].closest('div')!.querySelector('button')!;
+    fireEvent.click(deleteHwBtn2); // 数学ワークP45を削除
+
     const saveBtn2 = screen.getByText('時間割コマ割りを保存');
     fireEvent.click(saveBtn2);
     await waitFor(() => {
       expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
     });
+
+    // 削除がDBに反映されたか確認
+    const finalMiniResultsAfterDel = db.getMiniTestResults();
+    expect(finalMiniResultsAfterDel.find(r => r.test_content === '数学小テスト（一次方程式）')).toBeUndefined();
+
+    const finalHwResultsAfterDel = db.getHomeworkResults();
+    expect(finalHwResultsAfterDel.find(r => r.homework_content === '数学ワークP45')).toBeUndefined();
 
     unmountTeacher2();
   });

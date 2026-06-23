@@ -308,7 +308,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         type="number"
                         min="0"
                         max="100"
-                        value={studentScores[test.id] ?? ''}
+                        value={studentScores[test.id]}
                         onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
                         placeholder="点数を入力"
                         className={styles.input}
@@ -316,7 +316,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                       />
                       <button
                         type="button"
-                        onClick={() => handleSaveStudentScore(test.id, studentScores[test.id] ?? '')}
+                        onClick={() => handleSaveStudentScore(test.id, studentScores[test.id])}
                         className={styles.btn}
                         style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                       >
