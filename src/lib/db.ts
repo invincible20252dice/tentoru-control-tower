@@ -21,6 +21,20 @@ export interface Student {
   created_at: string;
 }
 
+export interface MilestonePlan {
+  id: string;
+  grade: string;       // '中3' | '小5' など
+  subject: string;     // '数学' | '英語' など
+  course: 'standard' | 'advanced';
+  month: number;       // 3 to 12, 1 to 2
+  week_number: number; // 1 to 5
+  unit_name?: string;  // 目標完了単元名 (例: '単元1', '歴史1章')
+  target_sequence_order?: number; // 到達しているべき sequence_order
+  is_holiday: boolean; // GW休暇などの休校週フラグ
+  holiday_name?: string; // 'GW休暇', '定期テスト休み' など
+  created_at?: string;
+}
+
 export interface CurriculumUnit {
   id: string;
   school_id: string;
@@ -821,6 +835,124 @@ class DatabaseService {
     }
   }
 
+  // MilestonePlans CRUD
+  public getMilestonePlans(): MilestonePlan[] {
+    const seed: MilestonePlan[] = [];
+    
+    // 中3 通常コース 数学
+    const mathPlans: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      // 3月
+      { month: 3, week_number: 1, unit_name: '単元1', target_sequence_order: 9, is_holiday: false },
+      { month: 3, week_number: 2, unit_name: '単元1', target_sequence_order: 18, is_holiday: false },
+      { month: 3, week_number: 3, unit_name: '単元1', target_sequence_order: 27, is_holiday: false },
+      { month: 3, week_number: 4, unit_name: '単元1', target_sequence_order: 37, is_holiday: false },
+      // 4月
+      { month: 4, week_number: 1, unit_name: '単元2', target_sequence_order: 38, is_holiday: false },
+      { month: 4, week_number: 2, unit_name: '単元2', target_sequence_order: 39, is_holiday: false },
+      { month: 4, week_number: 3, unit_name: '単元2', target_sequence_order: 41, is_holiday: false },
+      { month: 4, week_number: 4, unit_name: '単元2', target_sequence_order: 41, is_holiday: false },
+      // 5月
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 41, is_holiday: true, holiday_name: 'GW休暇' },
+      { month: 5, week_number: 2, unit_name: '単元3', target_sequence_order: 43, is_holiday: false },
+      { month: 5, week_number: 3, unit_name: '単元3', target_sequence_order: 45, is_holiday: false },
+      { month: 5, week_number: 4, unit_name: '単元3', target_sequence_order: 46, is_holiday: false },
+      // 6月
+      { month: 6, week_number: 1, unit_name: '単元3', target_sequence_order: 48, is_holiday: false },
+      { month: 6, week_number: 2, unit_name: '単元3', target_sequence_order: 49, is_holiday: false },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      // 7月
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト休み' },
+      { month: 7, week_number: 2, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      { month: 7, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      { month: 7, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      // 8月
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 49, is_holiday: true, holiday_name: 'iスクール模試' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 49, is_holiday: true, holiday_name: 'お盆休み' },
+      { month: 8, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      { month: 8, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      // 9月
+      { month: 9, week_number: 1, unit_name: '予備', target_sequence_order: 49, is_holiday: false },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' }
+    ];
+
+    // 中3 通常コース 英語
+    const englishPlans: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      // 3月
+      { month: 3, week_number: 1, unit_name: '1', target_sequence_order: 1, is_holiday: false },
+      { month: 3, week_number: 2, unit_name: '1', target_sequence_order: 3, is_holiday: false },
+      { month: 3, week_number: 3, unit_name: '2', target_sequence_order: 4, is_holiday: false },
+      { month: 3, week_number: 4, unit_name: '2', target_sequence_order: 6, is_holiday: false },
+      // 4月
+      { month: 4, week_number: 1, unit_name: '3', target_sequence_order: 7, is_holiday: false },
+      { month: 4, week_number: 2, unit_name: '3', target_sequence_order: 8, is_holiday: false },
+      { month: 4, week_number: 3, unit_name: '4', target_sequence_order: 9, is_holiday: false },
+      { month: 4, week_number: 4, unit_name: '4', target_sequence_order: 10, is_holiday: false },
+      // 5月
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 10, is_holiday: true, holiday_name: 'GW休暇' },
+      { month: 5, week_number: 2, unit_name: '5', target_sequence_order: 12, is_holiday: false },
+      { month: 5, week_number: 3, unit_name: '6', target_sequence_order: 14, is_holiday: false },
+      { month: 5, week_number: 4, unit_name: '7', target_sequence_order: 16, is_holiday: false },
+      // 6月
+      { month: 6, week_number: 1, unit_name: '8', target_sequence_order: 18, is_holiday: false },
+      { month: 6, week_number: 2, unit_name: '予備', target_sequence_order: 18, is_holiday: false },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      // 7月
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト休み' },
+      { month: 7, week_number: 2, unit_name: '9', target_sequence_order: 18, is_holiday: false },
+      { month: 7, week_number: 3, unit_name: '9', target_sequence_order: 18, is_holiday: false },
+      { month: 7, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false },
+      // 8月
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 18, is_holiday: true, holiday_name: 'iスクール模試' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 18, is_holiday: true, holiday_name: 'お盆休み' },
+      { month: 8, week_number: 3, unit_name: '10', target_sequence_order: 18, is_holiday: false },
+      { month: 8, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false },
+      // 9月
+      { month: 9, week_number: 1, unit_name: '11', target_sequence_order: 18, is_holiday: false },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' }
+    ];
+
+    mathPlans.forEach(p => {
+      seed.push({
+        id: `mp-math-${p.month}-${p.week_number}`,
+        grade: '中3',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    englishPlans.forEach(p => {
+      seed.push({
+        id: `mp-eng-${p.month}-${p.week_number}`,
+        grade: '中3',
+        subject: '英語',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    return this.getMockData('milestone_plans', seed);
+  }
+
+  public async saveMilestonePlan(plan: MilestonePlan): Promise<MilestonePlan> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('milestone_plans').upsert(plan).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getMilestonePlans();
+      const idx = list.findIndex(p => p.id === plan.id);
+      if (idx >= 0) list[idx] = plan;
+      else list.push(plan);
+      this.saveMockData('milestone_plans', list);
+      return plan;
+    }
+  }
+
   // Clear mock data if needed (for testing or reset)
   public clearMockData(): void {
     if (!this.isBrowser()) return;
@@ -837,6 +969,7 @@ class DatabaseService {
     localStorage.removeItem('tentoru_teacher_corrections_log');
     localStorage.removeItem('tentoru_mini_test_results');
     localStorage.removeItem('tentoru_homework_results');
+    localStorage.removeItem('tentoru_milestone_plans');
   }
 }
 

@@ -14,7 +14,8 @@ import {
   PromptSetting,
   TeacherCorrectionLog,
   MiniTestResult,
-  HomeworkResult
+  HomeworkResult,
+  MilestonePlan
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -22,7 +23,9 @@ import {
   calculateMockExamPassRate, 
   learnFromTeacherCorrections, 
   generateAIReportText,
-  PersonalStyle
+  PersonalStyle,
+  calculateProgressGap,
+  getYearMonthWeek
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 
@@ -36,7 +39,9 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones'>('schedule');
+  const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
+  const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
@@ -116,11 +121,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     const listSch = db.getSchools();
     const listCodes = db.getSchoolCodesMaster();
     const listEth = db.getExamThresholdsMaster();
+    const listMps = db.getMilestonePlans();
+    const listUnits = db.getCurriculumUnits();
 
     setStudents(listSt);
     setSchools(listSch);
     setSchoolCodes(listCodes);
     setExamThresholds(listEth);
+    setMilestonePlans(listMps);
+    setAllCurriculumUnits(listUnits);
 
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
@@ -603,10 +612,12 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
 
     const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
       selectedStudent,
-      studentTasks,
+      db.getLearningTasks(),
       scheduleDate,
       futureDates,
-      periodCount // 1日あたりの上限タスク数を現在の設定コマ数とする
+      periodCount,
+      milestonePlans,
+      allCurriculumUnits
     );
 
     if (isPunked) {
@@ -909,6 +920,19 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                 if (st.status === 'fast') statusClass = styles.statusFast;
                 if (st.status === 'warning') statusClass = styles.statusWarning;
 
+                const sub = st.grade.startsWith('中') ? '数学' : '算数';
+                const allTasks = db.getLearningTasks();
+                const { gapWeeks } = calculateProgressGap(st, allTasks, milestonePlans, allCurriculumUnits, scheduleDate, sub);
+                
+                let gapBadge = null;
+                if (gapWeeks < 0) {
+                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#fef2f2', color: '#dc2626', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fee2e2' }}>{Math.abs(gapWeeks)}週遅れ ⚠️</span>;
+                } else if (gapWeeks > 0) {
+                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#f0fdf4', color: '#16a34a', padding: '2px 6px', borderRadius: '4px', border: '1px solid #dcfce7' }}>{gapWeeks}週進み ⚡</span>;
+                } else {
+                  gapBadge = <span style={{ marginLeft: '8px', fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
+                }
+
                 return (
                   <div 
                     key={st.id} 
@@ -919,8 +943,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       setStartUnitId(st.start_unit_id || '');
                     }}
                   >
-                    <span className={styles.studentName}>{st.name} ({st.grade})</span>
-                    <span className={`${styles.statusIcon} ${statusClass}`} title={`状況: ${st.status}`} />
+                    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className={styles.studentName}>{st.name} ({st.grade})</span>
+                        <span className={`${styles.statusIcon} ${statusClass}`} title={`状況: ${st.status}`} />
+                      </div>
+                      <div style={{ marginTop: '4px' }}>
+                        {gapBadge}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -964,6 +995,12 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   onClick={() => setActiveTab('schedule')}
                 >
                   学習計画・コマ割り
+                </button>
+                <button 
+                  className={`${styles.tabBtn} ${activeTab === 'milestones' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('milestones')}
+                >
+                  年間計画（マイルストーン）
                 </button>
                 <button 
                   className={`${styles.tabBtn} ${activeTab === 'curriculum' ? styles.tabBtnActive : ''}`}
@@ -1734,6 +1771,157 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 7: 年間計画 (マイルストーン可視化) */}
+              {activeTab === 'milestones' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    <span>年間基準計画（マイルストーン） & 進捗現在地ハイライト</span>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 'normal' }}>
+                      スプレッドシート基準計画との進捗ギャップを可視化します
+                    </span>
+                  </div>
+
+                  <div style={{ marginBottom: '16px', display: 'flex', gap: '16px', alignItems: 'center' }}>
+                    <div>
+                      <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
+                      <select 
+                        value={selectedSubject} 
+                        onChange={e => setSelectedSubject(e.target.value)} 
+                        className={styles.select}
+                        style={{ width: '120px', padding: '6px' }}
+                      >
+                        {selectedStudent.grade.startsWith('中') ? (
+                          <>
+                            <option value="数学">数学</option>
+                            <option value="英語">英語</option>
+                          </>
+                        ) : (
+                          <option value="算数">算数</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div style={{ fontSize: '0.9rem' }}>
+                      現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
+                    </div>
+                  </div>
+
+                  {/* スプレッドシート風グリッド */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #cbd5e1', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #94a3b8' }}>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '60px', textAlign: 'center' }}>月</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '60px', textAlign: 'center' }}>週</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'left' }}>目標完了単元 (基準マスタ)</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '150px', textAlign: 'center' }}>到達順序 (テーマ数)</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '220px', textAlign: 'left' }}>進捗ハイライト</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {milestonePlans
+                          .filter(p => p.grade === selectedStudent.grade && p.subject === selectedSubject && p.course === 'standard')
+                          .sort((a, b) => {
+                            const monthOrder = (m: number) => m >= 3 ? m : m + 12;
+                            const am = monthOrder(a.month);
+                            const bm = monthOrder(b.month);
+                            if (am !== bm) return am - bm;
+                            return a.week_number - b.week_number;
+                          })
+                          .map((plan, idx, arr) => {
+                            const { month: currMonth, week_number: currWeek } = getYearMonthWeek(scheduleDate);
+                            const isTodayWeek = plan.month === currMonth && plan.week_number === currWeek;
+
+                            // 生徒の現在進捗を取得
+                            const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
+                            const subjectUnits = allCurriculumUnits.filter(u => u.subject === selectedSubject);
+                            const subjectUnitIds = new Set(subjectUnits.map(u => u.id));
+                            const completedSubjectTasks = studentCompletedTasks.filter(t => subjectUnitIds.has(t.unit_id));
+
+                            let studentSeq = 0;
+                            if (completedSubjectTasks.length > 0) {
+                              const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
+                              const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
+                              studentSeq = Math.max(0, ...completedUnits.map(u => u.sequence_order));
+                            } else if (selectedStudent.start_unit_id) {
+                              const startUnit = subjectUnits.find(u => u.id === selectedStudent.start_unit_id);
+                              if (startUnit) {
+                                studentSeq = startUnit.sequence_order - 1;
+                              }
+                            }
+
+                            const target = plan.target_sequence_order ?? 0;
+                            const isStudentCurrentWeek = !plan.is_holiday && (
+                              (idx === 0 && studentSeq <= target) ||
+                              (studentSeq > (arr[idx - 1]?.target_sequence_order ?? 0) && studentSeq <= target)
+                            );
+
+                            let rowBg = '#ffffff';
+                            let rowBorder = '1px solid #cbd5e1';
+                            if (plan.is_holiday) {
+                              rowBg = '#ffe4e6';
+                            } else if (isTodayWeek) {
+                              rowBg = '#eff6ff';
+                              rowBorder = '2px solid #3b82f6';
+                            }
+
+                            return (
+                              <tr 
+                                key={plan.id} 
+                                style={{ 
+                                  backgroundColor: rowBg, 
+                                  fontWeight: isTodayWeek ? 'bold' : 'normal',
+                                  border: rowBorder
+                                }}
+                              >
+                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
+                                  {plan.month}月
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center' }}>
+                                  {plan.week_number}週
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '10px' }}>
+                                  {plan.is_holiday ? (
+                                    <span style={{ color: '#be123c', fontWeight: 'bold' }}>🎉 {plan.holiday_name} (休校/テスト対策週)</span>
+                                  ) : (
+                                    <span>{plan.unit_name || '未設定'}</span>
+                                  )}
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center' }}>
+                                  {plan.is_holiday ? '-' : `${target} テーマまで`}
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '10px' }}>
+                                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {isTodayWeek && (
+                                      <span style={{ backgroundColor: '#2563eb', color: '#ffffff', padding: '2px 8px', borderRadius: '9999px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center' }}>
+                                        🎯 目標週 (基準)
+                                      </span>
+                                    )}
+                                    {isStudentCurrentWeek && (
+                                      <span style={{ backgroundColor: '#10b981', color: '#ffffff', padding: '2px 8px', borderRadius: '9999px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center' }}>
+                                        📍 {selectedStudent.name} 現在地 ({studentSeq}テーマ完了)
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
+                    <p style={{ margin: '0 0 4px 0' }}><strong>💡 年間計画の読み方:</strong></p>
+                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                      <li><strong>🎯 目標週 (基準):</strong> 今日の日付（{scheduleDate}）に基づいて、本来進んでいるべき基準の週をハイライトしています。</li>
+                      <li><strong>📍 現在地:</strong> 生徒の現在完了している最大単元順序に基づき、どのマイルストーンの位置にいるかを表示しています。</li>
+                      <li>「現在地」が「目標週」より上にある場合は<strong>遅れ（赤警告）</strong>、下にある場合は<strong>前倒し（緑リード）</strong>となります。</li>
+                    </ul>
                   </div>
                 </div>
               )}

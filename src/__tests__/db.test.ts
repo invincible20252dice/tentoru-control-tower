@@ -393,6 +393,9 @@ describe('Database Service CRUD Tests', () => {
     await expect(db.saveHomeworkResult(hwRes)).rejects.toThrow('Database Error');
     await expect(db.saveHomeworkResults([hwRes])).rejects.toThrow('Database Error');
     await expect(db.deleteHomeworkResult('sup-1')).rejects.toThrow('Database Error');
+
+    const mp = { id: 'sup-1', grade: '中3', subject: '数学', course: 'standard' as const, month: 6, week_number: 1, is_holiday: false };
+    await expect(db.saveMilestonePlan(mp)).rejects.toThrow('Database Error');
   });
 
   // JSON parse error cover
@@ -506,5 +509,28 @@ describe('Database Service CRUD Tests', () => {
     await db.deleteHomeworkResult('hw-test-1');
     expect(db.getHomeworkResults().find(h => h.id === 'hw-test-1')).toBeUndefined();
     await db.deleteHomeworkResult('hw-test-2');
+  });
+
+  it('should manage milestone plans in Mock mode', async () => {
+    const mp = {
+      id: 'mp-test-1',
+      grade: '中3',
+      subject: '数学',
+      course: 'standard' as const,
+      month: 6,
+      week_number: 1,
+      unit_name: 'テスト単元',
+      target_sequence_order: 10,
+      is_holiday: false
+    };
+    const savedMp = await db.saveMilestonePlan(mp);
+    expect(savedMp.id).toBe('mp-test-1');
+
+    const mps = db.getMilestonePlans();
+    expect(mps.find(m => m.id === 'mp-test-1')).toBeDefined();
+
+    // overwrite
+    const updatedMp = await db.saveMilestonePlan({ ...mp, target_sequence_order: 12 });
+    expect(updatedMp.target_sequence_order).toBe(12);
   });
 });

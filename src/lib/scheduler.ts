@@ -1,8 +1,97 @@
-import { CurriculumUnit, LearningTask, Student, ExamThresholdMaster } from './db';
+import { CurriculumUnit, LearningTask, Student, ExamThresholdMaster, MilestonePlan } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
 };
+
+// -------------------------------------------------------------
+// 0. 日付・進捗ギャップユーティリティ
+// -------------------------------------------------------------
+export function getYearMonthWeek(dateStr: string): { month: number; week_number: number } {
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const dayOfMonth = date.getDate();
+  
+  // 月曜日を週の始まりとする (0:日, 1:月, ..., 6:土)
+  const firstDay = new Date(year, date.getMonth(), 1);
+  const firstDayOfWeek = firstDay.getDay();
+  const adjFirstDay = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+  const weekNum = Math.ceil((dayOfMonth + adjFirstDay) / 7);
+  
+  return {
+    month,
+    week_number: Math.min(4, weekNum)
+  };
+}
+
+export function calculateProgressGap(
+  student: Student,
+  allTasks: LearningTask[],
+  milestonePlans: MilestonePlan[],
+  curriculumUnits: CurriculumUnit[],
+  currentDateStr: string,
+  subject: string
+): { gapWeeks: number; status: 'normal' | 'fast' | 'warning' } {
+  const { month: currMonth, week_number: currWeek } = getYearMonthWeek(currentDateStr);
+  
+  const matchedPlans = milestonePlans
+    .filter(p => p.grade === student.grade && p.subject === subject && p.course === 'standard')
+    .sort((a, b) => {
+      const monthOrder = (m: number) => m >= 3 ? m : m + 12;
+      const am = monthOrder(a.month);
+      const bm = monthOrder(b.month);
+      if (am !== bm) return am - bm;
+      return a.week_number - b.week_number;
+    });
+
+  if (matchedPlans.length === 0) {
+    return { gapWeeks: 0, status: 'normal' };
+  }
+
+  const todayIdx = matchedPlans.findIndex(p => p.month === currMonth && p.week_number === currWeek);
+  if (todayIdx === -1) {
+    return { gapWeeks: 0, status: 'normal' };
+  }
+
+  const studentTasks = allTasks.filter(t => t.student_id === student.id && t.status === 'completed');
+  const subjectUnits = curriculumUnits.filter(u => u.subject === subject);
+  const subjectUnitIds = new Set(subjectUnits.map(u => u.id));
+  const completedSubjectTasks = studentTasks.filter(t => subjectUnitIds.has(t.unit_id));
+  
+  let currentSequence = 0;
+  if (completedSubjectTasks.length > 0) {
+    const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
+    const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
+    currentSequence = Math.max(0, ...completedUnits.map(u => u.sequence_order));
+  } else if (student.start_unit_id) {
+    const startUnit = subjectUnits.find(u => u.id === student.start_unit_id);
+    if (startUnit) {
+      currentSequence = startUnit.sequence_order - 1;
+    }
+  }
+
+  let studentIdx = -1;
+  for (let i = 0; i < matchedPlans.length; i++) {
+    const target = matchedPlans[i].target_sequence_order ?? 0;
+    if (target <= currentSequence) {
+      studentIdx = i;
+    } else {
+      break;
+    }
+  }
+
+  const gapWeeks = studentIdx - todayIdx;
+
+  let status: 'normal' | 'fast' | 'warning' = 'normal';
+  if (gapWeeks <= -1) {
+    status = 'warning';
+  } else if (gapWeeks >= 1) {
+    status = 'fast';
+  }
+
+  return { gapWeeks, status };
+}
 
 // -------------------------------------------------------------
 // 1. カリキュラム順序変更時の未来タスク再編成
@@ -68,14 +157,26 @@ export function rescheduleDelayedTasks(
   allTasks: LearningTask[],
   currentDate: string,
   futureDates: string[],
-  maxDailyTasks: number = schedulerConfig.maxDailyTasksDefault
+  maxDailyTasks: number = schedulerConfig.maxDailyTasksDefault,
+  milestonePlans: MilestonePlan[] = [],
+  curriculumUnits: CurriculumUnit[] = []
 ): { updatedTasks: LearningTask[]; updatedStudent: Student; isPunked: boolean } {
   const studentTasks = allTasks.filter(t => t.student_id === student.id);
   const otherTasks = allTasks.filter(t => t.student_id !== student.id);
 
-  // 2日連続未達成のチェック
-  // 簡易チェック：今日(currentDate)と昨日(currentDate - 1)に予定されていたタスクで、完了していないものがあるか？
-  // ※ここではテスト条件「2日連続未達成」を判定するために、過去の日付で status !== 'completed' のものを判定します
+  // 1. 進捗ギャップ（遅れ週）の確認
+  let maxWeeksBehind = 0;
+  if (milestonePlans.length > 0 && curriculumUnits.length > 0) {
+    const subjects = Array.from(new Set(curriculumUnits.map(u => u.subject)));
+    for (const sub of subjects) {
+      const { gapWeeks } = calculateProgressGap(student, allTasks, milestonePlans, curriculumUnits, currentDate, sub);
+      if (gapWeeks < 0) {
+        maxWeeksBehind = Math.max(maxWeeksBehind, Math.abs(gapWeeks));
+      }
+    }
+  }
+
+  // 2. 2日連続未達成のチェック
   const currentMs = new Date(currentDate).getTime();
   const oneDayMs = 24 * 60 * 60 * 1000;
   const yesterdayDate = new Date(currentMs - oneDayMs).toISOString().split('T')[0];
@@ -88,12 +189,12 @@ export function rescheduleDelayedTasks(
 
   const is2DaysConsecutiveUncompleted = yesterdayUncompleted && todayUncompleted;
 
-  // 2日連続未達成でない場合は何もしない
-  if (!is2DaysConsecutiveUncompleted) {
+  // 遅れがなく、かつ2日連続未達成でもない場合は何もしない
+  if (maxWeeksBehind === 0 && !is2DaysConsecutiveUncompleted) {
     return { updatedTasks: allTasks, updatedStudent: student, isPunked: false };
   }
 
-  // 未完了タスクの抽出（今日以前の未完了タスク＋今日より未来の未完了タスク）
+  // 未完了タスクの抽出
   const uncompletedTasks = studentTasks.filter(t => t.status !== 'completed' && t.status !== 'skipped');
   const completedTasks = studentTasks.filter(t => t.status === 'completed' || t.status === 'skipped');
 
@@ -101,14 +202,54 @@ export function rescheduleDelayedTasks(
     return { updatedTasks: allTasks, updatedStudent: student, isPunked: false };
   }
 
+  // 3. デッドライン（目標期日：今週の週末日曜日）の特定
+  const currDateObj = new Date(currentDate);
+  const day = currDateObj.getDay();
+  const diffToSunday = day === 0 ? 0 : 7 - day;
+  const deadlineSunday = new Date(currDateObj.getTime() + diffToSunday * oneDayMs);
+  const deadlineDateStr = deadlineSunday.toISOString().split('T')[0];
+
+  // 4. 休校週の日付を除外した、デッドラインまでの有効な割り当て可能日を抽出
+  const validFutureDates = futureDates.filter(dStr => {
+    if (dStr > deadlineDateStr) return false;
+
+    const { month: dMonth, week_number: dWeek } = getYearMonthWeek(dStr);
+    const isHoliday = milestonePlans.some(p => 
+      p.grade === student.grade && 
+      p.course === 'standard' && 
+      p.month === dMonth && 
+      p.week_number === dWeek && 
+      p.is_holiday
+    );
+    return !isHoliday;
+  });
+
+  // もしデッドラインまでに割り当て可能な日がない場合は、全体から休校週を除外した日付を使用
+  let targetDates = validFutureDates;
+  if (targetDates.length === 0) {
+    targetDates = futureDates.filter(dStr => {
+      const { month: dMonth, week_number: dWeek } = getYearMonthWeek(dStr);
+      return !milestonePlans.some(p => 
+        p.grade === student.grade && 
+        p.course === 'standard' && 
+        p.month === dMonth && 
+        p.week_number === dWeek && 
+        p.is_holiday
+      );
+    });
+  }
+
+  if (targetDates.length === 0) {
+    targetDates = futureDates;
+  }
+
   // 1日あたりの必要タスク数を算出
   const totalTasks = uncompletedTasks.length;
-  const daysCount = futureDates.length;
+  const daysCount = targetDates.length;
   const tasksPerDay = Math.ceil(totalTasks / daysCount);
 
   // パンク判定
   if (tasksPerDay > maxDailyTasks) {
-    // 計画パンク：自動リスケジュールをストップし、生徒ステータスを warning に
     const updatedStudent: Student = {
       ...student,
       status: 'warning',
@@ -119,7 +260,7 @@ export function rescheduleDelayedTasks(
   // 均等配分する
   const rescheduledTasks = uncompletedTasks.map((task, index) => {
     const dateIndex = Math.floor(index / tasksPerDay);
-    const scheduled_date = futureDates[dateIndex];
+    const scheduled_date = targetDates[Math.min(dateIndex, targetDates.length - 1)];
     return {
       ...task,
       scheduled_date,
@@ -128,7 +269,7 @@ export function rescheduleDelayedTasks(
 
   const updatedStudent: Student = {
     ...student,
-    status: 'normal', // パンク解消またはノーマル状態へ
+    status: 'normal',
   };
 
   return {

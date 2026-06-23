@@ -6,9 +6,11 @@ import {
   calculateMockExamPassRate,
   generateAIReportText,
   learnFromTeacherCorrections,
-  schedulerConfig
+  schedulerConfig,
+  getYearMonthWeek,
+  calculateProgressGap
 } from '../lib/scheduler';
-import { CurriculumUnit, LearningTask, Student, TestRecord, ExamThresholdMaster } from '../lib/db';
+import { CurriculumUnit, LearningTask, Student, TestRecord, ExamThresholdMaster, MilestonePlan } from '../lib/db';
 
 describe('Scheduler and Core Logic Tests', () => {
 
@@ -337,5 +339,137 @@ describe('Scheduler and Core Logic Tests', () => {
 
     const reportResNoEx = generateAIReportText(unpunctuatedText, { exclamationsCount: 0, positiveWords: [] });
     expect(reportResNoEx.endsWith('。')).toBe(true);
+  });
+
+  // 新機能: 年間計画（マイルストーン）逆算型自動スケジューリング機能のテスト
+  describe('Milestone-based Reverse Scheduling & Progress Gap Tests', () => {
+    it('should correctly calculate year, month, and week number from a date string', () => {
+      // 2026-06-01: 月曜日 (6月の第1週)
+      expect(getYearMonthWeek('2026-06-01')).toEqual({ month: 6, week_number: 1 });
+      // 2026-06-08: 月曜日 (6月の第2週)
+      expect(getYearMonthWeek('2026-06-08')).toEqual({ month: 6, week_number: 2 });
+      // 2026-03-01: 日曜日 (3月の第1週 - adjFirstDayが日曜日のケース)
+      expect(getYearMonthWeek('2026-03-01')).toEqual({ month: 3, week_number: 1 });
+      // 2026-06-30: 火曜日 (6月の第5週 -> 4週にクランプされる)
+      expect(getYearMonthWeek('2026-06-30').week_number).toBe(4);
+    });
+
+    it('should calculate progress gap correctly based on milestone plans and student progress', () => {
+      const student: Student = {
+        id: 'std-test',
+        student_id: 'test',
+        name: 'テスト生徒',
+        email: 'test@example.com',
+        grade: '中3',
+        school_id: 'sch-1',
+        status: 'normal',
+        start_unit_id: null,
+        created_at: ''
+      };
+
+      // 1月・2月のマイルストーンを混ぜて monthOrder (m < 3) のソートブランチをカバー
+      const milestonePlans: MilestonePlan[] = [
+        { id: 'mp-1', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 1, target_sequence_order: 10, is_holiday: false },
+        { id: 'mp-2', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 2, target_sequence_order: 20, is_holiday: false },
+        { id: 'mp-3', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 3, target_sequence_order: 30, is_holiday: false },
+        { id: 'mp-jan', grade: '中3', subject: '数学', course: 'standard', month: 1, week_number: 1, target_sequence_order: 40, is_holiday: false },
+        { id: 'mp-feb', grade: '中3', subject: '数学', course: 'standard', month: 2, week_number: 1, target_sequence_order: 50, is_holiday: false }
+      ];
+
+      const curriculumUnits: CurriculumUnit[] = [
+        { id: 'u-1', school_id: 'sch-1', subject: '数学', name: '単元1', sequence_order: 10, created_at: '' },
+        { id: 'u-2', school_id: 'sch-1', subject: '数学', name: '単元2', sequence_order: 20, created_at: '' },
+        { id: 'u-3', school_id: 'sch-1', subject: '数学', name: '単元3', sequence_order: 30, created_at: '' }
+      ];
+
+      // タスク履歴：単元1まで完了 (sequence_order = 10)
+      const tasks: LearningTask[] = [
+        { id: 't-1', student_id: 'std-test', unit_id: 'u-1', status: 'completed', video_watched: true, test_passed: true, scheduled_date: '2026-06-01', created_at: '' }
+      ];
+
+      const result = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-06-08', '数学');
+      expect(result.gapWeeks).toBe(-1);
+      expect(result.status).toBe('warning');
+
+      const result2 = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-06-01', '数学');
+      expect(result2.gapWeeks).toBe(0);
+      expect(result2.status).toBe('normal');
+
+      const tasksLead: LearningTask[] = [
+        { id: 't-1', student_id: 'std-test', unit_id: 'u-1', status: 'completed', video_watched: true, test_passed: true, scheduled_date: '2026-06-01', created_at: '' },
+        { id: 't-2', student_id: 'std-test', unit_id: 'u-2', status: 'completed', video_watched: true, test_passed: true, scheduled_date: '2026-06-02', created_at: '' }
+      ];
+      const result3 = calculateProgressGap(student, tasksLead, milestonePlans, curriculumUnits, '2026-06-01', '数学');
+      expect(result3.gapWeeks).toBe(1);
+      expect(result3.status).toBe('fast');
+
+      // マイルストーン定義外（例：12月）の日付の場合 (todayIdx === -1)
+      const resultEmpty = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-12-01', '数学');
+      expect(resultEmpty.gapWeeks).toBe(0);
+      expect(resultEmpty.status).toBe('normal');
+    });
+
+    it('should reschedule tasks up to current week deadline and skip holiday weeks during reverse scheduling', () => {
+      const student: Student = {
+        id: 'std-test',
+        student_id: 'test',
+        name: 'テスト生徒',
+        email: 'test@example.com',
+        grade: '中3',
+        school_id: 'sch-1',
+        status: 'normal',
+        start_unit_id: null,
+        created_at: ''
+      };
+
+      const milestonePlans: MilestonePlan[] = [
+        { id: 'mp-1', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 1, target_sequence_order: 10, is_holiday: false },
+        { id: 'mp-2', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 2, target_sequence_order: 20, is_holiday: false },
+        { id: 'mp-3', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 3, target_sequence_order: 20, is_holiday: true, holiday_name: 'お休み' }
+      ];
+
+      const curriculumUnits: CurriculumUnit[] = [
+        { id: 'u-1', school_id: 'sch-1', subject: '数学', name: '単元1', sequence_order: 10, created_at: '' },
+        { id: 'u-2', school_id: 'sch-1', subject: '数学', name: '単元2', sequence_order: 20, created_at: '' }
+      ];
+
+      const tasks: LearningTask[] = [
+        { id: 't-1', student_id: 'std-test', unit_id: 'u-1', scheduled_date: '2026-06-07', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+        { id: 't-2', student_id: 'std-test', unit_id: 'u-2', scheduled_date: '2026-06-08', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' }
+      ];
+
+      const futureDates = ['2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-15'];
+
+      const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
+        student,
+        tasks,
+        '2026-06-08',
+        futureDates,
+        3,
+        milestonePlans,
+        curriculumUnits
+      );
+
+      expect(isPunked).toBe(false);
+      const holidayTask = updatedTasks.find(t => t.scheduled_date === '2026-06-15');
+      expect(holidayTask).toBeUndefined();
+
+      const validDates = ['2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12'];
+      updatedTasks.filter(t => t.student_id === student.id && t.status !== 'completed').forEach(t => {
+        expect(validDates).toContain(t.scheduled_date);
+      });
+
+      // currentDate が日曜日 (2026-06-14) である場合をテスト (diffToSunday の day === 0 パス)
+      const resSunday = rescheduleDelayedTasks(
+        student,
+        tasks,
+        '2026-06-14',
+        futureDates,
+        3,
+        milestonePlans,
+        curriculumUnits
+      );
+      expect(resSunday.isPunked).toBeDefined();
+    });
   });
 });

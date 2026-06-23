@@ -1053,7 +1053,7 @@ describe('UI Components Render & Interaction Tests', () => {
   });
 
   it('should support edge cases, unit sorting, custom task updates, and AI report manual corrections in TeacherDashboard', async () => {
-    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const { container, unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
     
     // 生徒を選択する
     const studentItem = screen.getByText(/佐藤 拓海/);
@@ -1208,6 +1208,38 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // 反映とフォールバックの確認
     expect(screen.getByText('不明な生徒')).toBeInTheDocument();
+
+    // 6. 年間計画タブのテスト (Milestones)
+    // 一旦完了タスクを削除し、かつ平日（4月2週）に日付を変更して全ブランチを通す
+    await db.deleteLearningTasksByStudent('std-1');
+
+    // 日付変更のためにまず学習計画タブに戻る
+    const tabScheduleForMilestones = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(tabScheduleForMilestones);
+
+    const dateInput = container.querySelector('input[type="date"]')!;
+    fireEvent.change(dateInput, { target: { value: '2026-04-10' } });
+
+    const tabMilestones = screen.getByText('年間計画（マイルストーン）');
+    fireEvent.click(tabMilestones);
+    await waitFor(() => {
+      expect(screen.getByText('年間基準計画（マイルストーン） & 進捗現在地ハイライト')).toBeInTheDocument();
+    });
+
+    // 目標週バッジ、現在地バッジが表示されているか確認
+    expect(screen.getByText('🎯 目標週 (基準)')).toBeInTheDocument();
+    expect(screen.getAllByText(/現在地/).length).toBeGreaterThan(0);
+
+    // 教科の切り替え (英語へ) を追加し、onChange ブランチをカバーする
+    const selectSubjectElement = container.querySelector('select[value="数学"]') as HTMLSelectElement;
+    if (selectSubjectElement) {
+      fireEvent.change(selectSubjectElement, { target: { value: '英語' } });
+    }
+
+    // 元に戻す
+    fireEvent.click(tabScheduleForMilestones);
+    fireEvent.change(dateInput, { target: { value: '2026-06-19' } });
+    await db.saveLearningTasks(db.getLearningTasks()); // シード初期タスクの復元
 
     unmount();
   });
