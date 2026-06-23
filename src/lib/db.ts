@@ -19,6 +19,7 @@ export interface Student {
   start_unit_id: string | null;
   period_count?: number;
   created_at: string;
+  level?: 'A' | 'B' | 'C';
 }
 
 export interface MilestonePlan {
@@ -33,6 +34,19 @@ export interface MilestonePlan {
   is_holiday: boolean; // GW休暇などの休校週フラグ
   holiday_name?: string; // 'GW休暇', '定期テスト休み' など
   created_at?: string;
+  level?: 'A' | 'B' | 'C';
+  chapter?: string;
+  target_theme_name?: string;
+}
+
+export interface MilestoneTemplate {
+  id: string;
+  name: string;
+  grade: string;
+  subject: string;
+  level: 'A' | 'B' | 'C';
+  plans: MilestonePlan[];
+  created_at: string;
 }
 
 export interface CurriculumUnit {
@@ -842,82 +856,163 @@ class DatabaseService {
     // 中3 通常コース 数学
     const mathPlans: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
       // 3月
-      { month: 3, week_number: 1, unit_name: '単元1', target_sequence_order: 9, is_holiday: false },
-      { month: 3, week_number: 2, unit_name: '単元1', target_sequence_order: 18, is_holiday: false },
-      { month: 3, week_number: 3, unit_name: '単元1', target_sequence_order: 27, is_holiday: false },
-      { month: 3, week_number: 4, unit_name: '単元1', target_sequence_order: 37, is_holiday: false },
+      { month: 3, week_number: 1, unit_name: '単元1', target_sequence_order: 9, is_holiday: false, level: 'A', chapter: '第1章', target_theme_name: '正の数・負の数' },
+      { month: 3, week_number: 2, unit_name: '単元1', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: '第1章', target_theme_name: '正の数・負の数' },
+      { month: 3, week_number: 3, unit_name: '単元1', target_sequence_order: 27, is_holiday: false, level: 'A', chapter: '第1章', target_theme_name: '正の数・負の数' },
+      { month: 3, week_number: 4, unit_name: '単元1', target_sequence_order: 37, is_holiday: false, level: 'A', chapter: '第1章', target_theme_name: '正の数・負の数' },
       // 4月
-      { month: 4, week_number: 1, unit_name: '単元2', target_sequence_order: 38, is_holiday: false },
-      { month: 4, week_number: 2, unit_name: '単元2', target_sequence_order: 39, is_holiday: false },
-      { month: 4, week_number: 3, unit_name: '単元2', target_sequence_order: 41, is_holiday: false },
-      { month: 4, week_number: 4, unit_name: '単元2', target_sequence_order: 41, is_holiday: false },
+      { month: 4, week_number: 1, unit_name: '単元2', target_sequence_order: 38, is_holiday: false, level: 'A', chapter: '第2章', target_theme_name: '文字を使った式' },
+      { month: 4, week_number: 2, unit_name: '単元2', target_sequence_order: 39, is_holiday: false, level: 'A', chapter: '第2章', target_theme_name: '式の値' },
+      { month: 4, week_number: 3, unit_name: '単元2', target_sequence_order: 41, is_holiday: false, level: 'A', chapter: '第2章', target_theme_name: '文字式の計算（加減）' },
+      { month: 4, week_number: 4, unit_name: '単元2', target_sequence_order: 41, is_holiday: false, level: 'A', chapter: '第2章', target_theme_name: '文字式の計算（加減）' },
       // 5月
-      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 41, is_holiday: true, holiday_name: 'GW休暇' },
-      { month: 5, week_number: 2, unit_name: '単元3', target_sequence_order: 43, is_holiday: false },
-      { month: 5, week_number: 3, unit_name: '単元3', target_sequence_order: 45, is_holiday: false },
-      { month: 5, week_number: 4, unit_name: '単元3', target_sequence_order: 46, is_holiday: false },
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 41, is_holiday: true, holiday_name: 'GW休暇', level: 'A', chapter: 'GW休暇', target_theme_name: '' },
+      { month: 5, week_number: 2, unit_name: '単元3', target_sequence_order: 43, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '一次方程式' },
+      { month: 5, week_number: 3, unit_name: '単元3', target_sequence_order: 45, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '一次方程式' },
+      { month: 5, week_number: 4, unit_name: '単元3', target_sequence_order: 46, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '一次方程式' },
       // 6月
-      { month: 6, week_number: 1, unit_name: '単元3', target_sequence_order: 48, is_holiday: false },
-      { month: 6, week_number: 2, unit_name: '単元3', target_sequence_order: 49, is_holiday: false },
-      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
-      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      { month: 6, week_number: 1, unit_name: '単元3', target_sequence_order: 48, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '一次方程式' },
+      { month: 6, week_number: 2, unit_name: '単元3', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '一次方程式' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
       // 7月
-      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト休み' },
-      { month: 7, week_number: 2, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
-      { month: 7, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
-      { month: 7, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト休み', level: 'A', chapter: 'テスト休み', target_theme_name: '' },
+      { month: 7, week_number: 2, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '復習', target_theme_name: '復習' },
+      { month: 7, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '復習', target_theme_name: '復習' },
+      { month: 7, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '復習', target_theme_name: '復習' },
       // 8月
-      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 49, is_holiday: true, holiday_name: 'iスクール模試' },
-      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 49, is_holiday: true, holiday_name: 'お盆休み' },
-      { month: 8, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
-      { month: 8, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false },
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 49, is_holiday: true, holiday_name: 'iスクール模試', level: 'A', chapter: '模試', target_theme_name: '' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 49, is_holiday: true, holiday_name: 'お盆休み', level: 'A', chapter: 'お盆休み', target_theme_name: '' },
+      { month: 8, week_number: 3, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '復習', target_theme_name: '復習' },
+      { month: 8, week_number: 4, unit_name: '単元1〜3の復習', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '復習', target_theme_name: '復習' },
       // 9月
-      { month: 9, week_number: 1, unit_name: '予備', target_sequence_order: 49, is_holiday: false },
-      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' },
-      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' }
+      { month: 9, week_number: 1, unit_name: '予備', target_sequence_order: 49, is_holiday: false, level: 'A', chapter: '予備', target_theme_name: '' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: 'テスト対策', target_theme_name: '' }
     ];
 
     // 中3 通常コース 英語
     const englishPlans: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
       // 3月
-      { month: 3, week_number: 1, unit_name: '1', target_sequence_order: 1, is_holiday: false },
-      { month: 3, week_number: 2, unit_name: '1', target_sequence_order: 3, is_holiday: false },
-      { month: 3, week_number: 3, unit_name: '2', target_sequence_order: 4, is_holiday: false },
-      { month: 3, week_number: 4, unit_name: '2', target_sequence_order: 6, is_holiday: false },
+      { month: 3, week_number: 1, unit_name: '1', target_sequence_order: 1, is_holiday: false, level: 'A', chapter: 'Lesson 1', target_theme_name: 'Be動詞' },
+      { month: 3, week_number: 2, unit_name: '1', target_sequence_order: 3, is_holiday: false, level: 'A', chapter: 'Lesson 1', target_theme_name: 'Be動詞疑問文' },
+      { month: 3, week_number: 3, unit_name: '2', target_sequence_order: 4, is_holiday: false, level: 'A', chapter: 'Lesson 2', target_theme_name: '一般動詞' },
+      { month: 3, week_number: 4, unit_name: '2', target_sequence_order: 6, is_holiday: false, level: 'A', chapter: 'Lesson 2', target_theme_name: '一般動詞疑問文' },
       // 4月
-      { month: 4, week_number: 1, unit_name: '3', target_sequence_order: 7, is_holiday: false },
-      { month: 4, week_number: 2, unit_name: '3', target_sequence_order: 8, is_holiday: false },
-      { month: 4, week_number: 3, unit_name: '4', target_sequence_order: 9, is_holiday: false },
-      { month: 4, week_number: 4, unit_name: '4', target_sequence_order: 10, is_holiday: false },
+      { month: 4, week_number: 1, unit_name: '3', target_sequence_order: 7, is_holiday: false, level: 'A', chapter: 'Lesson 3', target_theme_name: '現在進行形' },
+      { month: 4, week_number: 2, unit_name: '3', target_sequence_order: 8, is_holiday: false, level: 'A', chapter: 'Lesson 3', target_theme_name: '現在進行形否定疑問' },
+      { month: 4, week_number: 3, unit_name: '4', target_sequence_order: 9, is_holiday: false, level: 'A', chapter: 'Lesson 4', target_theme_name: '規則動詞の過去形' },
+      { month: 4, week_number: 4, unit_name: '4', target_sequence_order: 10, is_holiday: false, level: 'A', chapter: 'Lesson 4', target_theme_name: '規則動詞過去否定疑問' },
       // 5月
-      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 10, is_holiday: true, holiday_name: 'GW休暇' },
-      { month: 5, week_number: 2, unit_name: '5', target_sequence_order: 12, is_holiday: false },
-      { month: 5, week_number: 3, unit_name: '6', target_sequence_order: 14, is_holiday: false },
-      { month: 5, week_number: 4, unit_name: '7', target_sequence_order: 16, is_holiday: false },
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 10, is_holiday: true, holiday_name: 'GW休暇', level: 'A', chapter: 'GW休暇', target_theme_name: '' },
+      { month: 5, week_number: 2, unit_name: '5', target_sequence_order: 12, is_holiday: false, level: 'A', chapter: 'Lesson 5', target_theme_name: '不規則動詞の過去形' },
+      { month: 5, week_number: 3, unit_name: '6', target_sequence_order: 14, is_holiday: false, level: 'A', chapter: 'Lesson 6', target_theme_name: '未来の表現' },
+      { month: 5, week_number: 4, unit_name: '7', target_sequence_order: 16, is_holiday: false, level: 'A', chapter: 'Lesson 7', target_theme_name: '助動詞' },
       // 6月
-      { month: 6, week_number: 1, unit_name: '8', target_sequence_order: 18, is_holiday: false },
-      { month: 6, week_number: 2, unit_name: '予備', target_sequence_order: 18, is_holiday: false },
-      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
-      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）' },
+      { month: 6, week_number: 1, unit_name: '8', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 8', target_theme_name: '不定詞' },
+      { month: 6, week_number: 2, unit_name: '予備', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: '予備', target_theme_name: '' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
       // 7月
-      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト休み' },
-      { month: 7, week_number: 2, unit_name: '9', target_sequence_order: 18, is_holiday: false },
-      { month: 7, week_number: 3, unit_name: '9', target_sequence_order: 18, is_holiday: false },
-      { month: 7, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false },
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト休み', level: 'A', chapter: 'テスト休み', target_theme_name: '' },
+      { month: 7, week_number: 2, unit_name: '9', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 9', target_theme_name: '動名詞' },
+      { month: 7, week_number: 3, unit_name: '9', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 9', target_theme_name: '動名詞' },
+      { month: 7, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 10', target_theme_name: '総合' },
       // 8月
-      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 18, is_holiday: true, holiday_name: 'iスクール模試' },
-      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 18, is_holiday: true, holiday_name: 'お盆休み' },
-      { month: 8, week_number: 3, unit_name: '10', target_sequence_order: 18, is_holiday: false },
-      { month: 8, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false },
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 18, is_holiday: true, holiday_name: 'iスクール模試', level: 'A', chapter: '模試', target_theme_name: '' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 18, is_holiday: true, holiday_name: 'お盆休み', level: 'A', chapter: 'お盆休み', target_theme_name: '' },
+      { month: 8, week_number: 3, unit_name: '10', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 10', target_theme_name: '総合' },
+      { month: 8, week_number: 4, unit_name: '10', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 10', target_theme_name: '総合' },
       // 9月
-      { month: 9, week_number: 1, unit_name: '11', target_sequence_order: 18, is_holiday: false },
-      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' },
-      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）' }
+      { month: 9, week_number: 1, unit_name: '11', target_sequence_order: 18, is_holiday: false, level: 'A', chapter: 'Lesson 11', target_theme_name: 'まとめ' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: 'テスト対策', target_theme_name: '' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 18, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: 'テスト対策', target_theme_name: '' }
+    ];
+
+    // 中1 数学 レベルA
+    const m1MathA: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      { month: 4, week_number: 1, unit_name: '正の数と負の数', target_sequence_order: 4, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数で量を表すこと' },
+      { month: 4, week_number: 2, unit_name: '絶対値', target_sequence_order: 6, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '絶対値' },
+      { month: 4, week_number: 3, unit_name: '加法・減法', target_sequence_order: 12, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の加法（異符号）' },
+      { month: 4, week_number: 4, unit_name: '加減混合', target_sequence_order: 17, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '加法と減法が混ざった計算' },
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 17, is_holiday: true, holiday_name: 'GW休暇', level: 'A', chapter: 'GW休暇', target_theme_name: '' },
+      { month: 5, week_number: 2, unit_name: '乗法・除法', target_sequence_order: 20, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の除法①' },
+      { month: 5, week_number: 3, unit_name: '四則混合', target_sequence_order: 27, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '同じ数の積' },
+      { month: 5, week_number: 4, unit_name: '分配法則と利用', target_sequence_order: 32, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '分配法則' },
+      { month: 6, week_number: 1, unit_name: '素因数分解', target_sequence_order: 37, is_holiday: false, level: 'A', chapter: '第1章 正の数・負の数', target_theme_name: '素因数分解の利用' },
+      { month: 6, week_number: 2, unit_name: '文字を用いた式', target_sequence_order: 38, is_holiday: false, level: 'A', chapter: '第2章 文字の式', target_theme_name: '文字を使った式' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 38, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 38, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'A', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 38, is_holiday: true, holiday_name: '定期テスト休み', level: 'A', chapter: '定期テスト休み', target_theme_name: '' },
+      { month: 7, week_number: 2, unit_name: '式の値', target_sequence_order: 39, is_holiday: false, level: 'A', chapter: '第2章 文字の式', target_theme_name: '式の値' },
+      { month: 7, week_number: 3, unit_name: '文字式の計算', target_sequence_order: 40, is_holiday: false, level: 'A', chapter: '第2章 文字の式', target_theme_name: '文字式の計算（加減）' },
+      { month: 7, week_number: 4, unit_name: '文字式の利用', target_sequence_order: 41, is_holiday: false, level: 'A', chapter: '第2章 文字の式', target_theme_name: '文字式の利用（数量の表し方）' },
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 41, is_holiday: true, holiday_name: 'iスクール模試', level: 'A', chapter: '模試', target_theme_name: '' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 41, is_holiday: true, holiday_name: 'お盆休み', level: 'A', chapter: 'お盆休み', target_theme_name: '' },
+      { month: 8, week_number: 3, unit_name: '等式と方程式', target_sequence_order: 42, is_holiday: false, level: 'A', chapter: '第3章 方程式', target_theme_name: '等式と方程式の解' },
+      { month: 8, week_number: 4, unit_name: '方程式の解き方', target_sequence_order: 44, is_holiday: false, level: 'A', chapter: '第3章 方程式', target_theme_name: '一次方程式の解き方' },
+      { month: 9, week_number: 1, unit_name: '方程式の利用', target_sequence_order: 45, is_holiday: false, level: 'A', chapter: '第3章 方程式', target_theme_name: '一次方程式の利用（文章題）' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: '定期テスト対策', target_theme_name: '' }
+    ];
+
+    // 中1 数学 レベルB
+    const m1MathB: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      { month: 4, week_number: 1, unit_name: '絶対値', target_sequence_order: 6, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '絶対値' },
+      { month: 4, week_number: 2, unit_name: '加減混合', target_sequence_order: 17, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '加法と減法が混ざった計算' },
+      { month: 4, week_number: 3, unit_name: '乗除混合', target_sequence_order: 26, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '3つ以上の数の乗除' },
+      { month: 4, week_number: 4, unit_name: '分配法則と利用', target_sequence_order: 34, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の利用' },
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 34, is_holiday: true, holiday_name: 'GW休暇', level: 'B', chapter: 'GW休暇', target_theme_name: '' },
+      { month: 5, week_number: 2, unit_name: '素因数分解', target_sequence_order: 37, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '素因数分解の利用' },
+      { month: 5, week_number: 3, unit_name: '式の値', target_sequence_order: 39, is_holiday: false, level: 'B', chapter: '第2章 文字の式', target_theme_name: '式の値' },
+      { month: 5, week_number: 4, unit_name: '文字式の計算', target_sequence_order: 41, is_holiday: false, level: 'B', chapter: '第2章 文字の式', target_theme_name: '文字式の利用（数量の表し方）' },
+      { month: 6, week_number: 1, unit_name: '等式の性質と解き方', target_sequence_order: 44, is_holiday: false, level: 'B', chapter: '第3章 方程式', target_theme_name: '一次方程式の解き方' },
+      { month: 6, week_number: 2, unit_name: '方程式の利用', target_sequence_order: 45, is_holiday: false, level: 'B', chapter: '第3章 方程式', target_theme_name: '一次方程式の利用（文章題）' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト休み', level: 'B', chapter: '定期テスト休み', target_theme_name: '' },
+      { month: 7, week_number: 2, unit_name: '比例', target_sequence_order: 47, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '座標と比例のグラフ' },
+      { month: 7, week_number: 3, unit_name: '反比例', target_sequence_order: 48, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '反比例とそのグラフ' },
+      { month: 7, week_number: 4, unit_name: '比例・反比例の利用', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '比例・反比例の利用' },
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 49, is_holiday: true, holiday_name: 'iスクール模試', level: 'B', chapter: '模試', target_theme_name: '' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 49, is_holiday: true, holiday_name: 'お盆休み', level: 'B', chapter: 'お盆休み', target_theme_name: '' },
+      { month: 8, week_number: 3, unit_name: '復習', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
+      { month: 8, week_number: 4, unit_name: '応用演習', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
+      { month: 9, week_number: 1, unit_name: '予備', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' }
+    ];
+
+    // 中1 数学 レベルC
+    const m1MathC: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      { month: 4, week_number: 1, unit_name: '正の数と負の数', target_sequence_order: 3, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '自然数' },
+      { month: 4, week_number: 2, unit_name: '数直線', target_sequence_order: 7, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '数直線' },
+      { month: 4, week_number: 3, unit_name: '加法（同符号）', target_sequence_order: 10, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の加法（同符号）' },
+      { month: 4, week_number: 4, unit_name: '加法（異符号）', target_sequence_order: 12, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の加法（異符号）' },
+      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 12, is_holiday: true, holiday_name: 'GW休暇', level: 'C', chapter: 'GW休暇', target_theme_name: '' },
+      { month: 5, week_number: 2, unit_name: '減法', target_sequence_order: 14, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の減法' },
+      { month: 5, week_number: 3, unit_name: '加減混合', target_sequence_order: 16, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '3つ以上の数の加法・減法' },
+      { month: 5, week_number: 4, unit_name: '加減混合応用', target_sequence_order: 17, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '加法と減法が混ざった計算' },
+      { month: 6, week_number: 1, unit_name: '乗法', target_sequence_order: 18, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の乗法①' },
+      { month: 6, week_number: 2, unit_name: '除法', target_sequence_order: 20, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の除法①' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 20, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'C', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 20, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'C', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 20, is_holiday: true, holiday_name: '定期テスト休み', level: 'C', chapter: '定期テスト休み', target_theme_name: '' },
+      { month: 7, week_number: 2, unit_name: '乗除混合', target_sequence_order: 23, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '逆数' },
+      { month: 7, week_number: 3, unit_name: '四則混合', target_sequence_order: 28, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '指数をふくむ計算' },
+      { month: 7, week_number: 4, unit_name: '分配法則', target_sequence_order: 32, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '分配法則' },
+      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 32, is_holiday: true, holiday_name: 'iスクール模試', level: 'C', chapter: '模試', target_theme_name: '' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 32, is_holiday: true, holiday_name: 'お盆休み', level: 'C', chapter: 'お盆休み', target_theme_name: '' },
+      { month: 8, week_number: 3, unit_name: '素因数分解', target_sequence_order: 36, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '素因数分解' },
+      { month: 8, week_number: 4, unit_name: 'まとめ', target_sequence_order: 37, is_holiday: false, level: 'C', chapter: '第1章 正の数・負の数', target_theme_name: '素因数分解の利用' },
+      { month: 9, week_number: 1, unit_name: '文字を用いた式', target_sequence_order: 38, is_holiday: false, level: 'C', chapter: '第2章 文字の式', target_theme_name: '文字を使った式' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 38, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'C', chapter: '定期テスト対策', target_theme_name: '' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 38, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'C', chapter: '定期テスト対策', target_theme_name: '' }
     ];
 
     mathPlans.forEach(p => {
       seed.push({
-        id: `mp-math-${p.month}-${p.week_number}`,
+        id: `mp-math-levelA-${p.month}-${p.week_number}`,
         grade: '中3',
         subject: '数学',
         course: 'standard',
@@ -927,9 +1022,39 @@ class DatabaseService {
 
     englishPlans.forEach(p => {
       seed.push({
-        id: `mp-eng-${p.month}-${p.week_number}`,
+        id: `mp-eng-levelA-${p.month}-${p.week_number}`,
         grade: '中3',
         subject: '英語',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    m1MathA.forEach(p => {
+      seed.push({
+        id: `mp-m1math-levelA-${p.month}-${p.week_number}`,
+        grade: '中1',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    m1MathB.forEach(p => {
+      seed.push({
+        id: `mp-m1math-levelB-${p.month}-${p.week_number}`,
+        grade: '中1',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    m1MathC.forEach(p => {
+      seed.push({
+        id: `mp-m1math-levelC-${p.month}-${p.week_number}`,
+        grade: '中1',
+        subject: '数学',
         course: 'standard',
         ...p
       });
@@ -953,6 +1078,37 @@ class DatabaseService {
     }
   }
 
+  public async saveMilestonePlans(plans: MilestonePlan[]): Promise<MilestonePlan[]> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('milestone_plans').upsert(plans).select();
+      if (error) throw error;
+      return data;
+    } else {
+      this.saveMockData('milestone_plans', plans);
+      return plans;
+    }
+  }
+
+  // MilestoneTemplates CRUD
+  public getMilestoneTemplates(): MilestoneTemplate[] {
+    return this.getMockData('milestone_templates', []);
+  }
+
+  public async saveMilestoneTemplate(template: MilestoneTemplate): Promise<MilestoneTemplate> {
+    const list = this.getMilestoneTemplates();
+    const idx = list.findIndex(t => t.id === template.id);
+    if (idx >= 0) list[idx] = template;
+    else list.push(template);
+    this.saveMockData('milestone_templates', list);
+    return template;
+  }
+
+  public async deleteMilestoneTemplate(id: string): Promise<void> {
+    let list = this.getMilestoneTemplates();
+    list = list.filter(t => t.id !== id);
+    this.saveMockData('milestone_templates', list);
+  }
+
   // Clear mock data if needed (for testing or reset)
   public clearMockData(): void {
     if (!this.isBrowser()) return;
@@ -970,6 +1126,7 @@ class DatabaseService {
     localStorage.removeItem('tentoru_mini_test_results');
     localStorage.removeItem('tentoru_homework_results');
     localStorage.removeItem('tentoru_milestone_plans');
+    localStorage.removeItem('tentoru_milestone_templates');
   }
 }
 

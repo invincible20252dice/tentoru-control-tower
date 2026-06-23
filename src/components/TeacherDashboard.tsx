@@ -15,7 +15,8 @@ import {
   TeacherCorrectionLog,
   MiniTestResult,
   HomeworkResult,
-  MilestonePlan
+  MilestonePlan,
+  MilestoneTemplate
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -42,6 +43,16 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
+
+  // レベル別・テンプレート機能用 State
+  const [newStudentLevel, setNewStudentLevel] = useState<'A' | 'B' | 'C'>('A');
+  const [selectedLevel, setSelectedLevel] = useState<'A' | 'B' | 'C'>('A');
+  const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState('');
+  const [addMonth, setAddMonth] = useState<number>(4);
+  const [addWeek, setAddWeek] = useState<number>(1);
 
   // 検索フィルター用のState
   const [filterSchoolId, setFilterSchoolId] = useState<string>('');
@@ -129,6 +140,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     const listEth = db.getExamThresholdsMaster();
     const listMps = db.getMilestonePlans();
     const listUnits = db.getCurriculumUnits();
+    const listTemplates = db.getMilestoneTemplates();
 
     setStudents(listSt);
     setSchools(listSch);
@@ -136,6 +148,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     setExamThresholds(listEth);
     setMilestonePlans(listMps);
     setAllCurriculumUnits(listUnits);
+    setMilestoneTemplates(listTemplates);
 
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
@@ -149,6 +162,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       const freshSt = listSt.find(s => s.id === selectedStudent.id);
       if (freshSt) {
         setSelectedStudent(freshSt);
+        setSelectedLevel(freshSt.level || 'A');
         const allTasks = db.getLearningTasks();
         const freshTasks = allTasks.filter(t => t.student_id === freshSt.id);
         setStudentTasks(freshTasks);
@@ -278,7 +292,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       school_id: newStudentSchoolId,
       status: 'normal',
       start_unit_id: null,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      level: newStudentLevel
     };
 
     await db.saveStudent(newStudent);
@@ -710,7 +725,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     );
 
     const testLogs = studentLogs.filter(l => l.log_type === 'test_result');
-    const passedUnitsCount = testLogs.filter(l => (l.score || 0) >= 80).length; // 80点以上を合格とする
+    const passScore = student.level === 'A' ? 90 : student.level === 'B' ? 80 : 70;
+    const passedUnitsCount = testLogs.filter(l => (l.score || 0) >= passScore).length;
     
     const averageScore = testLogs.length > 0 
       ? Math.round(testLogs.reduce((sum, l) => sum + (l.score || 0), 0) / testLogs.length)
@@ -826,6 +842,277 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       link.href = canvas.toDataURL('image/png');
       link.click();
     });
+  };
+
+  // --- 年間計画（マイルストーン）カスタマイズ & テンプレート用ヘルパー関数 ---
+  const getFilteredMilestones = () => {
+    const currentGrade = selectedStudent.grade;
+    return milestonePlans
+      .filter(p => p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard')
+      .sort((a, b) => {
+        const monthOrder = (m: number) => m >= 3 ? m : m + 12;
+        const am = monthOrder(a.month);
+        const bm = monthOrder(b.month);
+        if (am !== bm) return am - bm;
+        return a.week_number - b.week_number;
+      });
+  };
+
+  const handleAddMilestoneRow = async (month: number, week: number) => {
+    const currentGrade = selectedStudent.grade;
+    const newPlan: MilestonePlan = {
+      id: `mp-custom-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      grade: currentGrade,
+      subject: selectedSubject,
+      course: 'standard',
+      month,
+      week_number: week,
+      is_holiday: false,
+      level: selectedLevel,
+      chapter: '',
+      unit_name: '',
+      target_theme_name: '',
+      target_sequence_order: 0,
+      created_at: new Date().toISOString()
+    };
+    const updated = [...milestonePlans, newPlan];
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+    alert('新しいマイルストーン行を追加しました。');
+    loadData();
+  };
+
+  const handleDeleteMilestoneRow = async (id: string) => {
+    const updated = milestonePlans.filter(p => p.id !== id);
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+    alert('マイルストーン行を削除しました。');
+    loadData();
+  };
+
+  const handleMoveMilestoneRow = async (index: number, direction: 'up' | 'down') => {
+    const filtered = getFilteredMilestones();
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === filtered.length - 1) return;
+
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    const planA = filtered[index];
+    const planB = filtered[targetIdx];
+
+    const temp = {
+      chapter: planA.chapter,
+      unit_name: planA.unit_name,
+      target_theme_name: planA.target_theme_name,
+      target_sequence_order: planA.target_sequence_order,
+      is_holiday: planA.is_holiday,
+      holiday_name: planA.holiday_name
+    };
+
+    const updatedPlans = filtered.map((p, idx) => {
+      if (idx === index) {
+        return {
+          ...p,
+          chapter: planB.chapter,
+          unit_name: planB.unit_name,
+          target_theme_name: planB.target_theme_name,
+          target_sequence_order: planB.target_sequence_order,
+          is_holiday: planB.is_holiday,
+          holiday_name: planB.holiday_name
+        };
+      }
+      if (idx === targetIdx) {
+        return {
+          ...p,
+          chapter: temp.chapter,
+          unit_name: temp.unit_name,
+          target_theme_name: temp.target_theme_name,
+          target_sequence_order: temp.target_sequence_order,
+          is_holiday: temp.is_holiday,
+          holiday_name: temp.holiday_name
+        };
+      }
+      return p;
+    });
+
+    const newAllPlans = milestonePlans.map(p => {
+      const match = updatedPlans.find(up => up.id === p.id);
+      return match || p;
+    });
+
+    setMilestonePlans(newAllPlans);
+    await db.saveMilestonePlans(newAllPlans);
+    loadData();
+  };
+
+  const handleToggleHoliday = async (id: string) => {
+    const updated = milestonePlans.map(p => {
+      if (p.id === id) {
+        const nextIsHoliday = !p.is_holiday;
+        return {
+          ...p,
+          is_holiday: nextIsHoliday,
+          holiday_name: nextIsHoliday ? '休校日' : '',
+          target_sequence_order: nextIsHoliday ? 0 : p.target_sequence_order
+        };
+      }
+      return p;
+    });
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+    loadData();
+  };
+
+  const handleUpdateHolidayName = async (id: string, name: string) => {
+    const updated = milestonePlans.map(p => {
+      if (p.id === id) {
+        return { ...p, holiday_name: name, unit_name: name };
+      }
+      return p;
+    });
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+  };
+
+  const handleUpdateMilestoneField = async (id: string, field: 'chapter' | 'unit_name' | 'target_theme_name', value: string) => {
+    const schoolUnits = allCurriculumUnits.filter(u => u.subject === selectedSubject);
+    const updated = milestonePlans.map(p => {
+      if (p.id === id) {
+        const nextPlan = { ...p, [field]: value };
+        if (field === 'target_theme_name') {
+          const matchedUnit = schoolUnits.find(u => u.name === value);
+          if (matchedUnit) {
+            nextPlan.target_sequence_order = matchedUnit.sequence_order;
+          }
+        }
+        return nextPlan;
+      }
+      return p;
+    });
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+  };
+
+  const handleUpdateMilestoneTargetOrder = async (id: string, order: number) => {
+    const updated = milestonePlans.map(p => {
+      if (p.id === id) {
+        return { ...p, target_sequence_order: order };
+      }
+      return p;
+    });
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+  };
+
+  const handleMoveChapter = async (chapterName: string, direction: 'up' | 'down') => {
+    const filtered = getFilteredMilestones();
+    const chapters = Array.from(new Set(filtered.map(p => p.chapter).filter(Boolean))) as string[];
+    const idx = chapters.indexOf(chapterName);
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === chapters.length - 1) return;
+
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const targetChapter = chapters[targetIdx];
+
+    const newChapters = [...chapters];
+    newChapters[idx] = targetChapter;
+    newChapters[targetIdx] = chapterName;
+
+    const getChapterIndex = (ch?: string) => {
+      const index = ch ? newChapters.indexOf(ch) : -1;
+      return index === -1 ? 999 : index;
+    };
+
+    const sortedContent = [...filtered].sort((a, b) => {
+      const idxA = getChapterIndex(a.chapter);
+      const idxB = getChapterIndex(b.chapter);
+      if (idxA !== idxB) return idxA - idxB;
+      return 0;
+    });
+
+    const updatedPlans = filtered.map((orig, i) => {
+      const content = sortedContent[i];
+      return {
+        ...orig,
+        chapter: content.chapter,
+        unit_name: content.unit_name,
+        target_theme_name: content.target_theme_name,
+        target_sequence_order: content.target_sequence_order,
+        is_holiday: content.is_holiday,
+        holiday_name: content.holiday_name
+      };
+    });
+
+    const newAllPlans = milestonePlans.map(p => {
+      const match = updatedPlans.find(up => up.id === p.id);
+      return match || p;
+    });
+
+    setMilestonePlans(newAllPlans);
+    await db.saveMilestonePlans(newAllPlans);
+    alert(`章の順序を入れ替えました。`);
+    loadData();
+  };
+
+  const handleSaveTemplate = async (name: string) => {
+    if (!name.trim()) return;
+    const currentGrade = selectedStudent.grade;
+    const filtered = getFilteredMilestones();
+    const template: MilestoneTemplate = {
+      id: `temp-${Date.now()}`,
+      name,
+      grade: currentGrade,
+      subject: selectedSubject,
+      level: selectedLevel,
+      plans: filtered.map(p => ({ ...p, id: `mp-temp-item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` })),
+      created_at: new Date().toISOString()
+    };
+    await db.saveMilestoneTemplate(template);
+    setNewTemplateName('');
+    alert('テンプレートを保存しました。');
+    loadData();
+  };
+
+  const handleApplyTemplate = async (templateId: string) => {
+    const templates = db.getMilestoneTemplates();
+    const target = templates.find(t => t.id === templateId)!;
+
+    const currentGrade = selectedStudent.grade;
+
+    const filteredOut = milestonePlans.filter(p => 
+      !(p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard')
+    );
+
+    const newPlans = target.plans.map((p, idx) => ({
+      ...p,
+      id: `mp-applied-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
+      grade: currentGrade,
+      subject: selectedSubject,
+      level: selectedLevel
+    }));
+
+    const updated = [...filteredOut, ...newPlans];
+    setMilestonePlans(updated);
+    await db.saveMilestonePlans(updated);
+    alert(`テンプレート「${target.name}」を適用しました。`);
+    loadData();
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    await db.deleteMilestoneTemplate(templateId);
+    alert('テンプレートを削除しました。');
+    loadData();
+  };
+
+  const handleUpdateTemplateName = async (templateId: string, newName: string) => {
+    if (!newName.trim()) return;
+    const templates = db.getMilestoneTemplates();
+    const target = templates.find(t => t.id === templateId)!;
+    const updated = { ...target, name: newName };
+    await db.saveMilestoneTemplate(updated);
+    setEditingTemplateId(null);
+    setEditingTemplateName('');
+    alert('テンプレート名を更新しました。');
+    loadData();
   };
 
   const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
@@ -953,7 +1240,37 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   解除
                 </button>
               </div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{selectedStudent.name} ({selectedStudent.grade})</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>{selectedStudent.name} ({selectedStudent.grade})</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
+                <label htmlFor="student-level-select" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>学習レベル:</label>
+                <select
+                  id="student-level-select"
+                  value={selectedStudent.level || 'A'}
+                  onChange={async e => {
+                    const nextLevel = e.target.value as 'A' | 'B' | 'C';
+                    const updated = { ...selectedStudent, level: nextLevel };
+                    await db.saveStudent(updated);
+                    setSelectedStudent(updated);
+                    setSelectedLevel(nextLevel);
+                    alert(`生徒の学習レベルを レベル${nextLevel} に更新しました。`);
+                    loadData();
+                  }}
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '2px 4px',
+                    borderRadius: '4px',
+                    border: '1px solid #cbd5e1',
+                    background: '#f8fafc',
+                    color: '#1e293b',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="A">レベルA (標準)</option>
+                  <option value="B">レベルB (発展)</option>
+                  <option value="C">レベルC (基礎)</option>
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -1146,6 +1463,18 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                     ))}
                   </select>
                 </div>
+                <div className={styles.formGroup}>
+                  <label>学習レベル</label>
+                  <select 
+                    value={newStudentLevel} 
+                    onChange={e => setNewStudentLevel(e.target.value as any)}
+                    className={styles.select}
+                  >
+                    <option value="A">レベルA (標準)</option>
+                    <option value="B">レベルB (発展)</option>
+                    <option value="C">レベルC (基礎)</option>
+                  </select>
+                </div>
                 <button type="submit" className={styles.btn} style={{ marginTop: '16px' }}>
                   1クリックアカウント発行
                 </button>
@@ -1249,7 +1578,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       
                       <div className={styles.timetableSetup}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
-                          const currentConfig = periodSelections[p] || { subject: '', unitId: '', customTheme: '' };
+                          const currentConfig = periodSelections[p];
                           const showUnitSelect = currentConfig.subject === '数学' || currentConfig.subject === '英語';
 
                           return (
@@ -1450,32 +1779,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         時間割コマ割りを保存
                       </button>
                     </div>
-
-                    {/* Leftside: Scheduled units overview */}
-                    <div>
-                      <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>直近の学習タスク一覧</h4>
-                      <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px' }}>
-                        {studentTasks
-                          .sort((a,b) => new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime())
-                          .map(t => {
-                            const unit = db.getCurriculumUnits().find(u => u.id === t.unit_id);
-                            if (!unit) return null;
-
-                            return (
-                              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.8rem' }}>
-                                <span>{t.scheduled_date}</span>
-                                <strong style={{ color: '#1e293b' }}>{unit.name} ({unit.subject})</strong>
-                                <span>
-                                  {t.status === 'completed' && <span style={{ color: '#10b981' }}>完了</span>}
-                                  {t.status === 'skipped' && <span style={{ color: '#6366f1' }}>スキップ</span>}
-                                  {t.status === 'unstarted' && <span style={{ color: '#94a3b8' }}>未完了</span>}
-                                  {t.status === 'failed' && <span style={{ color: '#f59e0b' }}>テスト不合格</span>}
-                                </span>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
@@ -1572,7 +1875,9 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             <th style={{ padding: '10px' }}>日付</th>
                             <th style={{ padding: '10px' }}>生徒名</th>
                             <th style={{ padding: '10px' }}>テスト内容</th>
+                            <th style={{ padding: '10px', width: '100px' }}>レベル/合格点</th>
                             <th style={{ padding: '10px', width: '120px' }}>点数</th>
+                            <th style={{ padding: '10px', width: '100px' }}>合否</th>
                             <th style={{ padding: '10px', width: '80px' }}>操作</th>
                           </tr>
                         </thead>
@@ -1581,18 +1886,33 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id);
+                              const stLevel = student?.level || 'A';
+                              const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+                              const currentScore = r.score;
+                              let statusBadge = null;
+                              if (currentScore !== null && currentScore !== undefined) {
+                                const isPassed = currentScore >= passScore;
+                                statusBadge = isPassed ? (
+                                  <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>合格</span>
+                                ) : (
+                                  <span style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>不合格</span>
+                                );
+                              } else {
+                                statusBadge = <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>未受験</span>;
+                              }
                               return (
                                 <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                   <td style={{ padding: '10px' }}>{r.date}</td>
                                   <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
                                   <td style={{ padding: '10px' }}>{r.test_content}</td>
+                                  <td style={{ padding: '10px' }}>レベル{stLevel} ({passScore}点)</td>
                                   <td style={{ padding: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                       <input
                                         type="number"
                                         min="0"
                                         max="100"
-                                        value={tempScores[r.id] ?? ''}
+                                        value={tempScores[r.id] || ''}
                                         onChange={e => {
                                           setTempScores({
                                             ...tempScores,
@@ -1606,6 +1926,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                       <span>点</span>
                                     </div>
                                   </td>
+                                  <td style={{ padding: '10px' }}>{statusBadge}</td>
                                   <td style={{ padding: '10px' }}>
                                     <button
                                       onClick={() => handleSaveMiniTestScore(r)}
@@ -1662,7 +1983,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                   <td style={{ padding: '10px' }}>{r.homework_deadline || 'なし'}</td>
                                   <td style={{ padding: '10px' }}>
                                     <select
-                                      value={tempHomeworkStatuses[r.id] ?? 'incomplete'}
+                                      value={tempHomeworkStatuses[r.id]}
                                       onChange={e => {
                                         setTempHomeworkStatuses({
                                           ...tempHomeworkStatuses,
@@ -1934,34 +2255,202 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
               {activeTab === 'milestones' && (
                 <div className={styles.card}>
                   <div className={styles.cardTitle}>
-                    <span>年間基準計画（マイルストーン） & 進捗現在地ハイライト</span>
+                    <span>年間基準計画（マイルストーン）カスタマイズ設定</span>
                     <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 'normal' }}>
-                      スプレッドシート基準計画との進捗ギャップを可視化します
+                      レベル別に出し分け、章や単元（授業テーマ）の順序調整・削除・追加、休校日設定、およびテンプレート保存・呼び出しが可能です。
                     </span>
                   </div>
 
-                  <div style={{ marginBottom: '16px', display: 'flex', gap: '16px', alignItems: 'center' }}>
-                    <div>
-                      <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
-                      <select 
-                        value={selectedSubject} 
-                        onChange={e => setSelectedSubject(e.target.value)} 
-                        className={styles.select}
-                        style={{ width: '120px', padding: '6px' }}
-                      >
-                        {selectedStudent.grade.startsWith('中') ? (
-                          <>
-                            <option value="数学">数学</option>
-                            <option value="英語">英語</option>
-                          </>
-                        ) : (
-                          <option value="算数">算数</option>
-                        )}
-                      </select>
+                  <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {/* Subject select */}
+                      <div>
+                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
+                        <select 
+                          value={selectedSubject} 
+                          onChange={e => setSelectedSubject(e.target.value)} 
+                          className={styles.select}
+                          style={{ width: '120px', padding: '6px' }}
+                        >
+                          {selectedStudent.grade.startsWith('中') ? (
+                            <>
+                              <option value="数学">数学</option>
+                              <option value="英語">英語</option>
+                            </>
+                          ) : (
+                            <option value="算数">算数</option>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Level Toggle switch */}
+                      <div>
+                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>学習レベル:</label>
+                        <div className={styles.segmentControl} style={{ display: 'inline-flex' }}>
+                          <button
+                            type="button"
+                            className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
+                            onClick={() => setSelectedLevel('A')}
+                          >
+                            レベルA (標準)
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
+                            onClick={() => setSelectedLevel('B')}
+                          >
+                            レベルB (発展)
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.segmentBtn} ${selectedLevel === 'C' ? styles.segmentBtnActive : ''}`}
+                            onClick={() => setSelectedLevel('C')}
+                          >
+                            レベルC (基礎)
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '0.9rem' }}>
+                        現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
+                      </div>
                     </div>
 
-                    <div style={{ fontSize: '0.9rem' }}>
-                      現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
+                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                    {/* Template theme Save & Apply CRUD section */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>授業テーマ・計画テンプレート管理</h4>
+                      
+                      {/* Save Template */}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          placeholder="現在の計画をテンプレート名として保存（自由記述）..."
+                          value={newTemplateName}
+                          onChange={e => setNewTemplateName(e.target.value)}
+                          className={styles.input}
+                          style={{ maxWidth: '350px', fontSize: '0.85rem' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveTemplate(newTemplateName)}
+                          className={styles.btn}
+                          style={{ width: 'auto', padding: '6px 14px', fontSize: '0.85rem', background: '#3b82f6' }}
+                        >
+                          計画テンプレートを保存
+                        </button>
+                      </div>
+
+                      {/* Saved Templates List */}
+                      {milestoneTemplates.filter(t => t.grade === (selectedStudent ? selectedStudent.grade : '中1') && t.subject === selectedSubject && t.level === selectedLevel).length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>保存済みテンプレート一覧:</span>
+                          {milestoneTemplates
+                            .filter(t => t.grade === (selectedStudent ? selectedStudent.grade : '中1') && t.subject === selectedSubject && t.level === selectedLevel)
+                            .map(t => (
+                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' }}>
+                                {editingTemplateId === t.id ? (
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    <input
+                                      type="text"
+                                      value={editingTemplateName}
+                                      onChange={e => setEditingTemplateName(e.target.value)}
+                                      className={styles.input}
+                                      style={{ padding: '4px 6px', fontSize: '0.8rem', width: '200px' }}
+                                    />
+                                    <button onClick={() => handleUpdateTemplateName(t.id, editingTemplateName)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#10b981' }}>保存</button>
+                                    <button onClick={() => setEditingTemplateId(null)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#64748b' }}>キャンセル</button>
+                                  </div>
+                                ) : (
+                                  <span><strong>{t.name}</strong> <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>({t.plans.length}行 / {new Date(t.created_at).toLocaleDateString()})</span></span>
+                                )}
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button onClick={() => handleApplyTemplate(t.id)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#10b981' }}>
+                                    呼び出して適用
+                                  </button>
+                                  {editingTemplateId !== t.id && (
+                                    <button onClick={() => { setEditingTemplateId(t.id); setEditingTemplateName(t.name); }} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#e2e8f0', color: '#0f172a', border: '1px solid #cbd5e1' }}>
+                                      名称変更
+                                    </button>
+                                  )}
+                                  <button onClick={() => handleDeleteTemplate(t.id)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#ef4444' }}>
+                                    削除
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                    {/* Chapter Ordering section */}
+                    <div>
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: 700 }}>章ごと(単元ごと)での順番変更</h4>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {Array.from(new Set(getFilteredMilestones().map(p => p.chapter).filter(Boolean))).map((chName) => (
+                          <div key={chName as string} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}>
+                            <span>{chName as string}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveChapter(chName as string, 'up')}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
+                              title="章を上へ移動"
+                            >
+                              🔼
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveChapter(chName as string, 'down')}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
+                              title="章を下へ移動"
+                            >
+                              🔽
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                    {/* Add Milestone Row form */}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>行の追加:</h4>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <select 
+                          id="add-month-select"
+                          value={addMonth} 
+                          onChange={e => setAddMonth(parseInt(e.target.value))}
+                          className={styles.select} 
+                          style={{ width: '80px', padding: '4px' }}
+                        >
+                          {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
+                            <option key={m} value={m}>{m}月</option>
+                          ))}
+                        </select>
+                        <select 
+                          id="add-week-select"
+                          value={addWeek} 
+                          onChange={e => setAddWeek(parseInt(e.target.value))}
+                          className={styles.select} 
+                          style={{ width: '80px', padding: '4px' }}
+                        >
+                          {[1, 2, 3, 4, 5].map(w => (
+                            <option key={w} value={w}>{w}週目</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleAddMilestoneRow(addMonth, addWeek)}
+                          className={styles.btn}
+                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#10b981' }}
+                        >
+                          ➕ 行を追加
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1970,23 +2459,17 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                     <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #cbd5e1', fontSize: '0.85rem' }}>
                       <thead>
                         <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #94a3b8' }}>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '60px', textAlign: 'center' }}>月</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '60px', textAlign: 'center' }}>週</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'left' }}>目標完了単元 (基準マスタ)</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '150px', textAlign: 'center' }}>到達順序 (テーマ数)</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '220px', textAlign: 'left' }}>進捗ハイライト</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>月</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>週</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>章 (単元)</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>単元名</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'left' }}>目標テーマ</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '130px', textAlign: 'center' }}>進捗</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '160px', textAlign: 'center' }}>操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {milestonePlans
-                          .filter(p => p.grade === selectedStudent.grade && p.subject === selectedSubject && p.course === 'standard')
-                          .sort((a, b) => {
-                            const monthOrder = (m: number) => m >= 3 ? m : m + 12;
-                            const am = monthOrder(a.month);
-                            const bm = monthOrder(b.month);
-                            if (am !== bm) return am - bm;
-                            return a.week_number - b.week_number;
-                          })
+                        {getFilteredMilestones()
                           .map((plan, idx, arr) => {
                             const { month: currMonth, week_number: currWeek } = getYearMonthWeek(scheduleDate);
                             const isTodayWeek = plan.month === currMonth && plan.week_number === currWeek;
@@ -2002,23 +2485,20 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                               const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
                               const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
                               studentSeq = Math.max(0, ...completedUnits.map(u => u.sequence_order));
-                            } else if (selectedStudent.start_unit_id) {
+                            } else if (selectedStudent && selectedStudent.start_unit_id) {
                               const startUnit = subjectUnits.find(u => u.id === selectedStudent.start_unit_id);
                               if (startUnit) {
                                 studentSeq = startUnit.sequence_order - 1;
                               }
                             }
 
-                            const target = plan.target_sequence_order ?? 0;
-                            const isStudentCurrentWeek = !plan.is_holiday && (
-                              (idx === 0 && studentSeq <= target) ||
-                              (studentSeq > (arr[idx - 1]?.target_sequence_order ?? 0) && studentSeq <= target)
-                            );
+                            const target = plan.target_sequence_order || 0;
+                            const isStudentCompleted = studentSeq >= target;
 
                             let rowBg = '#ffffff';
                             let rowBorder = '1px solid #cbd5e1';
                             if (plan.is_holiday) {
-                              rowBg = '#ffe4e6';
+                              rowBg = '#fef2f2';
                             } else if (isTodayWeek) {
                               rowBg = '#eff6ff';
                               rowBorder = '2px solid #3b82f6';
@@ -2033,34 +2513,125 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                   border: rowBorder
                                 }}
                               >
-                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center', fontWeight: 'bold' }}>
                                   {plan.month}月
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center' }}>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
                                   {plan.week_number}週
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '10px' }}>
-                                  {plan.is_holiday ? (
-                                    <span style={{ color: '#be123c', fontWeight: 'bold' }}>🎉 {plan.holiday_name} (休校/テスト対策週)</span>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
+                                  <input
+                                    type="text"
+                                    value={plan.chapter || ''}
+                                    placeholder="例: 第1章 正の数・負の数"
+                                    disabled={plan.is_holiday}
+                                    onChange={e => handleUpdateMilestoneField(plan.id, 'chapter', e.target.value)}
+                                    className={styles.input}
+                                    style={{ fontSize: '0.8rem', padding: '4px' }}
+                                  />
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
+                                  <input
+                                    type="text"
+                                    value={plan.unit_name || ''}
+                                    placeholder={plan.is_holiday ? '休校理由を入力' : '例: 加法と減法'}
+                                    onChange={e => {
+                                      if (plan.is_holiday) {
+                                        handleUpdateHolidayName(plan.id, e.target.value);
+                                      } else {
+                                        handleUpdateMilestoneField(plan.id, 'unit_name', e.target.value);
+                                      }
+                                    }}
+                                    className={styles.input}
+                                    style={{ fontSize: '0.8rem', padding: '4px' }}
+                                  />
+                                </td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
+                                  {!plan.is_holiday ? (
+                                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                      <select
+                                        value={plan.target_theme_name || ''}
+                                        onChange={e => handleUpdateMilestoneField(plan.id, 'target_theme_name', e.target.value)}
+                                        className={styles.select}
+                                        style={{ fontSize: '0.8rem', padding: '4px', flex: 1 }}
+                                      >
+                                        <option value="">-- テーマを選択 --</option>
+                                        {subjectUnits.map(u => (
+                                          <option key={u.id} value={u.name}>({u.sequence_order}) {u.name}</option>
+                                        ))}
+                                      </select>
+                                      <input
+                                        type="number"
+                                        value={plan.target_sequence_order || 0}
+                                        onChange={e => handleUpdateMilestoneTargetOrder(plan.id, parseInt(e.target.value) || 0)}
+                                        className={styles.input}
+                                        style={{ width: '50px', fontSize: '0.8rem', padding: '4px' }}
+                                        title="目標到達シーケンス順序"
+                                      />
+                                    </div>
                                   ) : (
-                                    <span>{plan.unit_name || '未設定'}</span>
+                                    <span style={{ color: '#be123c', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                      🎉 {plan.holiday_name || '休校日'}
+                                    </span>
                                   )}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'center' }}>
-                                  {plan.is_holiday ? '-' : `${target} テーマまで`}
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
+                                  {!plan.is_holiday ? (
+                                    <span 
+                                      style={{ 
+                                        display: 'inline-block', 
+                                        backgroundColor: '#10b981', 
+                                        color: '#ffffff', 
+                                        padding: '4px 8px', 
+                                        borderRadius: '4px', 
+                                        fontSize: '0.75rem', 
+                                        fontWeight: 'bold' 
+                                      }}
+                                    >
+                                      {`📍 ${studentSeq}テーマ`}
+                                    </span>
+                                  ) : '-'}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '10px' }}>
-                                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                    {isTodayWeek && (
-                                      <span style={{ backgroundColor: '#2563eb', color: '#ffffff', padding: '2px 8px', borderRadius: '9999px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center' }}>
-                                        🎯 目標週 (基準)
-                                      </span>
-                                    )}
-                                    {isStudentCurrentWeek && (
-                                      <span style={{ backgroundColor: '#10b981', color: '#ffffff', padding: '2px 8px', borderRadius: '9999px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center' }}>
-                                        📍 {selectedStudent.name} 現在地 ({studentSeq}テーマ完了)
-                                      </span>
-                                    )}
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => handleMoveMilestoneRow(idx, 'up')}
+                                      className={styles.btn}
+                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
+                                      title="上へ"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === arr.length - 1}
+                                      onClick={() => handleMoveMilestoneRow(idx, 'down')}
+                                      className={styles.btn}
+                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
+                                      title="下へ"
+                                    >
+                                      ▼
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleHoliday(plan.id)}
+                                      className={styles.btn}
+                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: plan.is_holiday ? '#475569' : '#e2e8f0', color: plan.is_holiday ? '#fff' : '#0f172a', border: '1px solid #cbd5e1' }}
+                                      title="休校日の切り替え"
+                                    >
+                                      📅
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteMilestoneRow(plan.id)}
+                                      className={styles.btn}
+                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#ef4444' }}
+                                      title="行削除"
+                                    >
+                                      ×
+                                    </button>
                                   </div>
                                 </td>
                               </tr>
@@ -2071,11 +2642,11 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   </div>
 
                   <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
-                    <p style={{ margin: '0 0 4px 0' }}><strong>💡 年間計画の読み方:</strong></p>
+                    <p style={{ margin: '0 0 4px 0' }}><strong>💡 マイルストーン計画のカスタマイズについて:</strong></p>
                     <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                      <li><strong>🎯 目標週 (基準):</strong> 今日の日付（{scheduleDate}）に基づいて、本来進んでいるべき基準の週をハイライトしています。</li>
-                      <li><strong>📍 現在地:</strong> 生徒の現在完了している最大単元順序に基づき、どのマイルストーンの位置にいるかを表示しています。</li>
-                      <li>「現在地」が「目標週」より上にある場合は<strong>遅れ（赤警告）</strong>、下にある場合は<strong>前倒し（緑リード）</strong>となります。</li>
+                      <li>各セルのテキストボックスやプルダウンから、章名・単元名・目標テーマ・到達順序をインラインで直接編集できます。</li>
+                      <li><strong>📅 ボタン:</strong> その週を休校日（イベント日）にトグル切り替えします。オンの時は `holiday_name` が入力可能になります。</li>
+                      <li><strong>📍バッジ:</strong> 選択された生徒が今日までに完了したテーマ数（現在地）を示しています。</li>
                     </ul>
                   </div>
                 </div>

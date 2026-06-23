@@ -373,7 +373,8 @@ describe('Scheduler and Core Logic Tests', () => {
         { id: 'mp-2', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 2, target_sequence_order: 20, is_holiday: false },
         { id: 'mp-3', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 3, target_sequence_order: 30, is_holiday: false },
         { id: 'mp-jan', grade: '中3', subject: '数学', course: 'standard', month: 1, week_number: 1, target_sequence_order: 40, is_holiday: false },
-        { id: 'mp-feb', grade: '中3', subject: '数学', course: 'standard', month: 2, week_number: 1, target_sequence_order: 50, is_holiday: false }
+        { id: 'mp-feb', grade: '中3', subject: '数学', course: 'standard', month: 2, week_number: 1, target_sequence_order: 50, is_holiday: false },
+        { id: 'mp-holiday', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 4, is_holiday: true } // target_sequence_order is undefined
       ];
 
       const curriculumUnits: CurriculumUnit[] = [
@@ -407,6 +408,34 @@ describe('Scheduler and Core Logic Tests', () => {
       const resultEmpty = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-12-01', '数学');
       expect(resultEmpty.gapWeeks).toBe(0);
       expect(resultEmpty.status).toBe('normal');
+    });
+
+    it('should fallback target_sequence_order to 0 if null or undefined', () => {
+      const student: Student = {
+        id: 'std-test',
+        student_id: 'test',
+        name: 'テスト生徒',
+        email: 'test@example.com',
+        grade: '中3',
+        school_id: 'sch-1',
+        status: 'normal',
+        start_unit_id: null,
+        created_at: ''
+      };
+
+      const milestonePlans: MilestonePlan[] = [
+        { id: 'mp-holiday', grade: '中3', subject: '数学', course: 'standard', month: 6, week_number: 1, is_holiday: true } // target_sequence_order is undefined
+      ];
+
+      const curriculumUnits: CurriculumUnit[] = [
+        { id: 'u-1', school_id: 'sch-1', subject: '数学', name: '単元1', sequence_order: 10, created_at: '' }
+      ];
+
+      const tasks: LearningTask[] = [];
+
+      const result = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-06-01', '数学');
+      expect(result.gapWeeks).toBe(0);
+      expect(result.status).toBe('normal');
     });
 
     it('should reschedule tasks up to current week deadline and skip holiday weeks during reverse scheduling', () => {

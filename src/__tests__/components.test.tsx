@@ -976,6 +976,33 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
     });
 
+    fireEvent.change(scoreInput, { target: { value: '' } });
+    fireEvent.click(saveScoreBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
+    });
+
+    fireEvent.change(scoreInput, { target: { value: '88' } });
+    fireEvent.click(saveScoreBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
+    });
+    expect(screen.getByText('不合格 (再挑戦) ⚠️')).toBeInTheDocument();
+
+    fireEvent.change(scoreInput, { target: { value: '95' } });
+    fireEvent.click(saveScoreBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
+    });
+    expect(screen.getByText('合格 ✨')).toBeInTheDocument();
+
+    // 88点のアサーション期待値と整合させるため、再度88点に戻して保存する
+    fireEvent.change(scoreInput, { target: { value: '88' } });
+    fireEvent.click(saveScoreBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
+    });
+
     const completeCustomBtn = screen.getByText('この授業を完了にする');
     fireEvent.click(completeCustomBtn);
     await waitFor(() => {
@@ -1033,6 +1060,46 @@ describe('UI Components Render & Interaction Tests', () => {
     const finalMiniResults = db.getMiniTestResults();
     const finalResult = finalMiniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
     expect(finalResult?.score).toBe(95);
+
+    // 点数95点はレベルA(合格点90)なので、テーブル内で「合格」バッジが表示されていることを確認
+    const tr = scoreCellInput.closest('tr')!;
+    expect(tr.innerHTML).toContain('合格');
+    expect(tr.innerHTML).toContain('レベルA (90点)');
+
+    // 左下のレベルセレクトボックスを取得し、レベルC (基礎, 合格目標70点) に変更
+    const levelSelect = screen.getByLabelText('学習レベル:');
+    fireEvent.change(levelSelect, { target: { value: 'C' } });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('生徒の学習レベルを レベルC に更新しました。');
+    });
+    alertMock.mockClear();
+
+    // レベル変更後、テーブル表示が「レベルC (70点)」に切り替わったことを検証
+    expect(tr.innerHTML).toContain('レベルC (70点)');
+
+    // 点数を 75 点（レベルCでは合格）に変更して保存
+    fireEvent.change(scoreCellInput, { target: { value: '75' } });
+    fireEvent.click(teacherSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+    });
+    expect(tr.innerHTML).toContain('合格');
+
+    // 点数を 65 点（レベルCでは不合格）に変更して保存
+    fireEvent.change(scoreCellInput, { target: { value: '65' } });
+    fireEvent.click(teacherSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+    });
+    expect(tr.innerHTML).toContain('不合格');
+
+    // 次のテストへの影響を避けるため、元の値 95 点に戻しておく
+    fireEvent.change(scoreCellInput, { target: { value: '95' } });
+    fireEvent.click(teacherSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+    });
+    alertMock.mockClear();
 
     // 既存のテスト/宿題の削除保存テスト（DBからの削除ブランチのカバー）
     const tabScheduleBtn = screen.getByText('学習計画・コマ割り');
@@ -1208,6 +1275,16 @@ describe('UI Components Render & Interaction Tests', () => {
       created_at: new Date().toISOString()
     });
 
+    await db.saveHomeworkResult({
+      id: 'hw-unknown-student',
+      student_id: 'non-existent-student-id',
+      date: '2026-06-19',
+      homework_content: '変則宿題',
+      homework_deadline: null,
+      status: 'incomplete',
+      created_at: new Date().toISOString()
+    });
+
     // 表示更新のため生徒を切り替えて戻す
     const studentListTabBtn = screen.getAllByText('生徒一覧')[0];
     fireEvent.click(studentListTabBtn);
@@ -1225,6 +1302,11 @@ describe('UI Components Render & Interaction Tests', () => {
     // 反映とフォールバックの確認
     expect(screen.getByText('不明な生徒')).toBeInTheDocument();
 
+    // 宿題提出状況タブを開く
+    const tabHwBtn = screen.getByText('宿題提出状況');
+    fireEvent.click(tabHwBtn);
+    expect(screen.getByText('不明な生徒')).toBeInTheDocument();
+
     // 6. 年間計画タブのテスト (Milestones)
     // 一旦完了タスクを削除し、かつ平日（4月2週）に日付を変更して全ブランチを通す
     await db.deleteLearningTasksByStudent('std-1');
@@ -1239,12 +1321,11 @@ describe('UI Components Render & Interaction Tests', () => {
     const tabMilestones = screen.getByText('年間計画（マイルストーン）');
     fireEvent.click(tabMilestones);
     await waitFor(() => {
-      expect(screen.getByText('年間基準計画（マイルストーン） & 進捗現在地ハイライト')).toBeInTheDocument();
+      expect(screen.getByText(/年間基準計画（マイルストーン）/)).toBeInTheDocument();
     });
 
-    // 目標週バッジ、現在地バッジが表示されているか確認
-    expect(screen.getByText('🎯 目標週 (基準)')).toBeInTheDocument();
-    expect(screen.getAllByText(/現在地/).length).toBeGreaterThan(0);
+    // 進捗現在地バッジが表示されているか確認
+    expect(document.body.innerHTML).toContain('📍');
 
     // 教科の切り替え (英語へ) を追加し、onChange ブランチをカバーする
     const selectSubjectElement = container.querySelector('select[value="数学"]') as HTMLSelectElement;
@@ -1277,7 +1358,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     const studentB: Student = {
       id: 'std-B', student_id: 'student-B', name: '鈴木 花子', email: 'b@test.com',
-      grade: '小5', school_id: 'sch-2', status: 'normal', start_unit_id: null, created_at: ''
+      grade: '小5', school_id: 'sch-2', status: 'warning', start_unit_id: null, created_at: ''
     };
     await db.saveStudent(studentA);
     await db.saveStudent(studentB);
@@ -1359,14 +1440,45 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
 
     // 9. 中学生かつ start_unit_id ありの状態でマイルストーン計画を表示させてブランチカバー
+    await db.saveLearningTasks([
+      {
+        id: 'task-A-completed-1',
+        student_id: 'std-A',
+        unit_id: 'unit-108-4',
+        scheduled_date: '2026-06-20',
+        period: 1,
+        status: 'completed',
+        video_watched: true,
+        test_passed: true,
+        office_note: '',
+        actual_completed_date: '2026-06-20',
+        created_at: new Date().toISOString()
+      }
+    ]);
     const cardA = screen.getByText('田中 太郎 (中3)');
     fireEvent.click(cardA);
 
     const milestoneMenuBtn = screen.getByRole('button', { name: '年間計画（マイルストーン）' });
     fireEvent.click(milestoneMenuBtn);
-    // テーブルの中の「田中 太郎 現在地」が表示されるのを明示的に待ちます
-    await screen.findByText(/田中 太郎 現在地/);
-    expect(screen.getAllByText(/単元1/).length).toBeGreaterThan(0);
+    // テーブルの中の進捗現在地が表示されるのを明示的に待ちます
+    await waitFor(() => {
+      expect(document.body.innerHTML).toContain('📍');
+      expect(document.body.innerHTML).toContain('テーマ');
+    });
+    // 単元1がinput of valueとして描画されていることを確認
+    const hasUnit1 = Array.from(document.querySelectorAll('input')).some(input => input.value.includes('単元1'));
+    expect(hasUnit1).toBe(true);
+
+    // 対象教科を「英語」に切り替えて onChange ブランチをカバー
+    const labels = Array.from(document.querySelectorAll('label'));
+    const subjectLabel = labels.find(l => l.textContent?.includes('対象教科:'));
+    if (subjectLabel) {
+      const select = subjectLabel.nextElementSibling as HTMLSelectElement;
+      if (select) {
+        fireEvent.change(select, { target: { value: '英語' } });
+        fireEvent.change(select, { target: { value: '数学' } });
+      }
+    }
 
     // 10. 小学生の状態でマイルストーン計画を表示させて教科の算数ブランチカバー
     const studentListTabBtn2 = screen.getAllByText('生徒一覧')[0];
@@ -1382,5 +1494,242 @@ describe('UI Components Render & Interaction Tests', () => {
     db.clearMockData();
     db.getSchools();
     db.getStudents();
+  });
+
+  it('should support milestone customization and template CRUD lifecycle', async () => {
+    db.clearMockData();
+    db.getSchools();
+    db.getStudents();
+    db.getCurriculumUnits();
+    db.getMilestonePlans();
+
+    // 1. 新規生徒登録フォームでレベルBを指定して発行する
+    const { container, unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const createStudentTabBtn = screen.getAllByText('新規生徒アカウント発行')[0];
+    fireEvent.click(createStudentTabBtn);
+
+    const inputName = screen.getByPlaceholderText('例: 佐藤 拓海');
+    fireEvent.change(inputName, { target: { value: 'レベルB太郎' } });
+
+    const newStudentForm = screen.getByText('1クリックアカウント発行').closest('form')!;
+    const formSelects = newStudentForm.querySelectorAll('select');
+    fireEvent.change(formSelects[0], { target: { value: '中1' } });
+    fireEvent.change(formSelects[1], { target: { value: 'sch-1' } });
+    fireEvent.change(formSelects[2], { target: { value: 'B' } });
+
+    const submitBtn = screen.getByText('1クリックアカウント発行');
+    fireEvent.submit(submitBtn.closest('form')!);
+
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('生徒アカウントを発行しました'));
+    });
+    alertMock.mockClear();
+
+    // 2. 年間計画画面を表示する
+    const studentListTabBtn = screen.getAllByText('生徒一覧')[0];
+    fireEvent.click(studentListTabBtn);
+
+    const studentItem = screen.getByText(/レベルB太郎/);
+    fireEvent.click(studentItem);
+
+    const milestoneMenuBtn = screen.getByRole('button', { name: '年間計画（マイルストーン）' });
+    fireEvent.click(milestoneMenuBtn);
+
+    // レベルトグルでBが選択されていることを確認
+    const levelBBtn = screen.getByRole('button', { name: 'レベルB (発展)' });
+    expect(levelBBtn).toHaveClass(/segmentBtnActive/);
+
+    // レベルトグルをCに切り替える
+    const levelCBtn = screen.getByRole('button', { name: 'レベルC (基礎)' });
+    fireEvent.click(levelCBtn);
+    expect(levelCBtn).toHaveClass(/segmentBtnActive/);
+
+    // レベルトグルをBに切り替える
+    fireEvent.click(levelBBtn);
+    expect(levelBBtn).toHaveClass(/segmentBtnActive/);
+
+    // レベルトグルをAに切り替える
+    const levelABtn = screen.getByRole('button', { name: 'レベルA (標準)' });
+    fireEvent.click(levelABtn);
+    expect(levelABtn).toHaveClass(/segmentBtnActive/);
+
+    // 3. マイルストーン行の追加
+    const addMonthSelect = container.querySelector('#add-month-select')!;
+    const addWeekSelect = container.querySelector('#add-week-select')!;
+    fireEvent.change(addMonthSelect, { target: { value: '10' } });
+    fireEvent.change(addWeekSelect, { target: { value: '1' } });
+
+    const addRowBtn = screen.getByText('➕ 行を追加');
+    fireEvent.click(addRowBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('新しいマイルストーン行を追加しました。');
+    });
+    alertMock.mockClear();
+
+    // 2行目の追加 (空文字チャプター同士の比較用)
+    fireEvent.change(addMonthSelect, { target: { value: '10' } });
+    fireEvent.change(addWeekSelect, { target: { value: '2' } });
+    fireEvent.click(addRowBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('新しいマイルストーン行を追加しました。');
+    });
+    alertMock.mockClear();
+
+    expect(screen.getAllByText('10月').length).toBeGreaterThan(0);
+
+    // 4. マイルストーン行の上下移動
+    const upButtons = screen.getAllByTitle('上へ');
+    // 境界のテスト (一番上をさらに上へ移動 -> 早期リターンされるためアラートは呼ばれない)
+    fireEvent.click(upButtons[0]);
+    expect(alertMock).not.toHaveBeenCalled();
+
+    // 正常移動
+    fireEvent.click(upButtons[1]);
+
+    const downButtons = screen.getAllByTitle('下へ');
+    // 境界のテスト (一番下をさらに下へ移動 -> 早期リターンされるためアラートは呼ばれない)
+    fireEvent.click(downButtons[downButtons.length - 1]);
+    expect(alertMock).not.toHaveBeenCalled();
+
+    // 正常移動
+    fireEvent.click(downButtons[0]);
+
+    // 5. 休校日トグル
+    const holidayButtons = screen.getAllByTitle('休校日の切り替え');
+    fireEvent.click(holidayButtons[0]); // トグル ON
+    const holidayInputs = container.querySelectorAll('input[placeholder="休校理由を入力"]');
+    if (holidayInputs.length > 0) {
+      fireEvent.change(holidayInputs[0], { target: { value: 'テスト休校理由' } });
+    }
+    await waitFor(() => {
+      expect(screen.getByText('🎉 テスト休校理由')).toBeInTheDocument();
+    });
+
+    if (holidayInputs.length > 0) {
+      fireEvent.change(holidayInputs[0], { target: { value: '' } });
+    }
+    await waitFor(() => {
+      expect(screen.getByText('🎉 休校日')).toBeInTheDocument();
+    });
+    fireEvent.click(holidayButtons[0]); // トグル OFF
+
+    // 6. 章、単元名、目標テーマ、到達順序の編集
+    const chapterInputs = container.querySelectorAll('input[placeholder="例: 第1章 正の数・負の数"]');
+    if (chapterInputs.length > 0) {
+      fireEvent.change(chapterInputs[0], { target: { value: '第1章 新たな章' } });
+    }
+
+    const unitInputs = container.querySelectorAll('input[placeholder="例: 加法と減法"]');
+    if (unitInputs.length > 0) {
+      fireEvent.change(unitInputs[0], { target: { value: '新しい単元名' } });
+    }
+
+    const seqInputs = container.querySelectorAll('input[title="目標到達シーケンス順序"]');
+    if (seqInputs.length > 0) {
+      fireEvent.change(seqInputs[0], { target: { value: '15' } });
+      fireEvent.change(seqInputs[0], { target: { value: '' } });
+    }
+
+    const themeSelects = container.querySelectorAll('select');
+    const themeSelect = Array.from(themeSelects).find(s => s.innerHTML.includes('テーマを選択'));
+    if (themeSelect) {
+      fireEvent.change(themeSelect, { target: { value: '正の数と負の数' } });
+      fireEvent.change(themeSelect, { target: { value: '' } });
+    }
+
+    // 7. 章の順序一括変更
+    const chapterUpBtn = screen.getAllByTitle('章を上へ移動');
+    if (chapterUpBtn.length > 0) {
+      // 境界のテスト (一番上をさらに上へ移動 -> 早期リターンされるためアラートは呼ばれない)
+      fireEvent.click(chapterUpBtn[0]);
+      expect(alertMock).not.toHaveBeenCalled();
+    }
+
+    if (chapterUpBtn.length > 1) {
+      fireEvent.click(chapterUpBtn[1]);
+      await waitFor(() => {
+        expect(alertMock).toHaveBeenCalledWith('章の順序を入れ替えました。');
+      });
+      alertMock.mockClear();
+    }
+
+    const chapterDownBtn = screen.getAllByTitle('章を下へ移動');
+    if (chapterDownBtn.length > 0) {
+      // 境界のテスト (一番下をさらに下へ移動 -> 早期リターンされるためアラートは呼ばれない)
+      fireEvent.click(chapterDownBtn[chapterDownBtn.length - 1]);
+      expect(alertMock).not.toHaveBeenCalled();
+
+      // 正常移動のテスト
+      fireEvent.click(chapterDownBtn[0]);
+      await waitFor(() => {
+        expect(alertMock).toHaveBeenCalledWith('章の順序を入れ替えました。');
+      });
+      alertMock.mockClear();
+    }
+
+    // 8. テンプレート保存
+    const templateInput = screen.getByPlaceholderText(/現在の計画をテンプレート名として保存/);
+    
+    // 空文字での保存テスト (何も起こらない/リターンされる)
+    fireEvent.change(templateInput, { target: { value: '   ' } });
+    const saveTemplateBtn = screen.getByText('計画テンプレートを保存');
+    fireEvent.click(saveTemplateBtn);
+    expect(alertMock).not.toHaveBeenCalled();
+
+    // 正常な保存テスト
+    fireEvent.change(templateInput, { target: { value: 'テスト用カスタムテンプレート' } });
+    fireEvent.click(saveTemplateBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('テンプレートを保存しました。');
+    });
+    alertMock.mockClear();
+
+    // 9. 保存済みテンプレートの適用、名称変更、削除
+    const applyBtn = screen.getByText('呼び出して適用');
+    fireEvent.click(applyBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('適用しました'));
+    });
+    alertMock.mockClear();
+
+    const editNameBtn = screen.getByText('名称変更');
+    fireEvent.click(editNameBtn);
+    const cancelEditBtn = screen.getByText('キャンセル');
+    fireEvent.click(cancelEditBtn);
+    // 再度名称変更を開く (再レンダリング後の最新のボタン要素を再取得)
+    const editNameBtn2 = screen.getByText('名称変更');
+    fireEvent.click(editNameBtn2);
+    const templateNameInput = await screen.findByDisplayValue('テスト用カスタムテンプレート');
+
+    // 空文字で更新テスト (何も起こらない/リターンされる)
+    fireEvent.change(templateNameInput, { target: { value: '' } });
+    const saveNameBtn = screen.getByText('保存');
+    fireEvent.click(saveNameBtn);
+    expect(alertMock).not.toHaveBeenCalled();
+
+    // 正常な更新テスト
+    fireEvent.change(templateNameInput, { target: { value: '編集後テンプレート' } });
+    fireEvent.click(saveNameBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('テンプレート名を更新しました'));
+    });
+    alertMock.mockClear();
+
+    const deleteTemplateBtn = screen.getByText('削除');
+    fireEvent.click(deleteTemplateBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('テンプレートを削除しました。');
+    });
+    alertMock.mockClear();
+
+    // 10. 行の削除
+    const deleteRowButtons = screen.getAllByTitle('行削除');
+    fireEvent.click(deleteRowButtons[0]);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('マイルストーン行を削除しました。');
+    });
+    alertMock.mockClear();
+
+    unmount();
   });
 });

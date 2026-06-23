@@ -323,6 +323,13 @@ describe('Database Service CRUD Tests', () => {
     expect(savedHws).toBeDefined();
 
     await db.deleteHomeworkResult('sup-1');
+
+    const mp = { id: 'sup-1', grade: '中3', subject: '数学', course: 'standard' as const, month: 6, week_number: 1, is_holiday: false };
+    const savedMp = await db.saveMilestonePlan(mp);
+    expect(savedMp.id).toBe('sup-id');
+
+    const savedMps = await db.saveMilestonePlans([mp]);
+    expect(savedMps).toBeDefined();
   });
 
   // Supabase error paths simulation
@@ -396,6 +403,7 @@ describe('Database Service CRUD Tests', () => {
 
     const mp = { id: 'sup-1', grade: '中3', subject: '数学', course: 'standard' as const, month: 6, week_number: 1, is_holiday: false };
     await expect(db.saveMilestonePlan(mp)).rejects.toThrow('Database Error');
+    await expect(db.saveMilestonePlans([mp])).rejects.toThrow('Database Error');
   });
 
   // JSON parse error cover

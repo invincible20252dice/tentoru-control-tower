@@ -56,8 +56,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 生徒による小テスト結果の送信
   const handleSaveStudentScore = async (testId: string, scoreInput: string) => {
-    const test = miniTestResults.find(r => r.id === testId);
-    if (!test) return;
+    const test = miniTestResults.find(r => r.id === testId)!;
 
     const scoreVal = scoreInput === '' ? null : parseInt(scoreInput);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
@@ -299,32 +298,52 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                 📝 本日のテスト
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {miniTestResults.map(test => (
-                  <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }}>
-                    <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>{test.test_content}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={studentScores[test.id]}
-                        onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
-                        placeholder="点数を入力"
-                        className={styles.input}
-                        style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleSaveStudentScore(test.id, studentScores[test.id])}
-                        className={styles.btn}
-                        style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                      >
-                        結果を保存
-                      </button>
+                {miniTestResults.map(test => {
+                  const stLevel = student.level || 'A';
+                  const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+                  const currentScore = test.score;
+                  let statusBadge = null;
+                  if (currentScore !== null && currentScore !== undefined) {
+                    const isPassed = currentScore >= passScore;
+                    statusBadge = isPassed ? (
+                      <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', marginLeft: '8px' }}>合格 ✨</span>
+                    ) : (
+                      <span style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', marginLeft: '8px' }}>不合格 (再挑戦) ⚠️</span>
+                    );
+                  }
+                  return (
+                    <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }}>
+                      <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>
+                        {test.test_content}
+                        <span style={{ marginLeft: '10px', fontSize: '0.75rem', color: '#4b5563', fontWeight: 'normal' }}>
+                          (レベル{stLevel}目標: {passScore}点)
+                        </span>
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={studentScores[test.id]}
+                          onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
+                          placeholder="点数を入力"
+                          className={styles.input}
+                          style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveStudentScore(test.id, studentScores[test.id])}
+                          className={styles.btn}
+                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          結果を保存
+                        </button>
+                        {statusBadge}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
