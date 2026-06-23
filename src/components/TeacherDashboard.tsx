@@ -846,7 +846,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
 
   // --- 年間計画（マイルストーン）カスタマイズ & テンプレート用ヘルパー関数 ---
   const getFilteredMilestones = () => {
-    const currentGrade = selectedStudent.grade;
+    const currentGrade = selectedStudent!.grade;
     return milestonePlans
       .filter(p => p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard')
       .sort((a, b) => {
@@ -859,7 +859,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   };
 
   const handleAddMilestoneRow = async (month: number, week: number) => {
-    const currentGrade = selectedStudent.grade;
+    const currentGrade = selectedStudent!.grade;
     const newPlan: MilestonePlan = {
       id: `mp-custom-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       grade: currentGrade,
@@ -1055,7 +1055,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
 
   const handleSaveTemplate = async (name: string) => {
     if (!name.trim()) return;
-    const currentGrade = selectedStudent.grade;
+    const currentGrade = selectedStudent!.grade;
     const filtered = getFilteredMilestones();
     const template: MilestoneTemplate = {
       id: `temp-${Date.now()}`,
@@ -1076,7 +1076,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     const templates = db.getMilestoneTemplates();
     const target = templates.find(t => t.id === templateId)!;
 
-    const currentGrade = selectedStudent.grade;
+    const currentGrade = selectedStudent!.grade;
 
     const filteredOut = milestonePlans.filter(p => 
       !(p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard')
