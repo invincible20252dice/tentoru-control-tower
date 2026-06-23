@@ -811,4 +811,295 @@ describe('UI Components Render & Interaction Tests', () => {
     db.clearMockData();
     db.getSchools();
   });
+
+  it('should support period selection, homework, test config saves in TeacherDashboard and reflect in StudentDashboard', async () => {
+    await db.saveMiniTestResult({
+      id: 'mini-std-1-yesterday',
+      student_id: 'std-1',
+      date: '2026-06-18',
+      test_content: '過去のテスト',
+      score: 70,
+      homework_content: '宿題その1',
+      homework_deadline: '2026-06-19',
+      created_at: new Date().toISOString()
+    });
+
+    const { unmount: unmountTeacher } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    
+    const studentItem = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentItem);
+    
+    const tabSchedule = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(tabSchedule);
+
+    const tabMiniTests = screen.getByText('小テスト結果');
+    expect(tabMiniTests).toBeInTheDocument();
+
+    const cellNum1 = screen.getByText('1', { selector: 'span' });
+    const period1Select = cellNum1.parentElement!.querySelector('select')!;
+    fireEvent.change(period1Select, { target: { value: '理科' } });
+    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 歴史・電流など）');
+    fireEvent.change(customThemeInput, { target: { value: '電流の性質' } });
+
+    const officeNoteTextarea = screen.getByPlaceholderText('業務連絡（例：提出ワーク忘れずに）');
+    fireEvent.change(officeNoteTextarea, { target: { value: '持ち物：実験道具' } });
+
+    const testInput = screen.getByPlaceholderText('例: 不規則動詞テスト50問、二次方程式10問');
+    const hwContentInput = screen.getByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    const hwDeadlineInput = screen.getByLabelText(/期限:/);
+
+    fireEvent.change(testInput, { target: { value: '数学小テスト（一次方程式）' } });
+    fireEvent.change(hwContentInput, { target: { value: '数学ワークP45' } });
+    fireEvent.change(hwDeadlineInput, { target: { value: '2026-06-25' } });
+
+    const saveBtn = screen.getByText('時間割コマ割りを保存');
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    const miniResults = db.getMiniTestResults();
+    const result = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(result).toBeDefined();
+    expect(result?.test_content).toBe('数学小テスト（一次方程式）');
+    expect(result?.homework_content).toBe('数学ワークP45');
+    expect(result?.homework_deadline).toBe('2026-06-25');
+
+    unmountTeacher();
+
+    const testStudent: Student = {
+      id: 'std-1',
+      student_id: 'student101',
+      name: '佐藤 拓海',
+      email: 'student101@tentoru.com',
+      grade: '中3',
+      school_id: 'sch-1',
+      status: 'normal',
+      start_unit_id: null,
+      created_at: ''
+    };
+    
+    const { unmount } = render(<StudentDashboard student={testStudent} onBackToPortal={() => {}} />);
+
+    expect(screen.getByText('📝 本日のテスト')).toBeInTheDocument();
+    expect(screen.getByText('数学小テスト（一次方程式）')).toBeInTheDocument();
+    expect(screen.getByText('📚 今日の宿題')).toBeInTheDocument();
+    expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
+    expect(screen.getByText('提出期限: 2026-06-25')).toBeInTheDocument();
+
+    const scoreInput = screen.getByPlaceholderText('点数を入力');
+    const scoreForm = scoreInput.closest('form')!;
+    fireEvent.change(scoreInput, { target: { value: '150' } });
+    fireEvent.submit(scoreForm);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('0〜100の点数を入力してください。');
+    });
+
+    fireEvent.change(scoreInput, { target: { value: '88' } });
+    fireEvent.submit(scoreForm);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を送信しました！');
+    });
+
+    const completeCustomBtn = screen.getByText('この授業を完了にする');
+    fireEvent.click(completeCustomBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('授業を完了にしました！');
+    });
+
+    const updatedMiniResults = db.getMiniTestResults();
+    const updatedResult = updatedMiniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(updatedResult?.score).toBe(88);
+
+    unmount();
+
+    const { unmount: unmountTeacher2 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItem2 = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentItem2);
+    const tabMiniTestsBtn = screen.getByText('小テスト結果');
+    fireEvent.click(tabMiniTestsBtn);
+
+    expect(screen.getByText('数学小テスト（一次方程式）')).toBeInTheDocument();
+    expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
+    
+    const scoreCellInput = screen.getByDisplayValue('88');
+    fireEvent.change(scoreCellInput, { target: { value: '150' } });
+    const teacherSaveBtn = scoreCellInput.closest('tr')!.querySelector('button')!;
+    fireEvent.click(teacherSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('点数は0〜100の範囲で入力してください。');
+    });
+
+    fireEvent.change(scoreCellInput, { target: { value: '95' } });
+    fireEvent.click(teacherSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+    });
+
+    const finalMiniResults = db.getMiniTestResults();
+    const finalResult = finalMiniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    expect(finalResult?.score).toBe(95);
+
+    unmountTeacher2();
+  });
+
+  it('should support edge cases, unit sorting, custom task updates, and AI report manual corrections in TeacherDashboard', async () => {
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    
+    // 生徒を選択する
+    const studentItem = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentItem);
+
+    // 0. 初期状態での小テスト結果が空であることの確認 (length === 0 分岐のカバー)
+    const tabMiniTestsBtn = screen.getByText('小テスト結果');
+    fireEvent.click(tabMiniTestsBtn);
+    expect(screen.getByText('記録された小テスト結果はありません。')).toBeInTheDocument();
+
+    // 1. カリキュラム順序変更 (moveUnit) のテスト
+    // 「学校カリキュラム管理」タブを開く
+    const tabCurriculum = screen.getByText('学校カリキュラム管理');
+    fireEvent.click(tabCurriculum);
+
+    // リストの移動ボタンを取得
+    const upButtons = screen.getAllByTitle('上へ移動');
+    const downButtons = screen.getAllByTitle('下へ移動');
+    
+    // ガード節の検証 (最上部を上、最下部を下)
+    fireEvent.click(upButtons[0]);
+    fireEvent.click(downButtons[downButtons.length - 1]);
+    
+    // 通常の移動 (上から2番目を上へ)
+    if (upButtons.length > 1) {
+      fireEvent.click(upButtons[1]);
+      await waitFor(() => {
+        expect(alertMock).toHaveBeenLastCalledWith('カリキュラムの順序を更新し、対象生徒の未来の学習計画を再編しました。(過去の完了ログは維持されています)');
+      });
+    }
+
+    // 2. カスタムタスクの上書き更新
+    // 学習計画・コマ割りタブを開く
+    const tabSchedule = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(tabSchedule);
+
+    // 1時間目に理科を選択し、テーマを入力して保存
+    const cellNum1 = screen.getByText('1', { selector: 'span' });
+    const period1Select = cellNum1.parentElement!.querySelector('select')!;
+    fireEvent.change(period1Select, { target: { value: '理科' } });
+    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 歴史・電流など）');
+    fireEvent.change(customThemeInput, { target: { value: '電流の性質' } });
+    
+    const saveBtn = screen.getByText('時間割コマ割りを保存');
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    // 同じスロットに再度別テーマのカスタムタスクを設定して保存 (existingCustomTaskIdx >= 0 の上書き処理)
+    fireEvent.change(customThemeInput, { target: { value: '光の反射' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+    
+    // 反映を確認
+    const miniTasks = db.getLearningTasks();
+    const updatedCustom = miniTasks.find(t => t.student_id === 'std-1' && t.scheduled_date === '2026-06-19' && t.period === 1);
+    expect(updatedCustom?.custom_unit_name).toBe('光の反射');
+
+    // 3. 数学や英語でのカリキュラム単元選択 (unitId) と「またはテーマを自由に入力」の変更テスト
+    // 1時間目を数学に変更
+    fireEvent.change(period1Select, { target: { value: '数学' } });
+    // 数学に変更するとカリキュラム単元のドロップダウンが表示される
+    const parentContainer = period1Select.parentElement!;
+    await waitFor(() => {
+      const selects = parentContainer.querySelectorAll('select');
+      expect(selects.length).toBe(2);
+    });
+    const selects = parentContainer.querySelectorAll('select');
+    const unitSelect = selects[1]; // 単元セレクト
+    
+    // プルダウンを変更 (単元を選択)
+    fireEvent.change(unitSelect, { target: { value: 'unit-101-1' } });
+    
+    // 「またはテーマを自由に入力」が disabled になっていることを確認
+    const unitCustomInput = parentContainer.querySelector('input[placeholder="またはテーマを自由に入力"]')! as HTMLInputElement;
+    await waitFor(() => {
+      expect(unitCustomInput).toBeDisabled();
+    });
+
+    // プルダウンを未選択に戻し、自由入力を可能にする
+    fireEvent.change(unitSelect, { target: { value: '' } });
+    await waitFor(() => {
+      expect(unitCustomInput).not.toBeDisabled();
+    });
+    fireEvent.change(unitCustomInput, { target: { value: '数学自由単元' } });
+    
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    // 4. AI指導報告書の手動修正および未生成保存ガードのテスト
+    const tabAIReport = screen.getByText('AI指導報告書');
+    fireEvent.click(tabAIReport);
+    
+    // レポートテキストが空の状態で保存ボタンをクリック (ガードを通過)
+    const reportSaveBtn = screen.getByText('報告書を保存 ＆ 修正履歴を学習 (パターンB)');
+    fireEvent.click(reportSaveBtn);
+    
+    // AI報告書を生成
+    const generateAIBtn = screen.getByText('今月の学習ログから報告書を自動生成 (AI分析ステップ)');
+    fireEvent.click(generateAIBtn);
+    
+    // 生成完了を待つ (setTimeoutが1.5秒)
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('AI報告書の文章を自動生成しました！');
+    }, { timeout: 3000 });
+
+    // 生成されたテキストを変更する
+    const reportTextarea = document.querySelectorAll('textarea')[0];
+    const originalText = reportTextarea.value;
+    fireEvent.change(reportTextarea, { target: { value: originalText + '\n追加のフィードバック' } });
+    
+    // 保存を実行
+    fireEvent.click(reportSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('指導報告書を保存し、文体修正履歴を学習しました！');
+    });
+
+    // 学習履歴に保存されたか確認
+    const correctionLogs = db.getTeacherCorrectionsLogs();
+    expect(correctionLogs.length).toBeGreaterThan(0);
+    expect(correctionLogs[0].corrected_text).toContain('追加のフィードバック');
+
+    // 5. 小テスト結果管理での変則データのカバレッジテスト
+    // 不明な生徒や、宿題なし・期限なしの小テスト結果を表示させるテスト
+    await db.saveMiniTestResult({
+      id: 'mini-unknown-student',
+      student_id: 'non-existent-student-id',
+      date: '2026-06-19',
+      test_content: '変則テスト',
+      score: null,
+      homework_content: '',
+      homework_deadline: '',
+      created_at: new Date().toISOString()
+    });
+
+    // 表示更新のため生徒を切り替えて戻す
+    const yuiItem = screen.getByText(/鈴木 結衣/);
+    fireEvent.click(yuiItem);
+    const takumiItem = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(takumiItem);
+
+    // 再度小テスト結果タブを開く
+    const tabMiniTestsBtn2 = screen.getByText('小テスト結果');
+    fireEvent.click(tabMiniTestsBtn2);
+
+    // 反映とフォールバックの確認
+    expect(screen.getByText('不明な生徒')).toBeInTheDocument();
+    const cellNones = screen.getAllByText('なし');
+    expect(cellNones.length).toBeGreaterThan(0);
+
+    unmount();
+  });
 });

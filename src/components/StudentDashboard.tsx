@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
-import { db, Student, LearningTask, CurriculumUnit, LearningLog } from '../lib/db';
+import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult } from '../lib/db';
 import SugorokuMap from './SugorokuMap';
 
 interface StudentDashboardProps {
@@ -14,6 +14,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [units, setUnits] = useState<CurriculumUnit[]>([]);
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>([]);
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-06-19'); // デモ用初期日付
+  const [miniTestResult, setMiniTestResult] = useState<MiniTestResult | null>(null);
+  const [studentScoreInput, setStudentScoreInput] = useState<string>('');
 
   const loadData = () => {
     const allTasks = db.getLearningTasks();
@@ -29,11 +31,49 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     // period の昇順でソート
     today.sort((a, b) => (a.period || 0) - (b.period || 0));
     setTodayTasks(today);
+
+    // 今日の小テスト・宿題結果
+    const miniResults = db.getMiniTestResults();
+    const todayMini = miniResults.find(r => r.student_id === student.id && r.date === currentDateStr);
+    setMiniTestResult(todayMini || null);
+    setStudentScoreInput(todayMini && todayMini.score !== null ? todayMini.score.toString() : '');
   };
 
   useEffect(() => {
     loadData();
   }, [student.id, currentDateStr]);
+
+  // 生徒による小テスト結果の送信
+  const handleSaveStudentScore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!miniTestResult) return;
+
+    const scoreVal = studentScoreInput === '' ? null : parseInt(studentScoreInput);
+    if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
+      alert('0〜100の点数を入力してください。');
+      return;
+    }
+
+    const updated = {
+      ...miniTestResult,
+      score: scoreVal
+    };
+    await db.saveMiniTestResult(updated);
+    alert('小テスト点数を送信しました！');
+    loadData();
+  };
+
+  // カリキュラム外タスクを完了にする
+  const handleCompleteCustomTask = async (task: LearningTask) => {
+    const updated: LearningTask = {
+      ...task,
+      status: 'completed',
+      actual_completed_date: currentDateStr
+    };
+    await db.saveLearningTasks([updated]);
+    alert('授業を完了にしました！');
+    loadData();
+  };
 
   // 1. 動画視聴ボタンのアクション
   const handleWatchVideo = async (task: LearningTask) => {
@@ -241,6 +281,54 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             今日の時間割・タスク ({currentDateStr})
           </h2>
 
+          {/* 本日のテスト表示 */}
+          {miniTestResult && miniTestResult.test_content && (
+            <div style={{ margin: '12px 0', padding: '16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fee2e2' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📝 本日のテスト
+              </h3>
+              <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#374151' }}>{miniTestResult.test_content}</p>
+              
+              <form onSubmit={handleSaveStudentScore} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={studentScoreInput}
+                  onChange={e => setStudentScoreInput(e.target.value)}
+                  placeholder="点数を入力"
+                  className={styles.input}
+                  style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
+                />
+                <button
+                  type="submit"
+                  className={styles.btn}
+                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  結果を保存
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* 宿題表示 */}
+          {miniTestResult && miniTestResult.homework_content && (
+            <div style={{ margin: '12px 0', padding: '16px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700 }}>
+                📚 今日の宿題
+              </h3>
+              <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
+                {miniTestResult.homework_content}
+              </p>
+              {miniTestResult.homework_deadline && (
+                <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
+                  提出期限: {miniTestResult.homework_deadline}
+                </div>
+              )}
+            </div>
+          )}
+
           {todayTasks.length === 0 ? (
             <div className={styles.emptyTimetable}>
               今日のコマ割り予定はありません。自習で動画視聴やテストを進めましょう。
@@ -249,26 +337,29 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             <div className={styles.timetable}>
               {todayTasks.map(task => {
                 const unit = units.find(u => u.id === task.unit_id);
-                if (!unit) return null;
+                const subjectName = task.subject || (unit ? unit.subject : 'その他');
+                const themeName = task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし');
+                const googleDriveUrl = unit?.google_drive_url;
+                const isCustomTask = !unit;
 
                 return (
                   <div key={task.id} className={styles.periodRow}>
                     <div className={styles.periodNumber}>{task.period}</div>
                     <div className={styles.periodContent}>
                       <div className={styles.periodHeader}>
-                        <span className={styles.subjectName}>{unit.subject}</span>
+                        <span className={styles.subjectName}>{subjectName}</span>
                         <div>
                           {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`}>合格完了！</span>}
                           {task.status === 'failed' && <span className={`${styles.badge} ${styles.statusWarning}`}>不合格 (再挑戦)</span>}
                         </div>
                       </div>
-                      <div className={styles.unitName}>{unit.name}</div>
+                      <div className={styles.unitName}>{themeName}</div>
 
                       {/* Google Drive Link for printing materials */}
-                      {unit.google_drive_url && (
+                      {googleDriveUrl && (
                         <div>
                           <a 
-                            href={unit.google_drive_url} 
+                            href={googleDriveUrl} 
                             target="_blank" 
                             rel="noopener noreferrer" 
                             className={styles.printLink}
@@ -286,39 +377,50 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         </div>
                       )}
 
-
-
                       {/* Student Tasks Actions */}
                       <div className={styles.actions}>
-                        {!task.video_watched && task.status !== 'completed' ? (
-                          <button 
-                            onClick={() => handleWatchVideo(task)} 
-                            className={`${styles.btn} ${styles.btnPrimary}`}
-                          >
-                            動画を視聴する (10分)
-                          </button>
-                        ) : (
+                        {isCustomTask ? (
                           task.status !== 'completed' && (
-                            <span className={`${styles.btn} ${styles.btnSecondary}`} style={{ cursor: 'default' }}>
-                              動画視聴済み
-                            </span>
-                          )
-                        )}
-
-                        {task.status !== 'completed' && (
-                          <>
                             <button 
-                              onClick={() => handlePassTest(task)} 
+                              onClick={() => handleCompleteCustomTask(task)} 
                               className={`${styles.btn} ${styles.btnSuccess}`}
                             >
-                              単元テストを受ける (合格)
+                              この授業を完了にする
                             </button>
-                            <button 
-                              onClick={() => handleFailTest(task)} 
-                              className={`${styles.btn} ${styles.btnSecondary}`}
-                            >
-                              テストを受ける (不合格)
-                            </button>
+                          )
+                        ) : (
+                          <>
+                            {!task.video_watched && task.status !== 'completed' ? (
+                              <button 
+                                onClick={() => handleWatchVideo(task)} 
+                                className={`${styles.btn} ${styles.btnPrimary}`}
+                              >
+                                動画を視聴する (10分)
+                              </button>
+                            ) : (
+                              task.status !== 'completed' && (
+                                <span className={`${styles.btn} ${styles.btnSecondary}`} style={{ cursor: 'default' }}>
+                                  動画視聴済み
+                                </span>
+                              )
+                            )}
+
+                            {task.status !== 'completed' && (
+                              <>
+                                <button 
+                                  onClick={() => handlePassTest(task)} 
+                                  className={`${styles.btn} ${styles.btnSuccess}`}
+                                >
+                                  単元テストを受ける (合格)
+                                </button>
+                                <button 
+                                  onClick={() => handleFailTest(task)} 
+                                  className={`${styles.btn} ${styles.btnSecondary}`}
+                                >
+                                  テストを受ける (不合格)
+                                </button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>

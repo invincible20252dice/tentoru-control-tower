@@ -36,12 +36,14 @@ export interface LearningTask {
   student_id: string;
   unit_id: string;
   scheduled_date: string; // YYYY-MM-DD
-  period: number | null; // 1 to 4
+  period: number | null; // 1 to 10
   status: 'unstarted' | 'skipped' | 'completed' | 'failed';
   video_watched: boolean;
   test_passed: boolean;
   office_note?: string;
   actual_completed_date?: string;
+  subject?: string;
+  custom_unit_name?: string;
   created_at: string;
 }
 
@@ -108,6 +110,17 @@ export interface TeacherCorrectionLog {
   student_id: string;
   original_text: string;
   corrected_text: string;
+  created_at: string;
+}
+
+export interface MiniTestResult {
+  id: string;
+  student_id: string;
+  date: string; // YYYY-MM-DD
+  test_content: string; // 自由記述テスト内容
+  score: number | null; // 結果点数
+  homework_content: string; // 宿題内容
+  homework_deadline: string; // 宿題期限 (YYYY-MM-DD)
   created_at: string;
 }
 
@@ -721,6 +734,26 @@ class DatabaseService {
     }
   }
 
+  // 12. MiniTestResults CRUD
+  public getMiniTestResults(): MiniTestResult[] {
+    return this.getMockData('mini_test_results', []);
+  }
+
+  public async saveMiniTestResult(result: MiniTestResult): Promise<MiniTestResult> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('mini_test_results').upsert(result).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getMiniTestResults();
+      const idx = list.findIndex(r => r.id === result.id);
+      if (idx >= 0) list[idx] = result;
+      else list.push(result);
+      this.saveMockData('mini_test_results', list);
+      return result;
+    }
+  }
+
   // Clear mock data if needed (for testing or reset)
   public clearMockData(): void {
     if (!this.isBrowser()) return;
@@ -735,6 +768,7 @@ class DatabaseService {
     localStorage.removeItem('tentoru_ai_reports');
     localStorage.removeItem('tentoru_prompt_settings');
     localStorage.removeItem('tentoru_teacher_corrections_log');
+    localStorage.removeItem('tentoru_mini_test_results');
   }
 }
 

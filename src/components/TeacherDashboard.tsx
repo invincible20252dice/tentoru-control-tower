@@ -12,7 +12,8 @@ import {
   ExamThresholdMaster, 
   AIReport, 
   PromptSetting,
-  TeacherCorrectionLog
+  TeacherCorrectionLog,
+  MiniTestResult
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -34,7 +35,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'tests' | 'ai-report'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'tests' | 'ai-report'>('schedule');
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
@@ -49,11 +50,31 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   // Daily Scheduler State
   const [scheduleDate, setScheduleDate] = useState('2026-06-19');
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
-  const [periodSelections, setPeriodSelections] = useState<Record<number, string>>({
-    1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '', 10: ''
+  
+  // 各コマの選択状態：教科、単元ID、カスタムテーマ
+  const [periodSelections, setPeriodSelections] = useState<Record<number, { subject: string; unitId: string; customTheme: string; }>>({
+    1: { subject: '', unitId: '', customTheme: '' },
+    2: { subject: '', unitId: '', customTheme: '' },
+    3: { subject: '', unitId: '', customTheme: '' },
+    4: { subject: '', unitId: '', customTheme: '' },
+    5: { subject: '', unitId: '', customTheme: '' },
+    6: { subject: '', unitId: '', customTheme: '' },
+    7: { subject: '', unitId: '', customTheme: '' },
+    8: { subject: '', unitId: '', customTheme: '' },
+    9: { subject: '', unitId: '', customTheme: '' },
+    10: { subject: '', unitId: '', customTheme: '' }
   });
   const [periodCount, setPeriodCount] = useState<number>(2);
   const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
+
+  // 宿題・テスト用の State
+  const [homeworkContent, setHomeworkContent] = useState<string>('');
+  const [homeworkDeadline, setHomeworkDeadline] = useState<string>('');
+  const [todayTestContent, setTodayTestContent] = useState<string>('');
+
+  // 小テスト結果リスト
+  const [miniTestResultsList, setMiniTestResultsList] = useState<MiniTestResult[]>([]);
+  const [tempScores, setTempScores] = useState<Record<string, string>>({});
 
   // Start Unit position State
   const [startUnitId, setStartUnitId] = useState<string>('');
@@ -116,14 +137,30 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
 
         // Load today's periods values
         const today = freshTasks.filter(t => t.scheduled_date === scheduleDate);
-        const newPeriods: Record<number, string> = {
-          1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '', 10: ''
-        };
+        const newPeriods: Record<number, { subject: string; unitId: string; customTheme: string; }> = {};
+        for (let i = 1; i <= 10; i++) {
+          newPeriods[i] = { subject: '', unitId: '', customTheme: '' };
+        }
         let loadedPeriodCount = freshSt.period_count || 2;
         let foundCommonNote = '';
+        
         today.forEach(t => {
           if (t.period) {
-            newPeriods[t.period] = t.unit_id;
+            const units = db.getCurriculumUnits();
+            const unit = units.find(u => u.id === t.unit_id);
+            if (unit) {
+              newPeriods[t.period] = {
+                subject: t.subject || unit.subject,
+                unitId: t.unit_id,
+                customTheme: ''
+              };
+            } else {
+              newPeriods[t.period] = {
+                subject: t.subject || 'テスト',
+                unitId: '',
+                customTheme: t.custom_unit_name || ''
+              };
+            }
             if (t.period > loadedPeriodCount) {
               loadedPeriodCount = t.period;
             }
@@ -135,6 +172,19 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
         setPeriodSelections(newPeriods);
         setPeriodCount(loadedPeriodCount);
         setCommonOfficeNote(foundCommonNote);
+
+        // Load MiniTestResult for today
+        const miniResults = db.getMiniTestResults();
+        const todayMiniResult = miniResults.find(r => r.student_id === freshSt.id && r.date === scheduleDate);
+        if (todayMiniResult) {
+          setHomeworkContent(todayMiniResult.homework_content);
+          setHomeworkDeadline(todayMiniResult.homework_deadline);
+          setTodayTestContent(todayMiniResult.test_content);
+        } else {
+          setHomeworkContent('');
+          setHomeworkDeadline('');
+          setTodayTestContent('');
+        }
 
         // Load test records
         const allTests = db.getTestRecords();
@@ -169,6 +219,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     if (prompts.length > 0) {
       setAiPrompt(prompts[0].prompt_template);
     }
+
+    // Load all mini test results
+    const allMiniResults = db.getMiniTestResults();
+    setMiniTestResultsList(allMiniResults);
+    const scoresMap: Record<string, string> = {};
+    allMiniResults.forEach(r => {
+      scoresMap[r.id] = r.score !== null ? r.score.toString() : '';
+    });
+    setTempScores(scoresMap);
   };
 
   useEffect(() => {
@@ -333,36 +392,85 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     if (!selectedStudent) return;
 
     // 本日の既存のタスクの period を一旦クリア
-    const clearedTasks = studentTasks.map(t => {
+    let clearedTasks = studentTasks.map(t => {
       if (t.scheduled_date === scheduleDate) {
         return { ...t, period: null, office_note: '' };
       }
       return t;
     });
 
-    // 新たなコマ割り設定を適用
-    const updatedTasks = clearedTasks.map(task => {
-      // どのコマに設定されているか探す
-      let foundPeriod: number | null = null;
-      for (const [p, unitId] of Object.entries(periodSelections)) {
-        if (unitId === task.unit_id) {
-          foundPeriod = parseInt(p);
-          break;
+    const newCustomTasks: LearningTask[] = [];
+
+    // periodSelections の設定を反映
+    for (let p = 1; p <= periodCount; p++) {
+      const config = periodSelections[p];
+      if (!config || !config.subject) {
+        continue;
+      }
+
+      if (config.unitId) {
+        clearedTasks = clearedTasks.map(task => {
+          if (task.unit_id === config.unitId) {
+            return {
+              ...task,
+              scheduled_date: scheduleDate,
+              period: p,
+              subject: config.subject,
+              office_note: commonOfficeNote
+            };
+          }
+          return task;
+        });
+      } else {
+        const customUnitId = `custom-${selectedStudent.id}-${scheduleDate}-${p}`;
+        const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
+        
+        if (existingCustomTaskIdx >= 0) {
+          clearedTasks[existingCustomTaskIdx] = {
+            ...clearedTasks[existingCustomTaskIdx],
+            scheduled_date: scheduleDate,
+            period: p,
+            subject: config.subject,
+            custom_unit_name: config.customTheme,
+            office_note: commonOfficeNote
+          };
+        } else {
+          newCustomTasks.push({
+            id: `task-custom-${Date.now()}-${p}`,
+            student_id: selectedStudent.id,
+            unit_id: customUnitId,
+            scheduled_date: scheduleDate,
+            period: p,
+            status: 'unstarted',
+            video_watched: false,
+            test_passed: false,
+            subject: config.subject,
+            custom_unit_name: config.customTheme,
+            office_note: commonOfficeNote,
+            created_at: new Date().toISOString()
+          });
         }
       }
+    }
 
-      if (foundPeriod !== null && foundPeriod <= periodCount) {
-        return {
-          ...task,
-          scheduled_date: scheduleDate,
-          period: foundPeriod,
-          office_note: commonOfficeNote
-        };
-      }
-      return task;
-    });
+    const allTasksToSave = [...clearedTasks, ...newCustomTasks];
+    await db.saveLearningTasks(allTasksToSave);
 
-    await db.saveLearningTasks(updatedTasks);
+    // 宿題と本日のテスト結果を MiniTestResult として保存
+    const miniResults = db.getMiniTestResults();
+    const existingMiniResult = miniResults.find(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
+    
+    const miniResultData: MiniTestResult = {
+      id: existingMiniResult?.id || `mini-${selectedStudent.id}-${scheduleDate}`,
+      student_id: selectedStudent.id,
+      date: scheduleDate,
+      test_content: todayTestContent,
+      score: existingMiniResult ? existingMiniResult.score : null,
+      homework_content: homeworkContent,
+      homework_deadline: homeworkDeadline,
+      created_at: existingMiniResult?.created_at || new Date().toISOString()
+    };
+    await db.saveMiniTestResult(miniResultData);
 
     // 生徒情報の period_count も更新して保存
     const updatedStudent = {
@@ -373,6 +481,23 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     setSelectedStudent(updatedStudent);
 
     alert('今日の時間割コマ割りを保存しました！');
+    loadData();
+  };
+
+  // 小テスト結果の保存
+  const handleSaveMiniTestScore = async (result: MiniTestResult) => {
+    const scoreStr = tempScores[result.id] || '';
+    const scoreVal = scoreStr === '' ? null : parseInt(scoreStr);
+    if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
+      alert('点数は0〜100の範囲で入力してください。');
+      return;
+    }
+    const updated = {
+      ...result,
+      score: scoreVal
+    };
+    await db.saveMiniTestResult(updated);
+    alert('小テスト点数を保存しました！');
     loadData();
   };
 
@@ -762,6 +887,12 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   学校カリキュラム管理
                 </button>
                 <button 
+                  className={`${styles.tabBtn} ${activeTab === 'mini-tests' ? styles.tabBtnActive : ''}`}
+                  onClick={() => setActiveTab('mini-tests')}
+                >
+                  小テスト結果
+                </button>
+                <button 
                   className={`${styles.tabBtn} ${activeTab === 'tests' ? styles.tabBtnActive : ''}`}
                   onClick={() => setActiveTab('tests')}
                 >
@@ -834,27 +965,92 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       </div>
                       
                       <div className={styles.timetableSetup}>
-                        {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => (
-                          <div key={p} className={styles.cellRow}>
-                            <span className={styles.cellNum}>{p}</span>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
-                              <select
-                                value={periodSelections[p] || ''}
-                                onChange={e => {
-                                  setPeriodSelections({ ...periodSelections, [p]: e.target.value });
-                                }}
-                                className={styles.select}
-                              >
-                                <option value="">-- コマ割りなし --</option>
-                                {db.getCurriculumUnits()
-                                  .filter(u => u.school_id === selectedStudent.school_id)
-                                  .map(u => (
-                                    <option key={u.id} value={u.id}>[{u.subject}] {u.name}</option>
-                                  ))}
-                              </select>
+                        {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
+                          const currentConfig = periodSelections[p] || { subject: '', unitId: '', customTheme: '' };
+                          const showUnitSelect = currentConfig.subject === '数学' || currentConfig.subject === '英語';
+
+                          return (
+                            <div key={p} className={styles.cellRow} style={{ alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
+                              <span className={styles.cellNum} style={{ marginTop: '8px' }}>{p}</span>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                                <select
+                                  value={currentConfig.subject}
+                                  onChange={e => {
+                                    const sub = e.target.value;
+                                    setPeriodSelections({
+                                      ...periodSelections,
+                                      [p]: { subject: sub, unitId: '', customTheme: '' }
+                                    });
+                                  }}
+                                  className={styles.select}
+                                >
+                                  <option value="">-- コマ割りなし --</option>
+                                  <option value="数学">数学</option>
+                                  <option value="英語">英語</option>
+                                  <option value="理科">理科</option>
+                                  <option value="社会">社会</option>
+                                  <option value="国語">国語</option>
+                                  <option value="テスト">テスト</option>
+                                </select>
+
+                                {currentConfig.subject && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {showUnitSelect ? (
+                                      <>
+                                        <select
+                                          value={currentConfig.unitId}
+                                          onChange={e => {
+                                            const uId = e.target.value;
+                                            setPeriodSelections({
+                                              ...periodSelections,
+                                              [p]: { ...currentConfig, unitId: uId, customTheme: uId ? '' : currentConfig.customTheme }
+                                            });
+                                          }}
+                                          className={styles.select}
+                                        >
+                                          <option value="">-- カリキュラム単元から選択 --</option>
+                                          {db.getCurriculumUnits()
+                                            .filter(u => u.school_id === selectedStudent.school_id && u.subject === currentConfig.subject)
+                                            .map(u => (
+                                              <option key={u.id} value={u.id}>{u.name}</option>
+                                            ))}
+                                        </select>
+                                        <input
+                                          type="text"
+                                          placeholder="またはテーマを自由に入力"
+                                          value={currentConfig.customTheme}
+                                          disabled={!!currentConfig.unitId}
+                                          onChange={e => {
+                                            setPeriodSelections({
+                                              ...periodSelections,
+                                              [p]: { ...currentConfig, customTheme: e.target.value }
+                                            });
+                                          }}
+                                          className={styles.input}
+                                          style={{ fontSize: '0.8rem', padding: '6px' }}
+                                        />
+                                      </>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        placeholder="テーマを入力（例: 歴史・電流など）"
+                                        value={currentConfig.customTheme}
+                                        onChange={e => {
+                                          setPeriodSelections({
+                                            ...periodSelections,
+                                            [p]: { ...currentConfig, customTheme: e.target.value }
+                                          });
+                                        }}
+                                        className={styles.input}
+                                        style={{ fontSize: '0.8rem', padding: '6px' }}
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {periodCount < 10 && (
@@ -866,6 +1062,48 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                           ➕ コマ数を追加 (最大10コマ)
                         </button>
                       )}
+
+                      {/* 本日のテスト */}
+                      <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px', color: '#0f172a' }}>本日のテスト (自由記述):</label>
+                        <input
+                          type="text"
+                          value={todayTestContent}
+                          onChange={e => setTodayTestContent(e.target.value)}
+                          placeholder="例: 不規則動詞テスト50問、二次方程式10問"
+                          className={styles.input}
+                          style={{ fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                      </div>
+
+                      {/* 宿題 */}
+                      <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px', color: '#0f172a' }}>宿題:</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div>
+                            <span style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '2px' }}>内容:</span>
+                            <textarea
+                              value={homeworkContent}
+                              onChange={e => setHomeworkContent(e.target.value)}
+                              placeholder="宿題の内容を入力（例：ワークP24-25）"
+                              className={styles.textarea}
+                              style={{ height: '50px', fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: '#64748b', display: 'block', marginBottom: '2px' }}>
+                              期限:
+                              <input
+                                type="date"
+                                value={homeworkDeadline}
+                                onChange={e => setHomeworkDeadline(e.target.value)}
+                                className={styles.input}
+                                style={{ fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', marginTop: '2px' }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
 
                       <div style={{ marginTop: '16px' }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>業務連絡 (本日共通):</label>
@@ -982,6 +1220,82 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Tab: 小テスト結果 */}
+              {activeTab === 'mini-tests' && (
+                <div className={styles.card}>
+                  <div className={styles.cardTitle}>
+                    小テスト結果管理
+                  </div>
+                  
+                  {miniTestResultsList.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                      記録された小テスト結果はありません。
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                            <th style={{ padding: '10px' }}>日付</th>
+                            <th style={{ padding: '10px' }}>生徒名</th>
+                            <th style={{ padding: '10px' }}>テスト内容</th>
+                            <th style={{ padding: '10px' }}>宿題内容</th>
+                            <th style={{ padding: '10px' }}>期限</th>
+                            <th style={{ padding: '10px', width: '120px' }}>点数</th>
+                            <th style={{ padding: '10px', width: '80px' }}>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {miniTestResultsList
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                            .map(r => {
+                              const student = students.find(s => s.id === r.student_id);
+                              return (
+                                <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ padding: '10px' }}>{r.date}</td>
+                                  <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
+                                  <td style={{ padding: '10px' }}>{r.test_content}</td>
+                                  <td style={{ padding: '10px' }}>{r.homework_content || 'なし'}</td>
+                                  <td style={{ padding: '10px' }}>{r.homework_deadline || 'なし'}</td>
+                                  <td style={{ padding: '10px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={tempScores[r.id] ?? ''}
+                                        onChange={e => {
+                                          setTempScores({
+                                            ...tempScores,
+                                            [r.id]: e.target.value
+                                          });
+                                        }}
+                                        className={styles.input}
+                                        style={{ width: '70px', padding: '4px 6px', fontSize: '0.8rem', display: 'inline-block' }}
+                                        placeholder="未入力"
+                                      />
+                                      <span>点</span>
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '10px' }}>
+                                    <button
+                                      onClick={() => handleSaveMiniTestScore(r)}
+                                      className={styles.btn}
+                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#3b82f6' }}
+                                    >
+                                      保存
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
