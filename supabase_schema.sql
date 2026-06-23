@@ -145,3 +145,35 @@ INSERT INTO prompt_settings (prompt_template) VALUES (
 - テスト平均正答率: {average_score}%
 - 苦手・間違えたジャンル: {incorrect_genres}'
 ) ON CONFLICT DO NOTHING;
+
+-- 12. 年間計画（マイルストーン）
+CREATE TABLE IF NOT EXISTS milestone_plans (
+    id TEXT PRIMARY KEY,
+    grade TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    course TEXT NOT NULL CHECK (course IN ('standard', 'advanced')),
+    month INTEGER NOT NULL,
+    week_number INTEGER NOT NULL,
+    is_holiday BOOLEAN NOT NULL DEFAULT FALSE,
+    holiday_name TEXT,
+    level TEXT NOT NULL CHECK (level IN ('A', 'B', 'C')),
+    chapter TEXT,
+    unit_name TEXT,
+    target_theme_name TEXT,
+    target_sequence_order INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 13. マイルストーンテンプレート
+CREATE TABLE IF NOT EXISTS milestone_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('A', 'B', 'C')),
+    plans JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 既存の students テーブルへの level カラム追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT 'A' CHECK (level IN ('A', 'B', 'C'));
