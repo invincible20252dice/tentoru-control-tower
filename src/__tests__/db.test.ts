@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { db } from '../lib/db';
+import { db, getSchoolYear, calculateCurrentGrade } from '../lib/db';
 
 describe('Database Service CRUD Tests', () => {
   beforeEach(() => {
@@ -240,7 +240,8 @@ describe('Database Service CRUD Tests', () => {
 
   // Supabase CRUD paths simulation
   it('should cover Supabase CRUD paths when not in mock mode', async () => {
-    (db as any).isMockMode = false;
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
     
     const createMockPromise = (data: any) => {
       const p = Promise.resolve({ data, error: null });
@@ -249,7 +250,7 @@ describe('Database Service CRUD Tests', () => {
       return p;
     };
 
-    (db as any).supabase = {
+    (localDb as any).supabase = {
       from: vi.fn().mockReturnValue({
         upsert: vi.fn().mockImplementation(() => ({
           select: vi.fn().mockImplementation(() => createMockPromise({ id: 'sup-id', code: 'sup-id' }))
@@ -264,93 +265,100 @@ describe('Database Service CRUD Tests', () => {
     };
 
     const school = { id: 'sup-1', name: 'S', type: 'junior_high' as const, created_at: '' };
-    const savedSch = await db.saveSchool(school);
+    const savedSch = await localDb.saveSchool(school);
     expect(savedSch.id).toBe('sup-id');
 
     const student = { id: 'sup-1', student_id: 'S', name: 'S', email: 'S', grade: 'S', school_id: 'S', status: 'normal' as const, start_unit_id: null, created_at: '' };
-    const savedStd = await db.saveStudent(student);
+    const savedStd = await localDb.saveStudent(student);
     expect(savedStd.id).toBe('sup-id');
 
     const unit = { id: 'sup-1', school_id: 'S', subject: 'S', name: 'S', sequence_order: 1, created_at: '' };
-    const savedUnits = await db.saveCurriculumUnits([unit]);
+    const savedUnits = await localDb.saveCurriculumUnits([unit]);
     expect(savedUnits).toBeDefined();
 
     const task = { id: 'sup-1', student_id: 'S', unit_id: 'S', scheduled_date: '2026-06-19', period: null, status: 'unstarted' as const, video_watched: false, test_passed: false, created_at: '' };
-    const savedTasks = await db.saveLearningTasks([task]);
+    const savedTasks = await localDb.saveLearningTasks([task]);
     expect(savedTasks).toBeDefined();
 
-    await db.deleteLearningTasksByStudent('sup-1');
+    await localDb.deleteLearningTasksByStudent('sup-1');
 
     const log = { id: 'sup-1', student_id: 'S', unit_id: 'S', log_type: 'video_view' as const, created_at: '' };
-    const savedLog = await db.addLearningLog(log);
+    const savedLog = await localDb.addLearningLog(log);
     expect(savedLog.id).toBe('sup-id');
 
     const record = { id: 'sup-1', student_id: 'S', record_type: 'regular_test' as const, subject: 'S', score: 100, created_at: '' };
-    const savedRec = await db.saveTestRecord(record);
+    const savedRec = await localDb.saveTestRecord(record);
     expect(savedRec.id).toBe('sup-id');
 
     const code = { code: 'sup-1', name: 'S', deviation_value: 60 };
-    const savedCode = await db.saveSchoolCodeMaster(code);
+    const savedCode = await localDb.saveSchoolCodeMaster(code);
     expect(savedCode.code).toBe('sup-id');
 
     const eth = { id: 'sup-1', school_code: 'S', min_score: 0, max_score: 100, probability: 50 };
-    const savedEth = await db.saveExamThresholdMaster(eth);
+    const savedEth = await localDb.saveExamThresholdMaster(eth);
     expect(savedEth.id).toBe('sup-id');
 
     const report = { id: 'sup-1', student_id: 'S', month: 'S', analysis_text: 'S', created_at: '' };
-    const savedRep = await db.saveAIReport(report);
+    const savedRep = await localDb.saveAIReport(report);
     expect(savedRep.id).toBe('sup-id');
 
     const prompt = { id: 'sup-1', prompt_template: 'S', created_at: '' };
-    const savedPrompt = await db.savePromptSetting(prompt);
+    const savedPrompt = await localDb.savePromptSetting(prompt);
     expect(savedPrompt.id).toBe('sup-id');
 
     const cor = { id: 'sup-1', student_id: 'S', original_text: 'S', corrected_text: 'S', created_at: '' };
-    const savedCor = await db.addTeacherCorrectionLog(cor);
+    const savedCor = await localDb.addTeacherCorrectionLog(cor);
     expect(savedCor.id).toBe('sup-id');
 
     const miniRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', test_content: 'S', score: 100, created_at: '' };
-    const savedMini = await db.saveMiniTestResult(miniRes);
+    const savedMini = await localDb.saveMiniTestResult(miniRes);
     expect(savedMini.id).toBe('sup-id');
 
-    await db.deleteMiniTestResult('sup-1');
+    await localDb.deleteMiniTestResult('sup-1');
 
     const hwRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', homework_content: 'S', homework_deadline: '2026-06-20', status: 'incomplete' as const, created_at: '' };
-    const savedHw = await db.saveHomeworkResult(hwRes);
+    const savedHw = await localDb.saveHomeworkResult(hwRes);
     expect(savedHw.id).toBe('sup-id');
 
-    const savedHws = await db.saveHomeworkResults([hwRes]);
+    const savedHws = await localDb.saveHomeworkResults([hwRes]);
     expect(savedHws).toBeDefined();
 
-    await db.deleteHomeworkResult('sup-1');
+    await localDb.deleteHomeworkResult('sup-1');
 
     const mp = { id: 'sup-1', grade: '中3', subject: '数学', course: 'standard' as const, month: 6, week_number: 1, is_holiday: false };
-    const savedMp = await db.saveMilestonePlan(mp);
+    const savedMp = await localDb.saveMilestonePlan(mp);
     expect(savedMp.id).toBe('sup-id');
 
-    const savedMps = await db.saveMilestonePlans([mp]);
+    const savedMps = await localDb.saveMilestonePlans([mp]);
     expect(savedMps).toBeDefined();
+
+    const interaction = { id: 'sup-1', student_id: 'S', category: 'S', memo: 'S', date: '2026-06-19', staff_name: 'S', created_at: '' };
+    const savedInt = await localDb.saveStudentInteraction(interaction);
+    expect(savedInt.id).toBe('sup-id');
+
+    await localDb.deleteStudentInteraction('sup-1');
+
+    const addedPersonality = await localDb.addPersonalityOption('S');
+    expect(addedPersonality).toBe('S');
   });
 
   // Supabase error paths simulation
   it('should throw error in Supabase if query fails', async () => {
-    (db as any).isMockMode = false;
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
 
     const createErrorPromise = () => {
       const p = Promise.resolve({ data: null, error: new Error('Database Error') });
       (p as any).single = vi.fn().mockResolvedValue({ data: null, error: new Error('Database Error') });
       (p as any).eq = vi.fn().mockResolvedValue({ data: null, error: new Error('Database Error') });
+      (p as any).select = vi.fn().mockImplementation(() => createErrorPromise());
       return p;
     };
 
-    (db as any).supabase = {
+    (localDb as any).supabase = {
       from: vi.fn().mockReturnValue({
-        upsert: vi.fn().mockImplementation(() => ({
-          select: vi.fn().mockImplementation(() => createErrorPromise())
-        })),
-        insert: vi.fn().mockImplementation(() => ({
-          select: vi.fn().mockImplementation(() => createErrorPromise())
-        })),
+        upsert: vi.fn().mockImplementation(() => createErrorPromise()),
+        insert: vi.fn().mockImplementation(() => createErrorPromise()),
         delete: vi.fn().mockReturnValue({
           eq: vi.fn().mockResolvedValue({ error: new Error('Database Error') })
         })
@@ -358,52 +366,57 @@ describe('Database Service CRUD Tests', () => {
     };
 
     const school = { id: 'sup-1', name: 'S', type: 'junior_high' as const, created_at: '' };
-    await expect(db.saveSchool(school)).rejects.toThrow('Database Error');
+    await expect(localDb.saveSchool(school)).rejects.toThrow('Database Error');
 
     const student = { id: 'sup-1', student_id: 'S', name: 'S', email: 'S', grade: 'S', school_id: 'S', status: 'normal' as const, start_unit_id: null, created_at: '' };
-    await expect(db.saveStudent(student)).rejects.toThrow('Database Error');
+    await expect(localDb.saveStudent(student)).rejects.toThrow('Database Error');
 
     const unit = { id: 'sup-1', school_id: 'S', subject: 'S', name: 'S', sequence_order: 1, created_at: '' };
-    await expect(db.saveCurriculumUnits([unit])).rejects.toThrow('Database Error');
+    await expect(localDb.saveCurriculumUnits([unit])).rejects.toThrow('Database Error');
 
     const task = { id: 'sup-1', student_id: 'S', unit_id: 'S', scheduled_date: '2026-06-19', period: null, status: 'unstarted' as const, video_watched: false, test_passed: false, created_at: '' };
-    await expect(db.saveLearningTasks([task])).rejects.toThrow('Database Error');
+    await expect(localDb.saveLearningTasks([task])).rejects.toThrow('Database Error');
 
-    await expect(db.deleteLearningTasksByStudent('sup-1')).rejects.toThrow('Database Error');
+    await expect(localDb.deleteLearningTasksByStudent('sup-1')).rejects.toThrow('Database Error');
 
     const log = { id: 'sup-1', student_id: 'S', unit_id: 'S', log_type: 'video_view' as const, created_at: '' };
-    await expect(db.addLearningLog(log)).rejects.toThrow('Database Error');
+    await expect(localDb.addLearningLog(log)).rejects.toThrow('Database Error');
 
     const record = { id: 'sup-1', student_id: 'S', record_type: 'regular_test' as const, subject: 'S', score: 100, created_at: '' };
-    await expect(db.saveTestRecord(record)).rejects.toThrow('Database Error');
+    await expect(localDb.saveTestRecord(record)).rejects.toThrow('Database Error');
 
     const code = { code: 'sup-1', name: 'S', deviation_value: 60 };
-    await expect(db.saveSchoolCodeMaster(code)).rejects.toThrow('Database Error');
+    await expect(localDb.saveSchoolCodeMaster(code)).rejects.toThrow('Database Error');
 
     const eth = { id: 'sup-1', school_code: 'S', min_score: 0, max_score: 100, probability: 50 };
-    await expect(db.saveExamThresholdMaster(eth)).rejects.toThrow('Database Error');
+    await expect(localDb.saveExamThresholdMaster(eth)).rejects.toThrow('Database Error');
 
     const report = { id: 'sup-1', student_id: 'S', month: 'S', analysis_text: 'S', created_at: '' };
-    await expect(db.saveAIReport(report)).rejects.toThrow('Database Error');
+    await expect(localDb.saveAIReport(report)).rejects.toThrow('Database Error');
 
     const prompt = { id: 'sup-1', prompt_template: 'S', created_at: '' };
-    await expect(db.savePromptSetting(prompt)).rejects.toThrow('Database Error');
+    await expect(localDb.savePromptSetting(prompt)).rejects.toThrow('Database Error');
 
     const cor = { id: 'sup-1', student_id: 'S', original_text: 'S', corrected_text: 'S', created_at: '' };
-    await expect(db.addTeacherCorrectionLog(cor)).rejects.toThrow('Database Error');
+    await expect(localDb.addTeacherCorrectionLog(cor)).rejects.toThrow('Database Error');
 
     const miniRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', test_content: 'S', score: 100, created_at: '' };
-    await expect(db.saveMiniTestResult(miniRes)).rejects.toThrow('Database Error');
-    await expect(db.deleteMiniTestResult('sup-1')).rejects.toThrow('Database Error');
+    await expect(localDb.saveMiniTestResult(miniRes)).rejects.toThrow('Database Error');
+    await expect(localDb.deleteMiniTestResult('sup-1')).rejects.toThrow('Database Error');
 
     const hwRes = { id: 'sup-1', student_id: 'S', date: '2026-06-19', homework_content: 'S', homework_deadline: '2026-06-20', status: 'incomplete' as const, created_at: '' };
-    await expect(db.saveHomeworkResult(hwRes)).rejects.toThrow('Database Error');
-    await expect(db.saveHomeworkResults([hwRes])).rejects.toThrow('Database Error');
-    await expect(db.deleteHomeworkResult('sup-1')).rejects.toThrow('Database Error');
+    await expect(localDb.saveHomeworkResult(hwRes)).rejects.toThrow('Database Error');
+    await expect(localDb.saveHomeworkResults([hwRes])).rejects.toThrow('Database Error');
+    await expect(localDb.deleteHomeworkResult('sup-1')).rejects.toThrow('Database Error');
 
     const mp = { id: 'sup-1', grade: '中3', subject: '数学', course: 'standard' as const, month: 6, week_number: 1, is_holiday: false };
-    await expect(db.saveMilestonePlan(mp)).rejects.toThrow('Database Error');
-    await expect(db.saveMilestonePlans([mp])).rejects.toThrow('Database Error');
+    await expect(localDb.saveMilestonePlan(mp)).rejects.toThrow('Database Error');
+    await expect(localDb.saveMilestonePlans([mp])).rejects.toThrow('Database Error');
+
+    const interaction = { id: 'sup-1', student_id: 'S', category: 'S', memo: 'S', date: '2026-06-19', staff_name: 'S', created_at: '' };
+    await expect(localDb.saveStudentInteraction(interaction)).rejects.toThrow('Database Error');
+    await expect(localDb.deleteStudentInteraction('sup-1')).rejects.toThrow('Database Error');
+    await expect(localDb.addPersonalityOption('S')).rejects.toThrow('Database Error');
   });
 
   // JSON parse error cover
@@ -540,5 +553,108 @@ describe('Database Service CRUD Tests', () => {
     // overwrite
     const updatedMp = await db.saveMilestonePlan({ ...mp, target_sequence_order: 12 });
     expect(updatedMp.target_sequence_order).toBe(12);
+  });
+
+  it('should ignore duplicate error code 23505 when adding personality option in Supabase', async () => {
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        insert: vi.fn().mockImplementation(() => 
+          Promise.resolve({ error: { code: '23505', message: 'duplicate key value violates unique constraint' } })
+        )
+      })
+    };
+
+    const res = await localDb.addPersonalityOption('すでに存在する個性');
+    expect(res).toBe('すでに存在する個性');
+  });
+
+  it('should cover student interaction extra mock methods', async () => {
+    // 1. getStudentInteractions without parameter
+    const allInteractions = db.getStudentInteractions();
+    expect(allInteractions.length).toBeGreaterThan(0);
+
+    // 2. deleteStudentInteraction & overwrite saveStudentInteraction
+    const mockInteraction = {
+      id: 'inter-temp-1',
+      student_id: 'std-2',
+      category: 'その他' as const,
+      memo: 'テスト用メモ',
+      date: '2026-06-24',
+      staff_name: '福田',
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudentInteraction(mockInteraction);
+    expect(db.getStudentInteractions('std-2').find(i => i.id === 'inter-temp-1')).toBeDefined();
+
+    // overwrite (idx >= 0 path in db.ts:1281)
+    const updatedMock = { ...mockInteraction, memo: '更新したメモ' };
+    await db.saveStudentInteraction(updatedMock);
+    expect(db.getStudentInteractions('std-2').find(i => i.id === 'inter-temp-1')?.memo).toBe('更新したメモ');
+
+    await db.deleteStudentInteraction('inter-temp-1');
+    expect(db.getStudentInteractions('std-2').find(i => i.id === 'inter-temp-1')).toBeUndefined();
+
+    // 3. addPersonalityOption with already existing name (db.ts:1319 false path)
+    const res = await db.addPersonalityOption('班長');
+    expect(res).toBe('班長');
+  });
+
+  it('should cover fallback paths in student grade/year calculation and saves', async () => {
+    // 1. registered_year, registered_grade が存在しない生徒オブジェクト (db.ts 515-516 ?? カバー)
+    // 直接モックストレージに書き込むことで、saveStudent の手動リセットロジックをバイパスする
+    const rawStudents = (db as any).getMockData('students', []);
+    const legacyStudent = {
+      id: 'legacy-std-1',
+      student_id: 'legacy999',
+      name: '歴史生徒',
+      grade: '中3' as const,
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      level: 'A' as const,
+      status: 'normal' as const,
+      created_at: '2025-05-15T10:00:00Z', // 2025年度
+      registered_year: undefined,
+      registered_grade: undefined
+    };
+    rawStudents.push(legacyStudent);
+    (db as any).saveMockData('students', rawStudents);
+
+    // getStudents 時に ?? の右側（フォールバック）を通過
+    const studentsList = db.getStudents();
+    const loadedLegacy = studentsList.find(s => s.id === 'legacy-std-1');
+    expect(loadedLegacy).toBeDefined();
+    expect(loadedLegacy?.registered_year).toBe(2025);
+    expect(loadedLegacy?.registered_grade).toBe('中3');
+
+    // 2. registered_grade や registered_year が Falsy (undefined/null) の場合の expectedGrade ロジック (db.ts 693-694, 699-700 カバー)
+    const fakeStudent = {
+      id: 'fake-std-1',
+      student_id: 'fake999',
+      name: 'フェイク生徒',
+      grade: '小6' as const,
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      level: 'A' as const,
+      status: 'normal' as const,
+      registered_grade: undefined,
+      registered_year: undefined,
+      created_at: undefined
+    };
+    await db.saveStudent(fakeStudent);
+    const loadedFake = db.getStudents().find(s => s.id === 'fake-std-1');
+    expect(loadedFake).toBeDefined();
+    expect(loadedFake?.registered_year).toBe(2026);
+    expect(loadedFake?.registered_grade).toBe('小6');
+
+    // getSchoolYear と calculateCurrentGrade のエッジケースカバー (db.ts 61, 68)
+    // 1〜3月の getSchoolYear
+    const janYear = getSchoolYear('2026-02-15T12:00:00Z');
+    expect(janYear).toBe(2025);
+    
+    // 無効な学年の calculateCurrentGrade
+    const invalidGrade = calculateCurrentGrade('無効な学年', 2025, 2026);
+    expect(invalidGrade).toBe('無効な学年');
   });
 });

@@ -177,3 +177,46 @@ CREATE TABLE IF NOT EXISTS milestone_templates (
 
 -- 既存の students テーブルへの level カラム追加
 ALTER TABLE students ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT 'A' CHECK (level IN ('A', 'B', 'C'));
+
+-- 既存の students テーブルへの属性拡張カラム追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS name_kana TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS birthday TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS club_activities TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS hobbies TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS contact_phone TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS contact_time TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS personalities TEXT[] DEFAULT '{}';
+ALTER TABLE students ADD COLUMN IF NOT EXISTS target_school TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS classroom TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS teacher_in_charge TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_year INTEGER;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_grade TEXT;
+
+-- 14. 生徒対応ログ履歴
+CREATE TABLE IF NOT EXISTS student_interactions (
+    id TEXT PRIMARY KEY,
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    category TEXT NOT NULL CHECK (category IN ('保護者対応', '人生相談', '勉強相談', '学校相談', 'その他')),
+    memo TEXT NOT NULL,
+    date DATE NOT NULL,
+    staff_name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 15. 個性タグ選択肢マスター
+CREATE TABLE IF NOT EXISTS personality_options (
+    name TEXT PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 初期個性の挿入
+INSERT INTO personality_options (name) VALUES
+('ぱっと見大人しい'),
+('スイッチ入るとよく喋る'),
+('班長'),
+('合唱実行委員長'),
+('音楽の授業は好き'),
+('礼儀正しくちゃんと敬語使える')
+ON CONFLICT DO NOTHING;

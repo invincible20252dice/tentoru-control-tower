@@ -36,6 +36,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     // 今日の小テスト結果
     const miniResults = db.getMiniTestResults();
     const todayMini = miniResults.filter(r => r.student_id === student.id && r.date === currentDateStr);
+    console.log("STUDENT_DASHBOARD_FILTER_DIAGNOSTICS:", {
+      studentId: student.id,
+      currentDateStr,
+      miniResultsCount: miniResults.length,
+      todayMiniCount: todayMini.length,
+      todayMiniItems: todayMini
+    });
     setMiniTestResults(todayMini);
     
     const initialScores: Record<string, string> = {};
@@ -52,7 +59,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   useEffect(() => {
     loadData();
-  }, [student.id, currentDateStr]);
+  }, [student.id, student.level, currentDateStr]);
 
   // 生徒による小テスト結果の送信
   const handleSaveStudentScore = async (testId: string, scoreInput: string) => {

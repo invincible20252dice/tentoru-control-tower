@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import SugorokuMap from '../components/SugorokuMap';
 import TeacherDashboard from '../components/TeacherDashboard';
 import StudentDashboard from '../components/StudentDashboard';
@@ -1731,5 +1731,554 @@ describe('UI Components Render & Interaction Tests', () => {
     alertMock.mockClear();
 
     unmount();
+  });
+
+  // 4. 生徒情報詳細 (新規メニュー生徒情報、自動進級、個性、対応履歴) の結合テスト
+  it('should support student detail features including auto-grade promotion, personality tags, and interaction logging', async () => {
+    // 2025年度に「小5」で登録された鈴木結衣（std-2）は、2026年度には「小6」になっているはず
+    const allSt = db.getStudents();
+    const yui = allSt.find(s => s.id === 'std-2')!;
+    expect(yui.grade).toBe('小6'); // 自動進級の検証
+
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+
+    // 左メニューの「生徒情報」タブをクリック
+    const studentDetailTabBtn = screen.getByText('生徒情報');
+    await act(async () => {
+      fireEvent.click(studentDetailTabBtn);
+    });
+
+    // 生徒が選択されていない状態の文言を検証
+    expect(screen.getByText(/生徒が選択されていません/)).toBeInTheDocument();
+
+    // 生徒一覧に戻ってまず佐藤拓海を選択する（佐藤拓海は登録時level/classroom/teacher_in_chargeが設定されていないためフォールバックを評価できる）
+    const studentListTabBtn = screen.getAllByText('生徒一覧')[0];
+    await act(async () => {
+      fireEvent.click(studentListTabBtn);
+    });
+
+    const studentItemTakumi = screen.getByText(/佐藤 拓海/);
+    await act(async () => {
+      fireEvent.click(studentItemTakumi);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('佐藤 拓海 (中3)', { selector: 'div' })).toBeInTheDocument();
+    });
+
+    // 「生徒情報」タブをクリック（フォールバック表示を確認）
+    await act(async () => {
+      fireEvent.click(studentDetailTabBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('佐藤 拓海')).toBeInTheDocument();
+    });
+
+    // 再度生徒一覧に戻って鈴木結衣を選択する
+    await act(async () => {
+      fireEvent.click(studentListTabBtn);
+    });
+
+    const studentItemYui = screen.getByText(/鈴木 結衣/);
+    await act(async () => {
+      fireEvent.click(studentItemYui);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('鈴木 結衣 (小6)', { selector: 'div' })).toBeInTheDocument();
+    });
+
+    // 再度「生徒情報」タブをクリック
+    await act(async () => {
+      fireEvent.click(studentDetailTabBtn);
+    });
+
+    // 鈴木結衣の詳細情報が表示されていること、および初期状態では対応履歴がないことを検証
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('鈴木 結衣')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('スズキ ユイ')).toBeInTheDocument();
+      expect(screen.getByText('対応履歴はまだありません。')).toBeInTheDocument();
+      // テストレコードが無い時の fallback (3140, 3181 の false ブランチ) をアサート
+      expect(screen.getByText('定期テスト記録がありません。')).toBeInTheDocument();
+      expect(screen.getByText('模試の記録がありません。')).toBeInTheDocument();
+    });
+
+    // ここでテストレコードを登録する
+    // 3209行目の failed アラートカバー用のタスク
+    await db.saveLearningTasks([
+      ...db.getLearningTasks(),
+      {
+        id: 'task-failed-std2',
+        student_id: 'std-2',
+        unit_id: 'unit-101-1',
+        scheduled_date: '2026-06-18',
+        period: 1,
+        status: 'failed' as const,
+        video_watched: false,
+        test_passed: false,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    // 3290-3291行目の各カテゴリデザイン分岐カバー用の対応履歴
+    const categories = ['保護者対応', '人生相談', '学校相談', 'その他'] as const;
+    for (let i = 0; i < categories.length; i++) {
+      await db.saveStudentInteraction({
+        id: `si-std2-extra-${i}`,
+        student_id: 'std-2',
+        category: categories[i],
+        memo: `カテゴリ ${categories[i]} のテスト用対応ログ`,
+        date: '2026-06-20',
+        staff_name: '福田',
+        created_at: new Date(Date.now() - (i + 1) * 60000).toISOString()
+      });
+    }
+
+    await db.saveTestRecord({
+      id: 'tr-std2-1',
+      student_id: 'std-2',
+      record_type: 'regular_test',
+      subject: '算数',
+      score: 80,
+      rank_change: 'up',
+      rate_change: 5,
+      next_target_score: 90,
+      created_at: '2026-06-20T10:00:00Z'
+    });
+
+    await db.saveTestRecord({
+      id: 'tr-std2-2',
+      student_id: 'std-2',
+      record_type: 'mock_exam',
+      subject: '算数',
+      score: 85,
+      target_school_code: 'schcode-A',
+      created_at: '2026-06-21T10:00:00Z'
+    });
+
+    // target_school_code がマスタに存在しないものも追加 (3189 の fallback カバー)
+    await db.saveTestRecord({
+      id: 'tr-std2-3',
+      student_id: 'std-2',
+      record_type: 'mock_exam',
+      subject: '算数',
+      score: 85,
+      target_school_code: 'unknown-sch',
+      created_at: '2026-06-22T10:00:00Z'
+    });
+
+    // 定期テストをもう1件追加して、sort関数の比較ブランチをカバー (TeacherDashboard 3141行目)
+    await db.saveTestRecord({
+      id: 'tr-std2-1-older',
+      student_id: 'std-2',
+      record_type: 'regular_test',
+      subject: '数学',
+      score: 75,
+      rank_change: 'keep',
+      rate_change: 0,
+      created_at: '2026-06-19T10:00:00Z'
+    });
+
+    // 各編集フォームのフィールドに入力するテスト (TeacherDashboard 2830-2998 の onChange カバー)
+    const nameInput = screen.getByPlaceholderText('氏名（漢字）');
+    fireEvent.change(nameInput, { target: { value: '鈴木 結衣子' } });
+
+    const nameKanaInput = screen.getByPlaceholderText('氏名（フリガナ）');
+    fireEvent.change(nameKanaInput, { target: { value: 'スズキ ユイコ' } });
+
+    const imageUrlInput = screen.getByPlaceholderText('顔写真画像URL (ダミー画像URLなど)');
+    fireEvent.change(imageUrlInput, { target: { value: 'http://dummy.png' } });
+
+    // 存在しない学校名
+    const schoolNameInput = screen.getByPlaceholderText('学校名');
+    fireEvent.change(schoolNameInput, { target: { value: '存在しない学校名' } });
+    // 存在する学校名 (Matched branch in school_name onChange)
+    fireEvent.change(schoolNameInput, { target: { value: '天登第一中学校' } });
+
+    const birthdayInput = screen.getByLabelText('生年月日');
+    fireEvent.change(birthdayInput, { target: { value: '2013-05-15' } });
+
+    const classroomSelect = screen.getByDisplayValue('恵比寿教室');
+    fireEvent.change(classroomSelect, { target: { value: '渋谷教室' } });
+
+    const teacherSelect = screen.getByDisplayValue('福田 尚弘');
+    fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
+
+    const clubInput = screen.getByPlaceholderText('例: サッカー部');
+    fireEvent.change(clubInput, { target: { value: 'テニス部' } });
+
+    const hobbiesInput = screen.getByPlaceholderText('例: 将棋・動画編集');
+    fireEvent.change(hobbiesInput, { target: { value: '読書' } });
+
+    const parentInput = screen.getByPlaceholderText('例: 佐藤 健二');
+    fireEvent.change(parentInput, { target: { value: '鈴木 太郎' } });
+
+    const targetSchoolInput = screen.getByPlaceholderText('例: 天登星雲高校');
+    fireEvent.change(targetSchoolInput, { target: { value: '恵比寿第一高校' } });
+
+    const phoneInput = screen.getByPlaceholderText('例: 090-7039-0656');
+    fireEvent.change(phoneInput, { target: { value: '080-1234-5678' } });
+
+    // 1. 学年の手動変更のテスト
+    const gradeSelect = screen.getByLabelText('学年（登録時の学年を反映）');
+    fireEvent.change(gradeSelect, { target: { value: '中1' } });
+    await waitFor(() => {
+      expect(gradeSelect).toHaveValue('中1');
+    });
+    
+    // 保存ボタンをクリック
+    const saveBtn = screen.getByText('変更を保存する');
+    fireEvent.submit(saveBtn.closest('form')!);
+    
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+    });
+    alertMock.mockClear();
+
+    // 連絡可能時間帯 (contact_time) を変更する (3007行目のカバー)
+    const contactTimeInput = screen.getByPlaceholderText('例: 18:00 - 21:00');
+    fireEvent.change(contactTimeInput, { target: { value: '19:00 - 21:00' } });
+
+    // 学年はすでに '中1' で、期待される学年と同じになっているため、今度は学年変更なしでの保存 (db.ts 703 行目の false ブランチのカバー)
+    const saveBtn2 = screen.getByText('変更を保存する');
+    fireEvent.submit(saveBtn2.closest('form')!);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+    });
+    alertMock.mockClear();
+
+    // ここで、先ほど登録したテストデータがロードされていることをアサートする (3140, 3181 の true ブランチ)
+    await waitFor(() => {
+      expect(screen.getByText(/定期テスト（最新）/)).toBeInTheDocument();
+      expect(screen.getByText(/80/)).toBeInTheDocument();
+      expect(screen.getByText(/▲ 上昇/)).toBeInTheDocument();
+      expect(screen.getByText(/模試実績（最新）/)).toBeInTheDocument();
+      expect(screen.getByText(/85/)).toBeInTheDocument();
+      expect(screen.getByText(/unknown-sch/)).toBeInTheDocument();
+    });
+
+    // 新しく regular_test で rank_change: 'keep' の最新レコードを登録し、キープのブランチをテストする
+    await db.saveTestRecord({
+      id: 'tr-std2-keep',
+      student_id: 'std-2',
+      record_type: 'regular_test',
+      subject: '国語',
+      score: 78,
+      rank_change: 'keep',
+      rate_change: 0,
+      next_target_score: 80,
+      created_at: '2026-06-23T10:00:00Z' // 2026-06-20 (tr-std2-1) より新しい日付
+    });
+
+    // リロードまたは情報再描画のために他生徒を選択してから再度鈴木結衣を選択する
+    await act(async () => {
+      fireEvent.click(studentListTabBtn);
+    });
+    const studentItemTakumiForSwitch = screen.getByText(/佐藤 拓海/);
+    await act(async () => {
+      fireEvent.click(studentItemTakumiForSwitch);
+    });
+    // 佐藤拓海が選択された状態になる（サイドバーの選択中表示など）のを待つ
+    await waitFor(() => {
+      expect(screen.getByText('佐藤 拓海 (中3)', { selector: 'div' })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(studentListTabBtn);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText(/鈴木 結衣/));
+    });
+    // 鈴木結衣が選択された状態になるのを待つ
+    await waitFor(() => {
+      expect(screen.getByText('鈴木 結衣子 (中1)', { selector: 'div' })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(studentDetailTabBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('キープ')).toBeInTheDocument();
+    });
+
+    // 2. 個性の追加・削除テスト
+    // 未入力・未選択での追加テスト (guard clause)
+    const addPersonalityBtn = screen.getByText('＋ 追加');
+    await act(async () => {
+      fireEvent.click(addPersonalityBtn);
+    });
+
+    // 用意された個性から選択して追加
+    const personalitySelect = screen.getByLabelText('マスタから選ぶ');
+    fireEvent.change(personalitySelect, { target: { value: '合唱実行委員長' } });
+    await waitFor(() => {
+      expect(personalitySelect).toHaveValue('合唱実行委員長');
+    });
+
+    await act(async () => {
+      fireEvent.click(addPersonalityBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('合唱実行委員長').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // 新規に個性を入力して追加
+    const personalityInput = screen.getByPlaceholderText('新しい個性を入力...');
+    fireEvent.change(personalityInput, { target: { value: '負けず嫌い' } });
+    await waitFor(() => {
+      expect(personalityInput).toHaveValue('負けず嫌い');
+    });
+
+    await act(async () => {
+      fireEvent.click(addPersonalityBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getByText('負けず嫌い', { selector: 'span' })).toBeInTheDocument();
+    });
+
+    // 重複した個性を追加しようとするとアラートが出るテスト
+    fireEvent.change(personalitySelect, { target: { value: '合唱実行委員長' } });
+    await waitFor(() => {
+      expect(personalitySelect).toHaveValue('合唱実行委員長');
+    });
+    await act(async () => {
+      fireEvent.click(addPersonalityBtn);
+    });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('この個性は既に登録されています。');
+    });
+    alertMock.mockClear();
+
+    // 個性を削除する
+    const removeBtn = screen.getAllByText('×').find(btn => btn.closest('span')?.textContent?.includes('負けず嫌い'))!;
+    fireEvent.click(removeBtn);
+    await waitFor(() => {
+      expect(screen.queryByText('負けず嫌い', { selector: 'span' })).not.toBeInTheDocument();
+    });
+
+    // 残りの個性タグもすべて削除する (personalities=[] のカバー)
+    let remainingRemoveBtns = screen.queryAllByText('×');
+    while (remainingRemoveBtns.length > 0) {
+      fireEvent.click(remainingRemoveBtns[0]);
+      await waitFor(() => {
+        remainingRemoveBtns = screen.queryAllByText('×');
+      });
+    }
+    expect(screen.getByText('個性タグが登録されていません。')).toBeInTheDocument();
+
+    // 3. 対応履歴の登録と表示テスト
+    // メモが空の状態での登録テスト (guard clause)
+    const addInteractionBtn = screen.getByText('対応内容を登録');
+    await act(async () => {
+      fireEvent.submit(addInteractionBtn.closest('form')!);
+    });
+
+    const categorySelect = screen.getByLabelText('種別');
+    fireEvent.change(categorySelect, { target: { value: '勉強相談' } });
+    await waitFor(() => {
+      expect(categorySelect).toHaveValue('勉強相談');
+    });
+
+    const memoTextarea = screen.getByPlaceholderText('具体的な対応メモを入力...');
+    fireEvent.change(memoTextarea, { target: { value: '期末テストに向けての学習スケジュールを話し合いました。' } });
+    await waitFor(() => {
+      expect(memoTextarea).toHaveValue('期末テストに向けての学習スケジュールを話し合いました。');
+    });
+
+    const dateInput = screen.getByLabelText('日付');
+    fireEvent.change(dateInput, { target: { value: '2026-06-25' } }); // 日付を変更して onChange を発火させる
+
+    await act(async () => {
+      fireEvent.submit(addInteractionBtn.closest('form')!);
+    });
+
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('対応内容を登録しました。');
+    });
+    alertMock.mockClear();
+
+    // 登録された対応がタイムラインに表示されているか検証
+    expect(screen.getByText('期末テストに向けての学習スケジュールを話し合いました。')).toBeInTheDocument();
+    expect(screen.getByText('2026/06/25')).toBeInTheDocument();
+    expect(screen.getByText('勉強相談', { selector: 'span' })).toBeInTheDocument();
+
+    // 鈴木結衣のレベルを C に変更して保存し、StudentDashboard のレベルC目標 (70点) のブランチをテストする
+    const levelSelect = screen.getByLabelText('学習レベル');
+    fireEvent.change(levelSelect, { target: { value: 'C' } });
+
+    const saveBtnLevel = screen.getByText('変更を保存する');
+    fireEvent.submit(saveBtnLevel.closest('form')!);
+    
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+    });
+    alertMock.mockClear();
+
+    // --- エラー系の catch ブロックのカバーテスト (TeacherDashboard 400, 428, 462-463 カバー) ---
+    // 1. 生徒情報保存エラー
+    const saveStudentSpy = vi.spyOn(db, 'saveStudent').mockRejectedValueOnce(new Error('Save failed'));
+    const saveBtnError = screen.getByText('変更を保存する');
+    fireEvent.submit(saveBtnError.closest('form')!);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('保存中にエラーが発生しました。');
+    });
+    alertMock.mockClear();
+    saveStudentSpy.mockRestore();
+
+    // 2. 個性の追加エラー
+    const addOptionSpy = vi.spyOn(db, 'addPersonalityOption').mockRejectedValueOnce(new Error('Add failed'));
+    const errorPersonalityInput = screen.getByPlaceholderText('新しい個性を入力...');
+    fireEvent.change(errorPersonalityInput, { target: { value: 'エラー個性' } });
+    const addPersonalityBtnError = screen.getByText('＋ 追加');
+    await act(async () => {
+      fireEvent.click(addPersonalityBtnError);
+    });
+    await waitFor(() => {
+      expect(addOptionSpy).toHaveBeenCalled();
+    });
+    addOptionSpy.mockRestore();
+
+    // 3. 対応履歴登録エラー
+    const saveInterSpy = vi.spyOn(db, 'saveStudentInteraction').mockRejectedValueOnce(new Error('Save failed'));
+    const errorMemoTextarea = screen.getByPlaceholderText('具体的な対応メモを入力...');
+    fireEvent.change(errorMemoTextarea, { target: { value: 'エラー対応ログ' } });
+    const addInteractionBtnError = screen.getByText('対応内容を登録');
+    await act(async () => {
+      fireEvent.submit(addInteractionBtnError.closest('form')!);
+    });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('登録中にエラーが発生しました。');
+    });
+    alertMock.mockClear();
+    saveInterSpy.mockRestore();
+
+    // --- 3157, 3161, 3208 行目のカバレッジ向上のためのテスト ---
+    // タスク無し、定期テストの rank_change: 'down' / 'keep' および rate_change: -5 / 0 を持つ生徒の登録
+    const noTaskStudent = {
+      id: 'notask-std',
+      student_id: 'notask101',
+      name: 'タスク無し生徒',
+      grade: '中1' as const,
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      level: 'A' as const,
+      status: 'normal' as const,
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(noTaskStudent);
+    
+    await db.saveTestRecord({
+      id: 'tr-notask-1',
+      student_id: 'notask-std',
+      record_type: 'regular_test',
+      subject: '英語',
+      score: 60,
+      rank_change: 'down',
+      rate_change: -5,
+      created_at: '2026-06-20T10:00:00Z'
+    });
+
+    await db.saveTestRecord({
+      id: 'tr-notask-2',
+      student_id: 'notask-std',
+      record_type: 'regular_test',
+      subject: '英語',
+      score: 65,
+      rank_change: 'down',
+      rate_change: -5,
+      created_at: '2026-06-21T10:00:00Z'
+    });
+
+    // リフレッシュのために既存の生徒（鈴木結衣）の変更を保存する
+    const forceSaveBtn = screen.getByText('変更を保存する');
+    fireEvent.submit(forceSaveBtn.closest('form')!);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+    });
+    alertMock.mockClear();
+
+    // 生徒一覧メニューに遷移する
+    const studentListMenuBtn = screen.getByText('生徒一覧');
+    fireEvent.click(studentListMenuBtn);
+
+    // 新規生徒をクリック (レンダリング完了を待つ)
+    await waitFor(() => {
+      expect(screen.getByText(/タスク無し生徒/)).toBeInTheDocument();
+    });
+    const studentItem = screen.getByText(/タスク無し生徒/);
+    fireEvent.click(studentItem);
+
+    // 生徒情報メニューに遷移して詳細を表示する
+    const studentInfoMenuBtn = screen.getByText('生徒情報');
+    fireEvent.click(studentInfoMenuBtn);
+
+    // 下降（rank_change='down'）、進捗率: 0% （タスク数0）をアサート
+    await waitFor(() => {
+      expect(screen.queryAllByText(/下降/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryAllByText(/進捗率/).length).toBeGreaterThanOrEqual(1);
+    });
+    // ----------------------------------------------------------------------------------
+
+    unmount();
+
+    // 鈴木結衣がレベルCになったので、本日のミニテストを登録し、StudentDashboard をレンダーして合格ラインが 70点になるブランチを通す
+    await db.saveMiniTestResult({
+      id: 'mini-c-1',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      test_content: 'レベルC向け計算小テスト',
+      score: 75,
+      created_at: new Date().toISOString()
+    });
+
+    const studentDashboardData = db.getStudents().find(s => s.id === 'std-2')!;
+    expect(studentDashboardData.level).toBe('C');
+
+    const { unmount: studentUnmount } = render(
+      <StudentDashboard 
+        key="student-dashboard-c"
+        student={studentDashboardData} 
+        onBackToPortal={() => {}} 
+      />
+    );
+
+    // 合格ラインが70点目標で75点なので「合格」になっていることを検証
+    await waitFor(() => {
+      expect(screen.getByText(/目標:.*70.*点/)).toBeInTheDocument();
+      expect(screen.getByText('合格 ✨')).toBeInTheDocument();
+    });
+
+    studentUnmount();
+
+    // レベルB (合格目標 80点) のブランチを通すためのテスト
+    const studentB = { ...studentDashboardData, level: 'B' as const };
+    await db.saveStudent(studentB);
+
+    await db.saveMiniTestResult({
+      id: 'mini-b-1',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      test_content: 'レベルB向け発展小テスト',
+      score: 85,
+      created_at: new Date().toISOString()
+    });
+
+    const { unmount: studentUnmountB } = render(
+      <StudentDashboard 
+        key="student-dashboard-b"
+        student={studentB} 
+        onBackToPortal={() => {}} 
+      />
+    );
+
+    // 合格ラインが80点目標で85点なので「合格」になっていることを検証 (StudentDashboard:303 の Level B カバー)
+    await waitFor(() => {
+      expect(screen.getAllByText(/目標:.*80.*点/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('合格 ✨')).toBeInTheDocument();
+    });
+
+    studentUnmountB();
   });
 });

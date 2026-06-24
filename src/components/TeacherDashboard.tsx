@@ -16,7 +16,10 @@ import {
   MiniTestResult,
   HomeworkResult,
   MilestonePlan,
-  MilestoneTemplate
+  MilestoneTemplate,
+  GRADES,
+  StudentInteraction,
+  getSchoolYear
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -40,8 +43,18 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student'>('student-list');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
+
+  // 生徒詳細（生徒情報）画面用 State
+  const [interactions, setInteractions] = useState<StudentInteraction[]>([]);
+  const [personalityOptions, setPersonalityOptions] = useState<string[]>([]);
+  const [interactionCategory, setInteractionCategory] = useState<'保護者対応' | '人生相談' | '勉強相談' | '学校相談' | 'その他'>('その他');
+  const [interactionMemo, setInteractionMemo] = useState('');
+  const [interactionDate, setInteractionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newPersonalityInput, setNewPersonalityInput] = useState('');
+  const [selectedPersonalityFromMaster, setSelectedPersonalityFromMaster] = useState('');
+  const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
 
   // レベル別・テンプレート機能用 State
@@ -163,6 +176,32 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       if (freshSt) {
         setSelectedStudent(freshSt);
         setSelectedLevel(freshSt.level || 'A');
+        
+        // Load interactions & personality options for student detail
+        const listInteractions = db.getStudentInteractions(freshSt.id);
+        setInteractions(listInteractions);
+        const listPersonalities = db.getPersonalityOptions();
+        setPersonalityOptions(listPersonalities);
+
+        setEditForm({
+          name: freshSt.name,
+          name_kana: freshSt.name_kana || '',
+          birthday: freshSt.birthday || '',
+          grade: freshSt.grade,
+          school_id: freshSt.school_id,
+          club_activities: freshSt.club_activities || '',
+          hobbies: freshSt.hobbies || '',
+          parent_name: freshSt.parent_name || '',
+          contact_phone: freshSt.contact_phone || '',
+          contact_time: freshSt.contact_time || '',
+          image_url: freshSt.image_url || '',
+          personalities: freshSt.personalities || [],
+          target_school: freshSt.target_school || '',
+          classroom: freshSt.classroom || '',
+          teacher_in_charge: freshSt.teacher_in_charge || '',
+          level: freshSt.level || 'A'
+        });
+
         const allTasks = db.getLearningTasks();
         const freshTasks = allTasks.filter(t => t.student_id === freshSt.id);
         setStudentTasks(freshTasks);
@@ -338,6 +377,91 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     setNewStudentName('');
     alert(`生徒アカウントを発行しました！\nログインID: ${studentId}\nメールアドレス: ${email}`);
     loadData();
+  };
+
+  // 生徒情報の保存
+  const handleSaveStudentDetail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+    try {
+      const updated = {
+        ...selectedStudent,
+        ...editForm
+      } as Student;
+      const saved = await db.saveStudent(updated);
+      setSelectedStudent(saved);
+      // 生徒リスト自体もリロードして更新を反映
+      const listSt = db.getStudents();
+      setStudents(listSt);
+      loadData();
+      alert('生徒情報を保存しました。');
+    } catch (err) {
+      console.error(err);
+      alert('保存中にエラーが発生しました。');
+    }
+  };
+
+  // 個性の追加
+  const handleAddPersonality = async () => {
+    if (!selectedStudent) return;
+    const tagToAdd = newPersonalityInput.trim() || selectedPersonalityFromMaster;
+    if (!tagToAdd) return;
+    
+    const currentTags = editForm.personalities!;
+    if (currentTags.includes(tagToAdd)) {
+      alert('この個性は既に登録されています。');
+      return;
+    }
+
+    try {
+      if (newPersonalityInput.trim()) {
+        await db.addPersonalityOption(tagToAdd);
+        const listPersonalities = db.getPersonalityOptions();
+        setPersonalityOptions(listPersonalities);
+      }
+      
+      const updatedTags = [...currentTags, tagToAdd];
+      setEditForm({ ...editForm, personalities: updatedTags });
+      setNewPersonalityInput('');
+      setSelectedPersonalityFromMaster('');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 個性の削除
+  const handleRemovePersonality = (tagToRemove: string) => {
+    const currentTags = editForm.personalities!;
+    const updatedTags = currentTags.filter(t => t !== tagToRemove);
+    setEditForm({ ...editForm, personalities: updatedTags });
+  };
+
+  // 対応履歴の登録
+  const handleAddInteraction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !interactionMemo.trim()) return;
+    try {
+      const staffName = editForm.teacher_in_charge || '福田';
+      const newInteraction: StudentInteraction = {
+        id: `si-${selectedStudent.id}-${Date.now()}`,
+        student_id: selectedStudent.id,
+        category: interactionCategory,
+        memo: interactionMemo,
+        date: interactionDate,
+        staff_name: staffName.split(' ')[0], // 苗字部分だけを表示する
+        created_at: new Date().toISOString()
+      };
+      
+      await db.saveStudentInteraction(newInteraction);
+      setInteractionMemo('');
+      // リロード
+      const listInteractions = db.getStudentInteractions(selectedStudent.id);
+      setInteractions(listInteractions);
+      alert('対応内容を登録しました。');
+    } catch (err) {
+      console.error(err);
+      alert('登録中にエラーが発生しました。');
+    }
   };
 
   // 2. カリキュラム単元の順序変更（年度途中）
@@ -1168,6 +1292,17 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
               </svg>
               新規生徒アカウント発行
             </button>
+            <button
+              className={`${styles.menuItem} ${activeTab === 'student-detail' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('student-detail')}
+            >
+              {/* User Card Icon */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              生徒情報
+            </button>
           </div>
 
           {/* Individual Settings Group */}
@@ -1504,19 +1639,21 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
             ) : (
               <>
                 {/* Selected Student Profile Banner */}
-                <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
-                      <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
-                    </div>
-                    <div>
-                      {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
-                      {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
-                      {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+                {activeTab !== 'student-detail' && (
+                  <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
+                      </div>
+                      <div>
+                        {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
+                        {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
+                        {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
               {/* Tab 1: 学習計画・時間割 (司令塔設定) */}
               {activeTab === 'schedule' && (
@@ -2648,6 +2785,543 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       <li><strong>📅 ボタン:</strong> その週を休校日（イベント日）にトグル切り替えします。オンの時は `holiday_name` が入力可能になります。</li>
                       <li><strong>📍バッジ:</strong> 選択された生徒が今日までに完了したテーマ数（現在地）を示しています。</li>
                     </ul>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'student-detail' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', alignItems: 'start' }}>
+                  
+                  {/* Left Column: Basic Information & Personality */}
+                  <div className={styles.card}>
+                    <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                      <span>基本情報・属性設定</span>
+                    </div>
+
+                    <form onSubmit={handleSaveStudentDetail}>
+                      {/* Avatar and Name */}
+                      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
+                        <div style={{
+                          width: '72px',
+                          height: '72px',
+                          borderRadius: '50%',
+                          backgroundColor: '#4f46e5',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.8rem',
+                          fontWeight: 'bold',
+                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                          overflow: 'hidden'
+                        }}>
+                          {editForm.image_url ? (
+                            <img src={editForm.image_url} alt="顔写真" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            selectedStudent.name.charAt(0)
+                          )}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                            <div style={{ flex: 2 }}>
+                              <input 
+                                type="text" 
+                                value={editForm.name || ''} 
+                                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                className={styles.input} 
+                                placeholder="氏名（漢字）"
+                                required
+                              />
+                            </div>
+                            <div style={{ flex: 2 }}>
+                              <input 
+                                type="text" 
+                                value={editForm.name_kana || ''} 
+                                onChange={e => setEditForm({ ...editForm, name_kana: e.target.value })}
+                                className={styles.input} 
+                                placeholder="氏名（フリガナ）"
+                              />
+                            </div>
+                          </div>
+                          <input 
+                            type="text" 
+                            value={editForm.image_url || ''} 
+                            onChange={e => setEditForm({ ...editForm, image_url: e.target.value })}
+                            className={styles.input} 
+                            placeholder="顔写真画像URL (ダミー画像URLなど)"
+                            style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Detail Form Fields */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div className={styles.formGroup}>
+                          <label>学校名</label>
+                          <input 
+                            type="text" 
+                            value={editForm.school_name || schools.find(s => s.id === editForm.school_id)?.name || ''} 
+                            onChange={e => {
+                              const typedName = e.target.value;
+                              const matched = schools.find(s => s.name === typedName);
+                              setEditForm({ 
+                                ...editForm, 
+                                school_name: typedName,
+                                school_id: matched ? matched.id : editForm.school_id 
+                              });
+                            }}
+                            className={styles.input}
+                            placeholder="学校名"
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label htmlFor="student-grade">学年（登録時の学年を反映）</label>
+                          <select 
+                            id="student-grade"
+                            value={editForm.grade} 
+                            onChange={e => setEditForm({ ...editForm, grade: e.target.value })}
+                            className={styles.select}
+                          >
+                            {GRADES.map(g => (
+                              <option key={g} value={g}>{g}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div className={styles.formGroup}>
+                          <label htmlFor="edit-student-birthday">生年月日</label>
+                          <input 
+                            id="edit-student-birthday"
+                            type="date" 
+                            value={editForm.birthday || ''} 
+                            onChange={e => setEditForm({ ...editForm, birthday: e.target.value })}
+                            className={styles.input}
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label htmlFor="edit-student-level">学習レベル</label>
+                          <select 
+                            id="edit-student-level"
+                            value={editForm.level} 
+                            onChange={e => setEditForm({ ...editForm, level: e.target.value as any })}
+                            className={styles.select}
+                          >
+                            <option value="A">レベルA (標準)</option>
+                            <option value="B">レベルB (発展)</option>
+                            <option value="C">レベルC (基礎)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div className={styles.formGroup}>
+                          <label>教室</label>
+                          <select 
+                            value={editForm.classroom} 
+                            onChange={e => setEditForm({ ...editForm, classroom: e.target.value })}
+                            className={styles.select}
+                          >
+                            <option value="">-- 指定なし --</option>
+                            <option value="恵比寿教室">恵比寿教室</option>
+                            <option value="渋谷教室">渋谷教室</option>
+                            <option value="新宿教室">新宿教室</option>
+                          </select>
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>担当講師</label>
+                          <select 
+                            value={editForm.teacher_in_charge} 
+                            onChange={e => setEditForm({ ...editForm, teacher_in_charge: e.target.value })}
+                            className={styles.select}
+                          >
+                            <option value="">-- 指定なし --</option>
+                            <option value="福田 尚弘">福田 尚弘</option>
+                            <option value="鈴木 健太郎">鈴木 健太郎</option>
+                            <option value="佐藤 舞">佐藤 舞</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div className={styles.formGroup}>
+                          <label>部活（自由記述）</label>
+                          <input 
+                            type="text" 
+                            value={editForm.club_activities || ''} 
+                            onChange={e => setEditForm({ ...editForm, club_activities: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: サッカー部"
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>趣味（自由記述）</label>
+                          <input 
+                            type="text" 
+                            value={editForm.hobbies || ''} 
+                            onChange={e => setEditForm({ ...editForm, hobbies: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: 将棋・動画編集"
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div className={styles.formGroup}>
+                          <label>保護者名</label>
+                          <input 
+                            type="text" 
+                            value={editForm.parent_name || ''} 
+                            onChange={e => setEditForm({ ...editForm, parent_name: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: 佐藤 健二"
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>志望校</label>
+                          <input 
+                            type="text" 
+                            value={editForm.target_school || ''} 
+                            onChange={e => setEditForm({ ...editForm, target_school: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: 天登星雲高校"
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                        <div className={styles.formGroup}>
+                          <label>連絡先 (電話番号)</label>
+                          <input 
+                            type="text" 
+                            value={editForm.contact_phone || ''} 
+                            onChange={e => setEditForm({ ...editForm, contact_phone: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: 090-7039-0656"
+                          />
+                        </div>
+                        <div className={styles.formGroup}>
+                          <label>連絡可能時間帯</label>
+                          <input 
+                            type="text" 
+                            value={editForm.contact_time || ''} 
+                            onChange={e => setEditForm({ ...editForm, contact_time: e.target.value })}
+                            className={styles.input}
+                            placeholder="例: 18:00 - 21:00"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Personality Tag Area */}
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '24px' }}>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>個性</h4>
+                        
+                        {/* Selected Tags list */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px' }}>
+                          {editForm.personalities!.length === 0 ? (
+                            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>個性タグが登録されていません。</span>
+                          ) : (
+                            editForm.personalities!.map((tag, i) => {
+                              const colors = [
+                                { bg: '#e0e7ff', text: '#3730a3', border: '#4338ca' },
+                                { bg: '#dcfce7', text: '#166534', border: '#15803d' },
+                                { bg: '#fef3c7', text: '#92400e', border: '#b45309' },
+                                { bg: '#f3e8ff', text: '#6b21a8', border: '#7e22ce' },
+                                { bg: '#ffe4e6', text: '#9f1239', border: '#be123c' }
+                              ];
+                              const color = colors[i % colors.length];
+                              return (
+                                <span 
+                                  key={tag} 
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    backgroundColor: color.bg,
+                                    color: color.text,
+                                    padding: '4px 10px',
+                                    borderRadius: '16px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 'bold',
+                                    border: `1px solid ${color.bg}`
+                                  }}
+                                >
+                                  {tag}
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleRemovePersonality(tag)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: color.text,
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                      fontSize: '0.85rem',
+                                      lineHeight: 1,
+                                      display: 'flex',
+                                      alignItems: 'center'
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Add tags interface */}
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ flex: 1 }}>
+                            <label htmlFor="personality-master" style={{ fontSize: '0.75rem', color: '#475569', display: 'block', marginBottom: '4px' }}>マスタから選ぶ</label>
+                            <select 
+                              id="personality-master"
+                              value={selectedPersonalityFromMaster} 
+                              onChange={e => {
+                                setSelectedPersonalityFromMaster(e.target.value);
+                                setNewPersonalityInput('');
+                              }}
+                              className={styles.select}
+                              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                            >
+                              <option value="">-- 選択肢から選ぶ --</option>
+                              {personalityOptions.map(p => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: '0.75rem', color: '#475569', display: 'block', marginBottom: '4px' }}>新しく書いて追加</label>
+                            <input 
+                              type="text" 
+                              value={newPersonalityInput} 
+                              onChange={e => {
+                                setNewPersonalityInput(e.target.value);
+                                setSelectedPersonalityFromMaster('');
+                              }}
+                              placeholder="新しい個性を入力..."
+                              className={styles.input}
+                              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                            />
+                          </div>
+                          <button 
+                            type="button" 
+                            onClick={handleAddPersonality}
+                            className={styles.btn}
+                            style={{ width: 'auto', padding: '6px 12px', background: '#3b82f6', height: '34px', display: 'flex', alignItems: 'center' }}
+                          >
+                            ＋ 追加
+                          </button>
+                        </div>
+                      </div>
+
+                      <button type="submit" className={styles.btn} style={{ background: '#10b981' }}>
+                        変更を保存する
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Right Column: Interaction Logs & Test Records */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                    
+                    {/* Test Results Summary Card */}
+                    <div className={styles.card}>
+                      <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                        <span>直近のテスト・模試実績</span>
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        
+                        {/* Regular Test card */}
+                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>定期テスト（最新）</h4>
+                          {(() => {
+                            const latestRegularTest = testRecordsList
+                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'regular_test')
+                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                            return latestRegularTest ? (
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestRegularTest.subject}</span>
+                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#4f46e5' }}>{latestRegularTest.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
+                                </div>
+                                {latestRegularTest.rank_change && (
+                                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', gap: '8px' }}>
+                                    <span>順位変動: 
+                                      <span style={{ 
+                                        color: latestRegularTest.rank_change === 'up' ? '#10b981' : latestRegularTest.rank_change === 'down' ? '#ef4444' : '#64748b',
+                                        fontWeight: 'bold',
+                                        marginLeft: '4px'
+                                      }}>
+                                        {latestRegularTest.rank_change === 'up' ? '▲ 上昇' : latestRegularTest.rank_change === 'down' ? '▼ 下降' : 'キープ'}
+                                      </span>
+                                    </span>
+                                    {latestRegularTest.rate_change && (
+                                      <span>({latestRegularTest.rate_change > 0 ? '+' : ''}{latestRegularTest.rate_change}%)</span>
+                                    )}
+                                  </div>
+                                )}
+                                {latestRegularTest.next_target_score && (
+                                  <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '6px' }}>
+                                    次回目標: <strong>{latestRegularTest.next_target_score}点</strong>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>定期テスト記録がありません。</span>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Mock Exam card */}
+                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>模試実績（最新）</h4>
+                          {(() => {
+                            const latestMockExam = testRecordsList
+                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'mock_exam')
+                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                            return latestMockExam ? (
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestMockExam.subject}</span>
+                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#059669' }}>{latestMockExam.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
+                                </div>
+                                {latestMockExam.target_school_code && (
+                                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    志望校: <strong>{schoolCodes.find(c => c.code === latestMockExam.target_school_code)?.name || latestMockExam.target_school_code}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>模試の記録がありません。</span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Learning Status */}
+                      <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#eef2f6', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                        <h4 style={{ margin: '0 0 6px 0', fontSize: '0.8rem', color: '#334155', fontWeight: 'bold' }}>現在の学習状況</h4>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#475569' }}>
+                          <span>完了単元数: <strong>{studentTasks.filter(t => t.status === 'completed').length}</strong> / {studentTasks.length}</span>
+                          <span>進捗率: <strong>{studentTasks.length > 0 ? Math.round((studentTasks.filter(t => t.status === 'completed').length / studentTasks.length) * 100) : 0}%</strong></span>
+                          <span>アラート失敗数: <strong style={{ color: studentTasks.filter(t => t.status === 'failed').length > 0 ? '#ef4444' : '#475569' }}>{studentTasks.filter(t => t.status === 'failed').length}</strong></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Interactions Card */}
+                    <div className={styles.card}>
+                      <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                        <span>対応入力</span>
+                      </div>
+
+                      <form onSubmit={handleAddInteraction} style={{ marginBottom: '24px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="interaction-category">種別</label>
+                            <select 
+                              id="interaction-category"
+                              value={interactionCategory} 
+                              onChange={e => setInteractionCategory(e.target.value as any)}
+                              className={styles.select}
+                            >
+                              <option value="保護者対応">保護者対応</option>
+                              <option value="人生相談">人生相談</option>
+                              <option value="勉強相談">勉強相談</option>
+                              <option value="学校相談">学校相談</option>
+                              <option value="その他">その他</option>
+                            </select>
+                          </div>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="interaction-date">日付</label>
+                            <input 
+                              id="interaction-date"
+                              type="date" 
+                              value={interactionDate} 
+                              onChange={e => setInteractionDate(e.target.value)}
+                              className={styles.input}
+                            />
+                          </div>
+                        </div>
+                        <div className={styles.formGroup} style={{ marginBottom: '12px' }}>
+                          <label>メモ</label>
+                          <textarea 
+                            value={interactionMemo} 
+                            onChange={e => setInteractionMemo(e.target.value)}
+                            className={styles.textarea}
+                            placeholder="具体的な対応メモを入力..."
+                            rows={3}
+                            required
+                          />
+                        </div>
+                        <button type="submit" className={styles.btn} style={{ background: '#22c55e' }}>
+                          対応内容を登録
+                        </button>
+                      </form>
+
+                      {/* Interaction Timeline List */}
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                        <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>対応履歴</h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto', paddingRight: '4px' }}>
+                          {interactions.length === 0 ? (
+                            <span style={{ fontSize: '0.85rem', color: '#94a3b8', textAlign: 'center', padding: '16px 0' }}>対応履歴はまだありません。</span>
+                          ) : (
+                            interactions.map(item => (
+                              <div 
+                                key={item.id} 
+                                style={{
+                                  backgroundColor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  borderRadius: '8px',
+                                  padding: '12px',
+                                  position: 'relative'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                      {item.date.replace(/-/g, '/')}
+                                    </span>
+                                    <span style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: 'bold',
+                                      backgroundColor: item.category === '保護者対応' ? '#ffe4e6' : item.category === '人生相談' ? '#f3e8ff' : item.category === '勉強相談' ? '#e0e7ff' : item.category === '学校相談' ? '#dcfce7' : '#f1f5f9',
+                                      color: item.category === '保護者対応' ? '#9f1239' : item.category === '人生相談' ? '#6b21a8' : item.category === '勉強相談' ? '#3730a3' : item.category === '学校相談' ? '#166534' : '#334155',
+                                      padding: '2px 8px',
+                                      borderRadius: '4px'
+                                    }}>
+                                      {item.category}
+                                    </span>
+                                  </div>
+                                  <span style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 'bold',
+                                    backgroundColor: '#3b82f6',
+                                    color: '#ffffff',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px'
+                                  }}>
+                                    {item.staff_name}
+                                  </span>
+                                </div>
+                                <div style={{ 
+                                  fontSize: '0.85rem', 
+                                  color: '#334155', 
+                                  whiteSpace: 'pre-wrap', 
+                                  lineHeight: 1.5 
+                                }}>
+                                  {item.memo}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+
                   </div>
                 </div>
               )}

@@ -20,7 +20,56 @@ export interface Student {
   period_count?: number;
   created_at: string;
   level?: 'A' | 'B' | 'C';
+  // 新規追加
+  name_kana?: string;
+  birthday?: string;
+  club_activities?: string;
+  hobbies?: string;
+  parent_name?: string;
+  contact_phone?: string;
+  contact_time?: string;
+  image_url?: string;
+  personalities?: string[];
+  target_school?: string;
+  classroom?: string;
+  teacher_in_charge?: string;
+  registered_grade?: string;
+  registered_year?: number;
+  school_name?: string;
 }
+
+export interface StudentInteraction {
+  id: string;
+  student_id: string;
+  category: '保護者対応' | '人生相談' | '勉強相談' | '学校相談' | 'その他';
+  memo: string;
+  date: string; // YYYY-MM-DD
+  staff_name: string;
+  created_at: string;
+}
+
+export const GRADES = [
+  '小1', '小2', '小3', '小4', '小5', '小6',
+  '中1', '中2', '中3',
+  '高1', '高2', '高3',
+  '既卒'
+];
+
+export function getSchoolYear(dateString?: string): number {
+  const date = dateString ? new Date(dateString) : new Date();
+  const y = date.getFullYear();
+  const m = date.getMonth(); // 0 is Jan, 3 is Apr
+  return m < 3 ? y - 1 : y;
+}
+
+export function calculateCurrentGrade(registeredGrade: string, registeredYear: number, currentYear: number): string {
+  const diff = currentYear - registeredYear;
+  if (diff <= 0) return registeredGrade;
+  const idx = GRADES.indexOf(registeredGrade);
+  if (idx === -1) return registeredGrade;
+  return GRADES[Math.min(idx + diff, GRADES.length - 1)];
+}
+
 
 export interface MilestonePlan {
   id: string;
@@ -416,9 +465,23 @@ class DatabaseService {
         grade: '中3',
         school_id: 'sch-1',
         status: 'normal',
-        start_unit_id: 'unit-102-1', // 「文字式（最初のテーマ）」からスタート
+        start_unit_id: 'unit-102-1',
         period_count: 2,
-        created_at: new Date().toISOString()
+        created_at: '2026-04-01T00:00:00Z',
+        level: 'A',
+        name_kana: 'サトウ タクミ',
+        birthday: '2011-05-15',
+        club_activities: '野球部',
+        hobbies: '読書・ゲーム',
+        parent_name: '佐藤 健二',
+        contact_phone: '090-1234-5678',
+        contact_time: '18:00 - 21:00',
+        personalities: ['スイッチ入るとよく喋る', '班長'],
+        target_school: '天登星雲高校',
+        classroom: '恵比寿教室',
+        teacher_in_charge: '福田 尚弘',
+        registered_grade: '中3',
+        registered_year: 2026
       },
       {
         id: 'std-2',
@@ -428,12 +491,37 @@ class DatabaseService {
         grade: '小5',
         school_id: 'sch-2',
         status: 'normal',
-        start_unit_id: 'unit-301-1', // 最初（最初のテーマ）からスタート
+        start_unit_id: 'unit-301-1',
         period_count: 2,
-        created_at: new Date().toISOString()
+        created_at: '2025-04-01T00:00:00Z', // 2025年度登録なので、2026年度時点では小6へ自動進級
+        level: 'B',
+        name_kana: 'スズキ ユイ',
+        birthday: '2015-08-20',
+        club_activities: '音楽クラブ',
+        hobbies: 'ピアノ・歌',
+        parent_name: '鈴木 陽子',
+        contact_phone: '080-9876-5432',
+        contact_time: '17:00 - 20:00',
+        personalities: ['ぱっと見大人しい', '音楽の授業は好き'],
+        target_school: 'テントル総合高校',
+        classroom: '恵比寿教室',
+        teacher_in_charge: '福田 尚弘',
+        registered_grade: '小5',
+        registered_year: 2025
       }
     ];
-    return this.getMockData('students', seed);
+    const rawList = this.getMockData('students', seed);
+    const curYear = getSchoolYear();
+    return rawList.map(s => {
+      const regYear = s.registered_year ?? getSchoolYear(s.created_at);
+      const regGrade = s.registered_grade ?? s.grade;
+      return {
+        ...s,
+        registered_year: regYear,
+        registered_grade: regGrade,
+        grade: calculateCurrentGrade(regGrade, regYear, curYear)
+      };
+    });
   }
 
   public getLearningTasks(): LearningTask[] {
@@ -600,17 +688,38 @@ class DatabaseService {
 
   // 2. Students CRUD
   public async saveStudent(student: Student): Promise<Student> {
+    const curYear = getSchoolYear();
+    const toSave: Student = {
+      ...student,
+      registered_year: student.registered_year ?? getSchoolYear(student.created_at || new Date().toISOString()),
+      registered_grade: student.registered_grade ?? student.grade
+    };
+    
+    // 学年が手動変更されたかどうかのチェック
+    const expectedGrade = calculateCurrentGrade(
+      toSave.registered_grade!,
+      toSave.registered_year!,
+      curYear
+    );
+    if (expectedGrade !== student.grade) {
+      toSave.registered_grade = student.grade;
+      toSave.registered_year = curYear;
+    }
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('students').upsert(student).select().single();
+      const { data, error } = await this.supabase.from('students').upsert(toSave).select().single();
       if (error) throw error;
       return data;
     } else {
-      const list = this.getStudents();
-      const idx = list.findIndex(s => s.id === student.id);
-      if (idx >= 0) list[idx] = student;
-      else list.push(student);
-      this.saveMockData('students', list);
-      return student;
+      const rawList = this.getMockData<Student>('students', []);
+      const idx = rawList.findIndex(s => s.id === toSave.id);
+      if (idx >= 0) rawList[idx] = toSave;
+      else rawList.push(toSave);
+      this.saveMockData('students', rawList);
+      return {
+        ...toSave,
+        grade: calculateCurrentGrade(toSave.registered_grade!, toSave.registered_year!, curYear)
+      };
     }
   }
 
@@ -1127,6 +1236,93 @@ class DatabaseService {
     localStorage.removeItem('tentoru_homework_results');
     localStorage.removeItem('tentoru_milestone_plans');
     localStorage.removeItem('tentoru_milestone_templates');
+    localStorage.removeItem('tentoru_student_interactions');
+    localStorage.removeItem('tentoru_personality_options');
+  }
+
+  // 14. StudentInteractions CRUD
+  public getStudentInteractions(studentId?: string): StudentInteraction[] {
+    const seed: StudentInteraction[] = [
+      {
+        id: 'si-1',
+        student_id: 'std-1',
+        category: '勉強相談',
+        memo: '理科は前回より手応えあり。英語が下がったかも、と言っている。\n今日の自習の様子はいつもより暗い顔。',
+        date: '2026-06-18',
+        staff_name: '福田',
+        created_at: '2026-06-18T18:00:00Z'
+      },
+      {
+        id: 'si-2',
+        student_id: 'std-1',
+        category: '保護者対応',
+        memo: '私立併願を迷っている。今度、駒場学園見に行く。',
+        date: '2026-06-20',
+        staff_name: '福田',
+        created_at: '2026-06-20T19:00:00Z'
+      }
+    ];
+    const list = this.getMockData('student_interactions', seed);
+    if (studentId) {
+      return list
+        .filter(i => i.student_id === studentId)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    return list;
+  }
+
+  public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('student_interactions').upsert(interaction).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getMockData<StudentInteraction>('student_interactions', []);
+      const idx = list.findIndex(i => i.id === interaction.id);
+      if (idx >= 0) list[idx] = interaction;
+      else list.push(interaction);
+      this.saveMockData('student_interactions', list);
+      return interaction;
+    }
+  }
+
+  public async deleteStudentInteraction(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('student_interactions').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      let list = this.getMockData<StudentInteraction>('student_interactions', []);
+      list = list.filter(i => i.id !== id);
+      this.saveMockData('student_interactions', list);
+    }
+  }
+
+  // 15. PersonalityOptions CRUD
+  public getPersonalityOptions(): string[] {
+    const seed = [
+      'ぱっと見大人しい',
+      'スイッチ入るとよく喋る',
+      '班長',
+      '合唱実行委員長',
+      '音楽の授業は好き',
+      '礼儀正しくちゃんと敬語使える'
+    ];
+    return this.getMockData<string>('personality_options', seed);
+  }
+
+  public async addPersonalityOption(name: string): Promise<string> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('personality_options').insert({ name });
+      if (error && error.code !== '23505') throw error;
+      return name;
+    } else {
+      const list = this.getPersonalityOptions();
+      if (!list.includes(name)) {
+        list.push(name);
+        this.saveMockData('personality_options', list);
+      }
+      return name;
+    }
   }
 }
 
