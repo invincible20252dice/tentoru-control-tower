@@ -61,11 +61,14 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const [newStudentLevel, setNewStudentLevel] = useState<'A' | 'B' | 'C'>('A');
   const [selectedLevel, setSelectedLevel] = useState<'A' | 'B' | 'C'>('A');
   const [milestoneTemplates, setMilestoneTemplates] = useState<MilestoneTemplate[]>([]);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editingTemplateName, setEditingTemplateName] = useState('');
   const [addMonth, setAddMonth] = useState<number>(4);
   const [addWeek, setAddWeek] = useState<number>(1);
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<'all' | number>('all');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   // 検索フィルター用のState
   const [filterSchoolId, setFilterSchoolId] = useState<string>('');
@@ -311,6 +314,38 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   useEffect(() => {
     loadData();
   }, [selectedSchoolId, selectedSubject, selectedStudent?.id, scheduleDate]);
+
+  useEffect(() => {
+    if (selectedStudent) {
+      const isJuniorHigh = selectedStudent.grade.startsWith('中');
+      if (isJuniorHigh) {
+        const juniorSubjects = ['数学', '英語', '理科', '歴史', '地理', '国語'];
+        if (!juniorSubjects.includes(selectedSubject)) {
+          setSelectedSubject('数学');
+        }
+      } else {
+        setSelectedSubject('算数');
+      }
+    }
+    setSelectedTemplateId('');
+
+    // スケジュール日付から現在の月を取得して初期表示フィルターにする
+    if (scheduleDate) {
+      const currentMonth = new Date(scheduleDate).getMonth() + 1;
+      const validMonths = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+      if (validMonths.includes(currentMonth)) {
+        setSelectedMonthFilter(currentMonth);
+      } else {
+        setSelectedMonthFilter('all');
+      }
+    } else {
+      setSelectedMonthFilter('all');
+    }
+  }, [selectedStudent?.id, scheduleDate]);
+
+  useEffect(() => {
+    setSelectedTemplateId('');
+  }, [selectedSubject, selectedLevel]);
 
   // 1. 1クリックアカウント発行
   const handleCreateAccount = async (e: React.FormEvent) => {
@@ -982,6 +1017,14 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
       });
   };
 
+  const getDisplayMilestones = () => {
+    const filtered = getFilteredMilestones();
+    if (selectedMonthFilter === 'all') {
+      return filtered;
+    }
+    return filtered.filter(p => p.month === selectedMonthFilter);
+  };
+
   const handleAddMilestoneRow = async (month: number, week: number) => {
     const currentGrade = selectedStudent!.grade;
     const newPlan: MilestonePlan = {
@@ -1014,57 +1057,38 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
     loadData();
   };
 
-  const handleMoveMilestoneRow = async (index: number, direction: 'up' | 'down') => {
-    const filtered = getFilteredMilestones();
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === filtered.length - 1) return;
+  const handleReorderMilestones = async (activeId: string, targetId: string) => {
+    const allList = getFilteredMilestones();
+    const activeIdx = allList.findIndex(p => p.id === activeId);
+    const targetIdx = allList.findIndex(p => p.id === targetId);
+    if (activeIdx === -1 || targetIdx === -1 || activeIdx === targetIdx) return;
 
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    const planA = filtered[index];
-    const planB = filtered[targetIdx];
+    // 現在の日付枠を取得
+    const locations = allList.map(p => ({
+      month: p.month,
+      week_number: p.week_number
+    }));
 
-    const temp = {
-      chapter: planA.chapter,
-      unit_name: planA.unit_name,
-      target_theme_name: planA.target_theme_name,
-      target_sequence_order: planA.target_sequence_order,
-      is_holiday: planA.is_holiday,
-      holiday_name: planA.holiday_name
-    };
+    // 要素を並び替え
+    const newAllList = [...allList];
+    const [draggedItem] = newAllList.splice(activeIdx, 1);
+    newAllList.splice(targetIdx, 0, draggedItem);
 
-    const updatedPlans = filtered.map((p, idx) => {
-      if (idx === index) {
-        return {
-          ...p,
-          chapter: planB.chapter,
-          unit_name: planB.unit_name,
-          target_theme_name: planB.target_theme_name,
-          target_sequence_order: planB.target_sequence_order,
-          is_holiday: planB.is_holiday,
-          holiday_name: planB.holiday_name
-        };
-      }
-      if (idx === targetIdx) {
-        return {
-          ...p,
-          chapter: temp.chapter,
-          unit_name: temp.unit_name,
-          target_theme_name: temp.target_theme_name,
-          target_sequence_order: temp.target_sequence_order,
-          is_holiday: temp.is_holiday,
-          holiday_name: temp.holiday_name
-        };
-      }
-      return p;
+    // 新しい順序に従って日付枠を割り当て直す
+    const reorderedItems = newAllList.map((item, idx) => ({
+      ...item,
+      month: locations[idx].month,
+      week_number: locations[idx].week_number
+    }));
+
+    // milestonePlans 全体のステートを更新する
+    const updatedPlans = milestonePlans.map(p => {
+      const match = reorderedItems.find(item => item.id === p.id);
+      return match ? match : p;
     });
 
-    const newAllPlans = milestonePlans.map(p => {
-      const match = updatedPlans.find(up => up.id === p.id);
-      return match || p;
-    });
-
-    setMilestonePlans(newAllPlans);
-    await db.saveMilestonePlans(newAllPlans);
+    setMilestonePlans(updatedPlans);
+    await db.saveMilestonePlans(updatedPlans);
     loadData();
   };
 
@@ -1401,8 +1425,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                     cursor: 'pointer'
                   }}
                 >
-                  <option value="A">レベルA (標準)</option>
-                  <option value="B">レベルB (発展)</option>
+                  <option value="A">レベルA (発展)</option>
+                  <option value="B">レベルB (標準)</option>
                   <option value="C">レベルC (基礎)</option>
                 </select>
               </div>
@@ -1605,8 +1629,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                     onChange={e => setNewStudentLevel(e.target.value as any)}
                     className={styles.select}
                   >
-                    <option value="A">レベルA (標準)</option>
-                    <option value="B">レベルB (発展)</option>
+                    <option value="A">レベルA (発展)</option>
+                    <option value="B">レベルB (標準)</option>
                     <option value="C">レベルC (基礎)</option>
                   </select>
                 </div>
@@ -1946,9 +1970,22 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         onChange={e => setSelectedSubject(e.target.value)}
                         className={styles.select}
                       >
-                        <option value="数学">数学</option>
-                        <option value="英語">英語</option>
-                        <option value="算数">算数</option>
+                        {(() => {
+                          const targetSchool = schools.find(s => s.id === selectedSchoolId);
+                          const isJuniorHigh = targetSchool ? targetSchool.type === 'junior_high' : true;
+                          return isJuniorHigh ? (
+                            <>
+                              <option value="数学">数学</option>
+                              <option value="英語">英語</option>
+                              <option value="理科">理科</option>
+                              <option value="歴史">歴史</option>
+                              <option value="地理">地理</option>
+                              <option value="国語">国語</option>
+                            </>
+                          ) : (
+                            <option value="算数">算数</option>
+                          );
+                        })()}
                       </select>
                     </div>
                   </div>
@@ -2413,6 +2450,10 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             <>
                               <option value="数学">数学</option>
                               <option value="英語">英語</option>
+                              <option value="理科">理科</option>
+                              <option value="歴史">歴史</option>
+                              <option value="地理">地理</option>
+                              <option value="国語">国語</option>
                             </>
                           ) : (
                             <option value="算数">算数</option>
@@ -2429,14 +2470,14 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
                             onClick={() => setSelectedLevel('A')}
                           >
-                            レベルA (標準)
+                            レベルA (発展)
                           </button>
                           <button
                             type="button"
                             className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
                             onClick={() => setSelectedLevel('B')}
                           >
-                            レベルB (発展)
+                            レベルB (標準)
                           </button>
                           <button
                             type="button"
@@ -2445,6 +2486,32 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                           >
                             レベルC (基礎)
                           </button>
+                        </div>
+                      </div>
+
+                      {/* Month filter toggle */}
+                      <div>
+                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>表示月:</label>
+                        <div className={styles.segmentControl} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '2px' }}>
+                          <button
+                            type="button"
+                            className={`${styles.segmentBtn} ${selectedMonthFilter === 'all' ? styles.segmentBtnActive : ''}`}
+                            onClick={() => setSelectedMonthFilter('all')}
+                            style={{ padding: '4px 8px', fontSize: '0.85rem' }}
+                          >
+                            すべて
+                          </button>
+                          {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              className={`${styles.segmentBtn} ${selectedMonthFilter === m ? styles.segmentBtnActive : ''}`}
+                              onClick={() => setSelectedMonthFilter(m)}
+                              style={{ padding: '4px 8px', fontSize: '0.85rem' }}
+                            >
+                              {m}月
+                            </button>
+                          ))}
                         </div>
                       </div>
 
@@ -2460,7 +2527,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>授業テーマ・計画テンプレート管理</h4>
                       
                       {/* Save Template */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <input
                           type="text"
                           placeholder="現在の計画をテンプレート名として保存（自由記述）..."
@@ -2479,46 +2546,100 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         </button>
                       </div>
 
-                      {/* Saved Templates List */}
-                      {milestoneTemplates.filter(t => t.grade === (selectedStudent ? selectedStudent.grade : '中1') && t.subject === selectedSubject && t.level === selectedLevel).length > 0 && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>保存済みテンプレート一覧:</span>
+                      {/* Saved Templates Dropdown & Actions */}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>保存済みテンプレート:</label>
+                        <select
+                          value={selectedTemplateId}
+                          onChange={e => {
+                            setSelectedTemplateId(e.target.value);
+                            setEditingTemplateId(null);
+                          }}
+                          className={styles.select}
+                          style={{ width: '380px', padding: '6px', fontSize: '0.85rem' }}
+                        >
+                          <option value="">-- テンプレートを選択 --</option>
                           {milestoneTemplates
-                            .filter(t => t.grade === (selectedStudent ? selectedStudent.grade : '中1') && t.subject === selectedSubject && t.level === selectedLevel)
                             .map(t => (
-                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' }}>
-                                {editingTemplateId === t.id ? (
-                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                    <input
-                                      type="text"
-                                      value={editingTemplateName}
-                                      onChange={e => setEditingTemplateName(e.target.value)}
-                                      className={styles.input}
-                                      style={{ padding: '4px 6px', fontSize: '0.8rem', width: '200px' }}
-                                    />
-                                    <button onClick={() => handleUpdateTemplateName(t.id, editingTemplateName)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#10b981' }}>保存</button>
-                                    <button onClick={() => setEditingTemplateId(null)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#64748b' }}>キャンセル</button>
-                                  </div>
-                                ) : (
-                                  <span><strong>{t.name}</strong> <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>({t.plans.length}行 / {new Date(t.created_at).toLocaleDateString()})</span></span>
-                                )}
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button onClick={() => handleApplyTemplate(t.id)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#10b981' }}>
-                                    呼び出して適用
-                                  </button>
-                                  {editingTemplateId !== t.id && (
-                                    <button onClick={() => { setEditingTemplateId(t.id); setEditingTemplateName(t.name); }} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#e2e8f0', color: '#0f172a', border: '1px solid #cbd5e1' }}>
-                                      名称変更
-                                    </button>
-                                  )}
-                                  <button onClick={() => handleDeleteTemplate(t.id)} className={styles.btn} style={{ width: 'auto', padding: '2px 8px', fontSize: '0.75rem', background: '#ef4444' }}>
-                                    削除
-                                  </button>
-                                </div>
-                              </div>
+                              <option key={t.id} value={t.id}>
+                                {t.name} ({t.grade} {t.subject} レベル{t.level === 'A' ? 'A (発展)' : t.level === 'B' ? 'B (標準)' : 'C (基礎)'} - {t.plans.length}行)
+                              </option>
                             ))}
-                        </div>
-                      )}
+                        </select>
+
+                        {selectedTemplateId && (
+                          <>
+                            {editingTemplateId === selectedTemplateId ? (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  value={editingTemplateName}
+                                  onChange={e => setEditingTemplateName(e.target.value)}
+                                  className={styles.input}
+                                  style={{ padding: '4px 6px', fontSize: '0.8rem', width: '200px' }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await handleUpdateTemplateName(selectedTemplateId, editingTemplateName);
+                                    setEditingTemplateId(null);
+                                  }}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#10b981' }}
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingTemplateId(null)}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#64748b' }}
+                                >
+                                  キャンセル
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplyTemplate(selectedTemplateId)}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#10b981' }}
+                                >
+                                  呼び出して適用
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const t = milestoneTemplates.find(x => x.id === selectedTemplateId);
+                                    if (t) {
+                                      setEditingTemplateId(t.id);
+                                      setEditingTemplateName(t.name);
+                                    }
+                                  }}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#e2e8f0', color: '#0f172a', border: '1px solid #cbd5e1' }}
+                                >
+                                  名称変更
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (confirm('このテンプレートを削除してもよろしいですか？')) {
+                                      await handleDeleteTemplate(selectedTemplateId);
+                                      setSelectedTemplateId('');
+                                    }
+                                  }}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#ef4444' }}
+                                >
+                                  削除
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
 
                     <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
@@ -2598,25 +2719,24 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #94a3b8' }}>
                           <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>月</th>
                           <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>週</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>章 (単元)</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>単元名</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', textAlign: 'left' }}>目標テーマ</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>章</th>
+                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '380px', textAlign: 'left' }}>単元名</th>
                           <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '130px', textAlign: 'center' }}>進捗</th>
                           <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '160px', textAlign: 'center' }}>操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {getFilteredMilestones()
+                        {getDisplayMilestones()
                           .map((plan, idx, arr) => {
                             const { month: currMonth, week_number: currWeek } = getYearMonthWeek(scheduleDate);
                             const isTodayWeek = plan.month === currMonth && plan.week_number === currWeek;
-
+ 
                             // 生徒の現在進捗を取得
                             const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
                             const subjectUnits = allCurriculumUnits.filter(u => u.subject === selectedSubject);
                             const subjectUnitIds = new Set(subjectUnits.map(u => u.id));
                             const completedSubjectTasks = studentCompletedTasks.filter(t => subjectUnitIds.has(t.unit_id));
-
+ 
                             let studentSeq = 0;
                             if (completedSubjectTasks.length > 0) {
                               const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
@@ -2628,10 +2748,10 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                 studentSeq = startUnit.sequence_order - 1;
                               }
                             }
-
+ 
                             const target = plan.target_sequence_order || 0;
                             const isStudentCompleted = studentSeq >= target;
-
+ 
                             let rowBg = '#ffffff';
                             let rowBorder = '1px solid #cbd5e1';
                             if (plan.is_holiday) {
@@ -2640,15 +2760,39 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                               rowBg = '#eff6ff';
                               rowBorder = '2px solid #3b82f6';
                             }
-
+ 
+                            // 文字数に応じてフォントサイズを動的に決定
+                            const themeName = plan.target_theme_name || '';
+                            const selectFontSize = themeName.length > 25 ? '0.65rem' : (themeName.length > 18 ? '0.7rem' : (themeName.length > 12 ? '0.75rem' : '0.8rem'));
+ 
                             return (
                               <tr 
                                 key={plan.id} 
                                 style={{ 
                                   backgroundColor: rowBg, 
                                   fontWeight: isTodayWeek ? 'bold' : 'normal',
-                                  border: rowBorder
+                                  border: rowBorder,
+                                  cursor: 'grab',
+                                  opacity: draggedId === plan.id ? 0.4 : 1
                                 }}
+                                draggable="true"
+                                onDragStart={(e) => {
+                                  setDraggedId(plan.id);
+                                  if (e.dataTransfer) {
+                                    e.dataTransfer.effectAllowed = 'move';
+                                  }
+                                }}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  if (draggedId && draggedId !== plan.id) {
+                                    handleReorderMilestones(draggedId, plan.id);
+                                  }
+                                  setDraggedId(null);
+                                }}
+                                onDragEnd={() => setDraggedId(null)}
                               >
                                 <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center', fontWeight: 'bold' }}>
                                   {plan.month}月
@@ -2668,29 +2812,13 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                   />
                                 </td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
-                                  <input
-                                    type="text"
-                                    value={plan.unit_name || ''}
-                                    placeholder={plan.is_holiday ? '休校理由を入力' : '例: 加法と減法'}
-                                    onChange={e => {
-                                      if (plan.is_holiday) {
-                                        handleUpdateHolidayName(plan.id, e.target.value);
-                                      } else {
-                                        handleUpdateMilestoneField(plan.id, 'unit_name', e.target.value);
-                                      }
-                                    }}
-                                    className={styles.input}
-                                    style={{ fontSize: '0.8rem', padding: '4px' }}
-                                  />
-                                </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                                   {!plan.is_holiday ? (
                                     <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                                       <select
                                         value={plan.target_theme_name || ''}
                                         onChange={e => handleUpdateMilestoneField(plan.id, 'target_theme_name', e.target.value)}
                                         className={styles.select}
-                                        style={{ fontSize: '0.8rem', padding: '4px', flex: 1 }}
+                                        style={{ fontSize: selectFontSize, width: '320px', padding: '4px' }}
                                       >
                                         <option value="">-- テーマを選択 --</option>
                                         {subjectUnits.map(u => (
@@ -2707,9 +2835,19 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                       />
                                     </div>
                                   ) : (
-                                    <span style={{ color: '#be123c', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                      🎉 {plan.holiday_name || '休校日'}
-                                    </span>
+                                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                      <span style={{ color: '#be123c', fontSize: '0.75rem', fontWeight: 'bold', marginRight: '8px' }}>
+                                        🎉 {plan.holiday_name || '休校日'}
+                                      </span>
+                                      <input
+                                        type="text"
+                                        value={plan.holiday_name || ''}
+                                        placeholder="休校理由を入力"
+                                        onChange={e => handleUpdateHolidayName(plan.id, e.target.value)}
+                                        className={styles.input}
+                                        style={{ fontSize: '0.8rem', padding: '4px', flex: 1 }}
+                                      />
+                                    </div>
                                   )}
                                 </td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
@@ -2731,26 +2869,36 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                                 </td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
                                   <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                    <button
-                                      type="button"
-                                      disabled={idx === 0}
-                                      onClick={() => handleMoveMilestoneRow(idx, 'up')}
-                                      className={styles.btn}
-                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
-                                      title="上へ"
-                                    >
-                                      ▲
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={idx === arr.length - 1}
-                                      onClick={() => handleMoveMilestoneRow(idx, 'down')}
-                                      className={styles.btn}
-                                      style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
-                                      title="下へ"
-                                    >
-                                      ▼
-                                    </button>
+                                    {(() => {
+                                      const allFiltered = getFilteredMilestones();
+                                      const globalIdx = allFiltered.findIndex(x => x.id === plan.id);
+                                      const isFirstGlobal = globalIdx === 0;
+                                      const isLastGlobal = globalIdx === allFiltered.length - 1;
+                                      return (
+                                        <>
+                                          <button
+                                            type="button"
+                                            disabled={isFirstGlobal}
+                                            onClick={() => handleReorderMilestones(plan.id, allFiltered[globalIdx - 1].id)}
+                                            className={styles.btn}
+                                            style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
+                                            title="上へ"
+                                          >
+                                            ▲
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={isLastGlobal}
+                                            onClick={() => handleReorderMilestones(plan.id, allFiltered[globalIdx + 1].id)}
+                                            className={styles.btn}
+                                            style={{ padding: '2px 6px', fontSize: '0.75rem', width: 'auto', background: '#cbd5e1', color: '#0f172a' }}
+                                            title="下へ"
+                                          >
+                                            ▼
+                                          </button>
+                                        </>
+                                      );
+                                    })()}
                                     <button
                                       type="button"
                                       onClick={() => handleToggleHoliday(plan.id)}
@@ -2781,7 +2929,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
                     <p style={{ margin: '0 0 4px 0' }}><strong>💡 マイルストーン計画のカスタマイズについて:</strong></p>
                     <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                      <li>各セルのテキストボックスやプルダウンから、章名・単元名・目標テーマ・到達順序をインラインで直接編集できます。</li>
+                      <li>各セルのテキストボックスやプルダウンから、章名・単元名・到達順序をインラインで直接編集できます。</li>
                       <li><strong>📅 ボタン:</strong> その週を休校日（イベント日）にトグル切り替えします。オンの時は `holiday_name` が入力可能になります。</li>
                       <li><strong>📍バッジ:</strong> 選択された生徒が今日までに完了したテーマ数（現在地）を示しています。</li>
                     </ul>
@@ -2908,8 +3056,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             onChange={e => setEditForm({ ...editForm, level: e.target.value as any })}
                             className={styles.select}
                           >
-                            <option value="A">レベルA (標準)</option>
-                            <option value="B">レベルB (発展)</option>
+                            <option value="A">レベルA (発展)</option>
+                            <option value="B">レベルB (標準)</option>
                             <option value="C">レベルC (基礎)</option>
                           </select>
                         </div>

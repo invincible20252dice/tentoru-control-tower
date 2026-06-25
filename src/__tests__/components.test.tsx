@@ -1465,8 +1465,12 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(document.body.innerHTML).toContain('📍');
       expect(document.body.innerHTML).toContain('テーマ');
     });
-    // 単元1がinput of valueとして描画されていることを確認
-    const hasUnit1 = Array.from(document.querySelectorAll('input')).some(input => input.value.includes('単元1'));
+    // 表示月を「すべて」に切り替えて、4月の単元「文字を使った式」が表示されるようにする
+    const allMonthBtn = screen.getByRole('button', { name: 'すべて' });
+    fireEvent.click(allMonthBtn);
+
+    // 「文字を使った式」が select の value として描画されていることを確認
+    const hasUnit1 = Array.from(document.querySelectorAll('select')).some(select => select.value.includes('文字を使った式'));
     expect(hasUnit1).toBe(true);
 
     // 対象教科を「英語」に切り替えて onChange ブランチをカバー
@@ -1536,7 +1540,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(milestoneMenuBtn);
 
     // レベルトグルでBが選択されていることを確認
-    const levelBBtn = screen.getByRole('button', { name: 'レベルB (発展)' });
+    const levelBBtn = screen.getByRole('button', { name: 'レベルB (標準)' });
     expect(levelBBtn).toHaveClass(/segmentBtnActive/);
 
     // レベルトグルをCに切り替える
@@ -1549,7 +1553,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(levelBBtn).toHaveClass(/segmentBtnActive/);
 
     // レベルトグルをAに切り替える
-    const levelABtn = screen.getByRole('button', { name: 'レベルA (標準)' });
+    const levelABtn = screen.getByRole('button', { name: 'レベルA (発展)' });
     fireEvent.click(levelABtn);
     expect(levelABtn).toHaveClass(/segmentBtnActive/);
 
@@ -1684,6 +1688,11 @@ describe('UI Components Render & Interaction Tests', () => {
     });
     alertMock.mockClear();
 
+    // 保存したテンプレートをセレクトボックスから選択する
+    const templateSelect = screen.getByText('保存済みテンプレート:').nextElementSibling as HTMLSelectElement;
+    const option = Array.from(templateSelect.options).find(opt => opt.text.includes('テスト用カスタムテンプレート'));
+    fireEvent.change(templateSelect, { target: { value: option!.value } });
+
     // 9. 保存済みテンプレートの適用、名称変更、削除
     const applyBtn = screen.getByText('呼び出して適用');
     fireEvent.click(applyBtn);
@@ -1715,12 +1724,14 @@ describe('UI Components Render & Interaction Tests', () => {
     });
     alertMock.mockClear();
 
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const deleteTemplateBtn = screen.getByText('削除');
     fireEvent.click(deleteTemplateBtn);
     await waitFor(() => {
       expect(alertMock).toHaveBeenCalledWith('テンプレートを削除しました。');
     });
     alertMock.mockClear();
+    confirmSpy.mockRestore();
 
     // 10. 行の削除
     const deleteRowButtons = screen.getAllByTitle('行削除');
@@ -2280,5 +2291,122 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     studentUnmountB();
+  });
+
+  it('should support drag and drop reordering, holiday name updates, and date input onChange', async () => {
+    db.clearMockData();
+    db.getSchools();
+    db.getStudents();
+    db.getCurriculumUnits();
+    
+    const originalPlans = db.getMilestonePlans();
+    const basePlan = originalPlans[0];
+    const dummyPlans = [
+      {
+        ...basePlan,
+        id: 'mp-dummy-1',
+        grade: '中3',
+        subject: '数学',
+        level: 'A',
+        course: 'standard',
+        month: 4,
+        week_number: 1,
+        target_theme_name: '非常に長くて25文字を超えるような特別に用意した数学のテーマ名です',
+        chapter: ''
+      },
+      {
+        ...basePlan,
+        id: 'mp-dummy-2',
+        grade: '中3',
+        subject: '数学',
+        level: 'A',
+        course: 'standard',
+        month: 4,
+        week_number: 2,
+        target_theme_name: '18文字を超える長い数学のテーマ',
+        chapter: '第2章'
+      },
+      {
+        ...basePlan,
+        id: 'mp-dummy-3',
+        grade: '中3',
+        subject: '数学',
+        level: 'A',
+        course: 'standard',
+        month: 4,
+        week_number: 3,
+        target_theme_name: '12文字を超えるテーマ',
+        chapter: '第3章'
+      }
+    ] as any;
+    await db.saveMilestonePlans([...originalPlans, ...dummyPlans]);
+
+    const { container, unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    
+    const studentItem = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentItem);
+    const milestoneMenuBtn = screen.getByRole('button', { name: '年間計画（マイルストーン）' });
+    fireEvent.click(milestoneMenuBtn);
+
+    const allMonthBtn = screen.getByRole('button', { name: 'すべて' });
+    fireEvent.click(allMonthBtn);
+
+    // 各月の個別フィルターボタンをクリックして 2509行目の onClick ブランチをカバー
+    const aprilBtn = screen.getByRole('button', { name: '4月' });
+    fireEvent.click(aprilBtn);
+    fireEvent.click(allMonthBtn); // 戻す
+
+    const rows = container.querySelectorAll('tbody tr');
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    const dataTransfer = {
+      effectAllowed: 'none',
+      setData: vi.fn(),
+      getData: vi.fn()
+    };
+    
+    fireEvent.dragStart(rows[0], { dataTransfer });
+    fireEvent.dragOver(rows[1]);
+    fireEvent.drop(rows[1], { dataTransfer });
+    fireEvent.dragEnd(rows[0]);
+
+    fireEvent.dragStart(rows[0], { dataTransfer });
+    fireEvent.drop(rows[0], { dataTransfer });
+    
+    fireEvent.dragStart(rows[0]);
+    fireEvent.dragOver(rows[1]);
+    fireEvent.drop(rows[1]);
+    fireEvent.dragEnd(rows[0]);
+
+    const studentInfoMenuBtn = screen.getByText('生徒情報');
+    fireEvent.click(studentInfoMenuBtn);
+
+    // 氏名（漢字）インプットを空にして 2977行目の editForm.name || '' ブランチをカバー
+    const nameInput = container.querySelector('input[placeholder="氏名（漢字）"]')!;
+    expect(nameInput).toBeInTheDocument();
+    fireEvent.change(nameInput, { target: { value: '' } });
+    fireEvent.change(nameInput, { target: { value: '佐藤 拓海' } });
+
+    // 対応履歴の日付変更（現在の日付とは異なる日付を設定して確実に onChange を走らせる）
+    const dateInput = container.querySelector('#interaction-date')!;
+    expect(dateInput).toBeInTheDocument();
+    fireEvent.change(dateInput, { target: { value: '2026-07-01' } });
+
+    // スケジュールメニューに遷移
+    const scheduleMenuBtn = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(scheduleMenuBtn);
+
+    // 対象日付インプットの値を無効な日付および空文字列にして、339-342行目のブランチをカバーする
+    const scheduleDateInput = container.querySelector('input[type="date"]')!;
+    expect(scheduleDateInput).toBeInTheDocument();
+    
+    const originalType = scheduleDateInput.type;
+    scheduleDateInput.type = 'text';
+    fireEvent.change(scheduleDateInput, { target: { value: 'invalid-date' } });
+    scheduleDateInput.type = originalType;
+
+    fireEvent.change(scheduleDateInput, { target: { value: '' } });
+
+    unmount();
   });
 });
