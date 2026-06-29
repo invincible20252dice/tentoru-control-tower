@@ -89,6 +89,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   // Daily Scheduler State
   const [scheduleDate, setScheduleDate] = useState('2026-06-19');
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
+  const [applyScope, setApplyScope] = useState<'individual' | 'school' | 'grade' | 'level'>('individual');
   
   // 各コマの選択状態：教科、単元ID、カスタムテーマ
   const [periodSelections, setPeriodSelections] = useState<Record<number, { subject: string; unitId: string; customTheme: string; }>>({
@@ -150,6 +151,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
 
   // Load Initial Data
   const loadData = () => {
+    setApplyScope('individual');
     const listSt = db.getStudents();
     const listSch = db.getSchools();
     const listCodes = db.getSchoolCodesMaster();
@@ -590,133 +592,223 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   const handleSaveTimetable = async () => {
     if (!selectedStudent) return;
 
-    // 本日の既存のタスクの period を一旦クリア
-    let clearedTasks = studentTasks.map(t => {
-      if (t.scheduled_date === scheduleDate) {
-        return { ...t, period: null, office_note: '' };
-      }
-      return t;
-    });
+    let targetStudents: any[] = [];
+    if (applyScope === 'individual') {
+      targetStudents = [selectedStudent];
+    } else if (applyScope === 'school') {
+      targetStudents = students.filter(s => s.school_id === selectedStudent.school_id);
+    } else if (applyScope === 'grade') {
+      targetStudents = students.filter(s => s.grade === selectedStudent.grade);
+    } else if (applyScope === 'level') {
+      targetStudents = students.filter(s => s.level === selectedStudent.level);
+    }
 
-    const newCustomTasks: LearningTask[] = [];
+    // すべてのタスク、ミニテスト結果、宿題結果をDBからロード
+    let currentLearningTasks = db.getLearningTasks();
+    const allMiniTestResults = db.getMiniTestResults();
+    const allHomeworkResults = db.getHomeworkResults();
 
-    // periodSelections の設定を反映
-    for (let p = 1; p <= periodCount; p++) {
-      const config = periodSelections[p];
-      if (!config || !config.subject) {
-        continue;
-      }
+    for (const student of targetStudents) {
+      // 本日の既存のタスクの period を一旦クリア
+      let clearedTasks = currentLearningTasks.filter(t => t.student_id === student.id);
+      clearedTasks = clearedTasks.map(t => {
+        if (t.scheduled_date === scheduleDate) {
+          return { ...t, period: null, office_note: '' };
+        }
+        return t;
+      });
 
-      if (config.unitId) {
-        clearedTasks = clearedTasks.map(task => {
-          if (task.unit_id === config.unitId) {
-            return {
-              ...task,
+      const newCustomTasks: LearningTask[] = [];
+
+      // periodSelections の設定を反映
+      for (let p = 1; p <= periodCount; p++) {
+        const config = periodSelections[p];
+        if (!config || !config.subject) {
+          continue;
+        }
+
+        if (config.unitId) {
+          // config.unitId が指す単元の情報を取得
+          const selectedUnit = allCurriculumUnits.find(u => u.id === config.unitId);
+          let targetUnitId = config.unitId;
+
+          // 学校が異なる場合、適用先の学校のカリキュラム単元から同じ教科・同じ名前のものを探す
+          if (selectedUnit && selectedUnit.school_id !== student.school_id) {
+            const matchingUnit = allCurriculumUnits.find(
+              u => u.school_id === student.school_id &&
+                   u.subject === selectedUnit.subject &&
+                   u.name === selectedUnit.name
+            );
+            if (matchingUnit) {
+              targetUnitId = matchingUnit.id;
+            } else {
+              // 見つからない場合は、カスタム単元にする
+              targetUnitId = '';
+            }
+          }
+
+          if (targetUnitId) {
+            const existingTaskIdx = clearedTasks.findIndex(task => task.unit_id === targetUnitId);
+            if (existingTaskIdx >= 0) {
+              clearedTasks[existingTaskIdx] = {
+                ...clearedTasks[existingTaskIdx],
+                scheduled_date: scheduleDate,
+                period: p,
+                subject: config.subject,
+                office_note: commonOfficeNote
+              };
+            } else {
+              newCustomTasks.push({
+                id: `task-${student.id}-${targetUnitId}-${Date.now()}-${p}`,
+                student_id: student.id,
+                unit_id: targetUnitId,
+                scheduled_date: scheduleDate,
+                period: p,
+                status: 'unstarted',
+                video_watched: false,
+                test_passed: false,
+                subject: config.subject,
+                office_note: commonOfficeNote,
+                created_at: new Date().toISOString()
+              });
+            }
+          } else {
+            // 単元が見つからない場合、カスタム単元名（テーマ名）として登録する
+            const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
+            const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
+            const customThemeName = selectedUnit ? selectedUnit.name : (config.customTheme || '');
+
+            if (existingCustomTaskIdx >= 0) {
+              clearedTasks[existingCustomTaskIdx] = {
+                ...clearedTasks[existingCustomTaskIdx],
+                scheduled_date: scheduleDate,
+                period: p,
+                subject: config.subject,
+                custom_unit_name: customThemeName,
+                office_note: commonOfficeNote
+              };
+            } else {
+              newCustomTasks.push({
+                id: `task-custom-${Date.now()}-${p}-${student.id}`,
+                student_id: student.id,
+                unit_id: customUnitId,
+                scheduled_date: scheduleDate,
+                period: p,
+                status: 'unstarted',
+                video_watched: false,
+                test_passed: false,
+                subject: config.subject,
+                custom_unit_name: customThemeName,
+                office_note: commonOfficeNote,
+                created_at: new Date().toISOString()
+              });
+            }
+          }
+        } else {
+          // 最初からカスタムテーマ指定の場合
+          const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
+          const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
+
+          if (existingCustomTaskIdx >= 0) {
+            clearedTasks[existingCustomTaskIdx] = {
+              ...clearedTasks[existingCustomTaskIdx],
               scheduled_date: scheduleDate,
               period: p,
               subject: config.subject,
+              custom_unit_name: config.customTheme,
               office_note: commonOfficeNote
             };
+          } else {
+            newCustomTasks.push({
+              id: `task-custom-${Date.now()}-${p}-${student.id}`,
+              student_id: student.id,
+              unit_id: customUnitId,
+              scheduled_date: scheduleDate,
+              period: p,
+              status: 'unstarted',
+              video_watched: false,
+              test_passed: false,
+              subject: config.subject,
+              custom_unit_name: config.customTheme,
+              office_note: commonOfficeNote,
+              created_at: new Date().toISOString()
+            });
           }
-          return task;
-        });
-      } else {
-        const customUnitId = `custom-${selectedStudent.id}-${scheduleDate}-${p}`;
-        const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
-        
-        if (existingCustomTaskIdx >= 0) {
-          clearedTasks[existingCustomTaskIdx] = {
-            ...clearedTasks[existingCustomTaskIdx],
-            scheduled_date: scheduleDate,
-            period: p,
-            subject: config.subject,
-            custom_unit_name: config.customTheme,
-            office_note: commonOfficeNote
-          };
-        } else {
-          newCustomTasks.push({
-            id: `task-custom-${Date.now()}-${p}`,
-            student_id: selectedStudent.id,
-            unit_id: customUnitId,
-            scheduled_date: scheduleDate,
-            period: p,
-            status: 'unstarted',
-            video_watched: false,
-            test_passed: false,
-            subject: config.subject,
-            custom_unit_name: config.customTheme,
-            office_note: commonOfficeNote,
-            created_at: new Date().toISOString()
-          });
         }
       }
-    }
 
-    const allTasksToSave = [...clearedTasks, ...newCustomTasks];
-    await db.saveLearningTasks(allTasksToSave);
+      // メモリ上の全タスクリストをこの生徒向けに更新する
+      const studentOtherTasks = currentLearningTasks.filter(t => t.student_id !== student.id);
+      currentLearningTasks = [...studentOtherTasks, ...clearedTasks, ...newCustomTasks];
 
-    // 複数のテスト結果 (MiniTestResult) を一括同期保存
-    const miniResults = db.getMiniTestResults();
-    const existingMiniResultsForToday = miniResults.filter(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
+      // 複数のテスト結果 (MiniTestResult) を一括同期保存
+      const existingMiniResultsForToday = allMiniTestResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
+      const savedTestIds = new Set<string>();
+      for (const test of todayTests) {
+        if (!test.content.trim()) continue;
+        const existing = existingMiniResultsForToday.find(r => r.test_content === test.content);
+        const testData: MiniTestResult = {
+          id: existing?.id || `mini-${student.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          student_id: student.id,
+          date: scheduleDate,
+          test_content: test.content,
+          score: existing ? existing.score : null,
+          created_at: existing?.created_at || new Date().toISOString()
+        };
+        await db.saveMiniTestResult(testData);
+        savedTestIds.add(testData.id);
+      }
 
-    const savedTestIds = new Set<string>();
-    for (const test of todayTests) {
-      if (!test.content.trim()) continue;
-      const existing = existingMiniResultsForToday.find(r => r.id === test.id || r.test_content === test.content);
-      const testData: MiniTestResult = {
-        id: existing?.id || (test.id.startsWith('temp-') ? `mini-${selectedStudent.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` : test.id),
-        student_id: selectedStudent.id,
-        date: scheduleDate,
-        test_content: test.content,
-        score: existing ? existing.score : null,
-        created_at: existing?.created_at || new Date().toISOString()
+      for (const existing of existingMiniResultsForToday) {
+        if (!savedTestIds.has(existing.id)) {
+          await db.deleteMiniTestResult(existing.id);
+        }
+      }
+
+      // 複数の宿題結果 (HomeworkResult) を一括同期保存
+      const existingHwResultsForToday = allHomeworkResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
+      const savedHwIds = new Set<string>();
+      for (const hw of todayHomeworks) {
+        if (!hw.content.trim()) continue;
+        const existing = existingHwResultsForToday.find(r => r.homework_content === hw.content);
+        const hwData: HomeworkResult = {
+          id: existing?.id || `hw-${student.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          student_id: student.id,
+          date: scheduleDate,
+          homework_content: hw.content,
+          homework_deadline: hw.deadline,
+          status: existing ? existing.status : 'incomplete',
+          created_at: existing?.created_at || new Date().toISOString()
+        };
+        await db.saveHomeworkResult(hwData);
+        savedHwIds.add(hwData.id);
+      }
+
+      for (const existing of existingHwResultsForToday) {
+        if (!savedHwIds.has(existing.id)) {
+          await db.deleteHomeworkResult(existing.id);
+        }
+      }
+
+      // 生徒情報の period_count も更新して保存
+      const updatedStudent = {
+        ...student,
+        period_count: periodCount
       };
-      await db.saveMiniTestResult(testData);
-      savedTestIds.add(testData.id);
-    }
-
-    for (const existing of existingMiniResultsForToday) {
-      if (!savedTestIds.has(existing.id)) {
-        await db.deleteMiniTestResult(existing.id);
+      await db.saveStudent(updatedStudent);
+      if (student.id === selectedStudent.id) {
+        setSelectedStudent(updatedStudent);
       }
     }
 
-    // 複数の宿題結果 (HomeworkResult) を一括同期保存
-    const hwResults = db.getHomeworkResults();
-    const existingHwResultsForToday = hwResults.filter(r => r.student_id === selectedStudent.id && r.date === scheduleDate);
+    // すべての生徒のタスクをマージしたタスクリストを一括保存
+    await db.saveLearningTasks(currentLearningTasks);
 
-    const savedHwIds = new Set<string>();
-    for (const hw of todayHomeworks) {
-      if (!hw.content.trim()) continue;
-      const existing = existingHwResultsForToday.find(r => r.id === hw.id || r.homework_content === hw.content);
-      const hwData: HomeworkResult = {
-        id: existing?.id || (hw.id.startsWith('temp-') ? `hw-${selectedStudent.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` : hw.id),
-        student_id: selectedStudent.id,
-        date: scheduleDate,
-        homework_content: hw.content,
-        homework_deadline: hw.deadline,
-        status: existing ? existing.status : 'incomplete',
-        created_at: existing?.created_at || new Date().toISOString()
-      };
-      await db.saveHomeworkResult(hwData);
-      savedHwIds.add(hwData.id);
-    }
-
-    for (const existing of existingHwResultsForToday) {
-      if (!savedHwIds.has(existing.id)) {
-        await db.deleteHomeworkResult(existing.id);
-      }
-    }
-
-    // 生徒情報の period_count も更新して保存
-    const updatedStudent = {
-      ...selectedStudent,
-      period_count: periodCount
-    };
-    await db.saveStudent(updatedStudent);
-    setSelectedStudent(updatedStudent);
-
-    alert('今日の時間割コマ割りを保存しました！');
+    alert(
+      applyScope === 'individual'
+        ? '今日の時間割コマ割りを保存しました！'
+        : '今日の時間割コマ割りを対象生徒全員に一括保存しました！'
+    );
     loadData();
   };
 
@@ -1934,6 +2026,24 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                           className={styles.textarea}
                           style={{ height: '60px', fontSize: '0.8rem', width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                         />
+                      </div>
+                      <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0f172a' }}>適用対象の範囲:</label>
+                        <select
+                          value={applyScope}
+                          onChange={e => setApplyScope(e.target.value as any)}
+                          className={styles.select}
+                          style={{ width: '100%', fontSize: '0.8rem', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                          data-testid="apply-scope-select"
+                        >
+                          <option value="individual">この生徒のみ（個別）</option>
+                          <option value="school">同じ学校の生徒全員に一括適用</option>
+                          <option value="grade">同じ学年の生徒全員に一括適用</option>
+                          <option value="level">同じレベル（{selectedStudent.level}）の生徒全員に一括適用</option>
+                        </select>
+                        <p style={{ margin: '6px 0 0 0', fontSize: '0.7rem', color: '#64748b' }}>
+                          ※一括適用を選択すると、条件に合致するすべての生徒に同じ時間割、テスト、宿題が設定されます。
+                        </p>
                       </div>
                       
                       <button onClick={handleSaveTimetable} className={styles.btn} style={{ marginTop: '16px' }}>

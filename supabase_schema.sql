@@ -220,3 +220,24 @@ INSERT INTO personality_options (name) VALUES
 ('音楽の授業は好き'),
 ('礼儀正しくちゃんと敬語使える')
 ON CONFLICT DO NOTHING;
+
+-- 16. 小テスト結果
+CREATE TABLE IF NOT EXISTS mini_test_results (
+    id TEXT PRIMARY KEY,
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    test_content TEXT NOT NULL,
+    score INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 17. 宿題提出状況
+CREATE TABLE IF NOT EXISTS homework_results (
+    id TEXT PRIMARY KEY,
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    homework_content TEXT NOT NULL,
+    homework_deadline DATE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'incomplete' CHECK (status IN ('incomplete', 'completed', 'skipped')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);

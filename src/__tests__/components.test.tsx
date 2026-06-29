@@ -655,7 +655,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const timetableContainer = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
     
     // Check initial select elements count is 2 (student's default period_count is 2)
-    let periodSelects = timetableContainer.querySelectorAll('select');
+    let periodSelects = Array.from(timetableContainer.querySelectorAll('select')).filter(s => s.getAttribute('data-testid') !== 'apply-scope-select');
     expect(periodSelects.length).toBe(2);
 
     // Click "➕ コマ数を追加 (最大10コマ)" button to increase period count
@@ -663,7 +663,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(addPeriodBtn);
 
     // Verify it increases to 3 select elements
-    periodSelects = timetableContainer.querySelectorAll('select');
+    periodSelects = Array.from(timetableContainer.querySelectorAll('select')).filter(s => s.getAttribute('data-testid') !== 'apply-scope-select');
     expect(periodSelects.length).toBe(3);
 
     fireEvent.change(periodSelects[0], { target: { value: 'unit-103-1' } });
@@ -2408,5 +2408,152 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(scheduleDateInput, { target: { value: '' } });
 
     unmount();
+  });
+
+  // 13. 一括適用機能テスト
+  it('should successfully bulk apply timetable, tests, and homework to students in the same level/school/grade', async () => {
+    // 1. テストデータのシード
+    await db.saveSchool({ id: 'sch-bulk-1', name: 'バルク中学A', type: 'junior_high', created_at: '' });
+    await db.saveSchool({ id: 'sch-bulk-2', name: 'バルク中学B', type: 'junior_high', created_at: '' });
+
+    const s1 = { id: 'std-bulk-1', student_id: 'std-b1', name: '生徒A', email: 'b1@t.com', grade: '中3', school_id: 'sch-bulk-1', status: 'normal', start_unit_id: null, level: 'A', period_count: 2, created_at: new Date().toISOString() };
+    const s2 = { id: 'std-bulk-2', student_id: 'std-b2', name: '生徒B', email: 'b2@t.com', grade: '中3', school_id: 'sch-bulk-1', status: 'normal', start_unit_id: null, level: 'B', period_count: 2, created_at: new Date().toISOString() };
+    const s3 = { id: 'std-bulk-3', student_id: 'std-b3', name: '生徒C', email: 'b3@t.com', grade: '中3', school_id: 'sch-bulk-2', status: 'normal', start_unit_id: null, level: 'A', period_count: 2, created_at: new Date().toISOString() };
+    const s4 = { id: 'std-bulk-4', student_id: 'std-b4', name: '生徒D', email: 'b4@t.com', grade: '中2', school_id: 'sch-bulk-1', status: 'normal', start_unit_id: null, level: 'A', period_count: 2, created_at: new Date().toISOString() };
+
+    await db.saveStudent(s1);
+    await db.saveStudent(s2);
+    await db.saveStudent(s3);
+    await db.saveStudent(s4);
+
+    // カリキュラム単元のシード
+    await db.saveCurriculumUnits([
+      { id: 'unit-b1-1', school_id: 'sch-bulk-1', subject: '数学', name: 'バルク単元1', sequence_order: 1, google_drive_url: '', created_at: '' },
+      { id: 'unit-b2-1', school_id: 'sch-bulk-2', subject: '数学', name: 'バルク単元1', sequence_order: 1, google_drive_url: '', created_at: '' }
+    ]);
+
+    // 2. 講師ダッシュボードのレンダリング
+    const { container } = render(<TeacherDashboard />);
+    
+    // 生徒リストから std-bulk-1 (生徒A) を選択
+    await waitFor(() => {
+      expect(screen.getByText('生徒A (中3)')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('生徒A (中3)'));
+
+    // 「学習計画・コマ割り」タブに切り替え
+    const tabBtn = screen.getByText('学習計画・コマ割り');
+    fireEvent.click(tabBtn);
+
+    // 日付設定 (2026-06-21)
+    const dateInput = container.querySelector('input[type="date"]')!;
+    fireEvent.change(dateInput, { target: { value: '2026-06-21' } });
+
+    // コマ割り設定
+    const timetableContainer = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const periodSelects = timetableContainer.querySelectorAll('select');
+    fireEvent.change(periodSelects[0], { target: { value: '数学' } });
+    
+    // 単元選択用の select は subject 選択後に表示される可能性があるので待つ
+    await waitFor(() => {
+      const allSelects = timetableContainer.querySelectorAll('select');
+      expect(allSelects.length).toBeGreaterThanOrEqual(2);
+    });
+    
+    // 数学の単元「バルク単元1」を選択
+    const allSelects = timetableContainer.querySelectorAll('select');
+    // 最初の select は period-1 の教科、2番目は単元選択
+    fireEvent.change(allSelects[1], { target: { value: 'unit-b1-1' } });
+
+    // 宿題を追加
+    const addHwBtn = screen.getByText('➕ 宿題を追加');
+    fireEvent.click(addHwBtn);
+    const hwTextareas = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    fireEvent.change(hwTextareas[0], { target: { value: '一括宿題A' } });
+
+    // テストを追加
+    const addTestBtn = screen.getByText('➕ テストを追加');
+    fireEvent.click(addTestBtn);
+    const testInputs = screen.getAllByPlaceholderText('例: 二次方程式10問');
+    fireEvent.change(testInputs[0], { target: { value: '一括テストA' } });
+
+    // 適用対象ドロップダウンを取得し、'level'（同じレベル全員）に設定
+    const applySelect = screen.getByTestId('apply-scope-select');
+    fireEvent.change(applySelect, { target: { value: 'level' } });
+
+    // 保存実行
+    const saveBtn = screen.getByText('時間割コマ割りを保存');
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
+    });
+
+    // 各生徒に保存されたか検証
+    const allTasks = db.getLearningTasks();
+    const allHws = db.getHomeworkResults();
+    const allTests = db.getMiniTestResults();
+
+    // std-bulk-3 (レベルA, 別校) に適用されたか検証
+    const s3Tasks = allTasks.filter(t => t.student_id === 'std-bulk-3' && t.scheduled_date === '2026-06-21');
+    expect(s3Tasks.length).toBeGreaterThan(0);
+    // 別学校のため、同じ単元名「バルク単元1」を持つ 'unit-b2-1' がマッピングされているはず
+    expect(s3Tasks[0].unit_id).toBe('unit-b2-1');
+    
+    const s3Hws = allHws.filter(h => h.student_id === 'std-bulk-3' && h.date === '2026-06-21');
+    expect(s3Hws.some(h => h.homework_content === '一括宿題A')).toBe(true);
+
+    const s3Tests = allTests.filter(t => t.student_id === 'std-bulk-3' && t.date === '2026-06-21');
+    expect(s3Tests.some(t => t.test_content === '一括テストA')).toBe(true);
+
+    // std-bulk-4 (レベルA, 同校・別学年) にも適用されたか検証
+    const s4Tasks = allTasks.filter(t => t.student_id === 'std-bulk-4' && t.scheduled_date === '2026-06-21');
+    expect(s4Tasks.length).toBeGreaterThan(0);
+    expect(s4Tasks[0].unit_id).toBe('unit-b1-1');
+
+    // std-bulk-2 (レベルB) には適用されていないか検証
+    const s2Tasks = allTasks.filter(t => t.student_id === 'std-bulk-2' && t.scheduled_date === '2026-06-21');
+    expect(s2Tasks.length).toBe(0);
+
+    // -- 599行目のカバー: スコープを 'school' (同じ学校全員) に変更して保存 --
+    fireEvent.change(applySelect, { target: { value: 'school' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
+    });
+
+    // -- 601行目のカバー: スコープを 'grade' (同じ学年全員) に変更して保存 --
+    fireEvent.change(applySelect, { target: { value: 'grade' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
+    });
+
+    // -- 682行目のカバー: カスタムテーマを上書き更新して保存 --
+    // 適用対象を 'individual' に戻す
+    fireEvent.change(applySelect, { target: { value: 'individual' } });
+    
+    // コマ1を「テーマ自由入力」に変更する（unitIdをクリアし、テーマを入力）
+    fireEvent.change(allSelects[1], { target: { value: '' } });
+    const customThemeInput = timetableContainer.querySelector('input[placeholder="またはテーマを自由に入力"]')!;
+    fireEvent.change(customThemeInput, { target: { value: '自由テーマ1' } });
+    
+    // 一度保存する（カスタムテーマの作成）
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    // 同じカスタムテーマ枠を別の文字で上書きする（682行目の existingCustomTaskIdx >= 0 に入るはず）
+    fireEvent.change(customThemeInput, { target: { value: '上書き自由テーマ' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    // 上書きされているか検証
+    const finalTasks = db.getLearningTasks();
+    const s1CustomTask = finalTasks.find(t => t.student_id === 'std-bulk-1' && t.scheduled_date === '2026-06-21' && t.period === 1);
+    expect(s1CustomTask?.custom_unit_name).toBe('上書き自由テーマ');
   });
 });
