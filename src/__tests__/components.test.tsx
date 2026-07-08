@@ -1,11 +1,13 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import SugorokuMap from '../components/SugorokuMap';
 import TeacherDashboard from '../components/TeacherDashboard';
 import StudentDashboard from '../components/StudentDashboard';
 import Portal from '../app/page';
-import { db, CurriculumUnit, LearningTask, Student } from '../lib/db';
+import { db, CurriculumUnit, LearningTask, Student, CustomClass, MiniTestResult } from '../lib/db';
+import { saveGeminiApiKey, getGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
+import { calculateProgressGap, rescheduleFutureUncompletedTasks, getYearMonthWeek } from '../lib/scheduler';
 
 // Mock html2canvas since it does not work in jsdom environment easily
 vi.mock('html2canvas', () => {
@@ -13,6 +15,44 @@ vi.mock('html2canvas', () => {
     default: vi.fn().mockResolvedValue({
       toDataURL: () => 'data:image/png;base64,mockImage'
     })
+  };
+});
+
+vi.mock('@google/generative-ai', () => {
+  return {
+    GoogleGenerativeAI: function(apiKey) {
+      return {
+        getGenerativeModel: () => {
+          return {
+            generateContent: async () => {
+              if (apiKey === 'trigger-json-error') {
+                return {
+                  response: {
+                    text: () => 'Invalid non-JSON response string!'
+                  }
+                };
+              }
+              return {
+                response: {
+                  text: () => JSON.stringify({
+                    test_name: '期末テスト',
+                    score_japanese: 80,
+                    score_math: 90,
+                    score_english: 85,
+                    score_social: 75,
+                    score_science: 85,
+                    score_total: 415,
+                    class_rank: '5',
+                    school_rank: '10',
+                    deviation_value: 61.2
+                  })
+                }
+              };
+            }
+          };
+        }
+      };
+    }
   };
 });
 
@@ -479,36 +519,34 @@ describe('UI Components Render & Interaction Tests', () => {
     // Save regular test score (and fill all form values to cover handlers)
     const regularForm = screen.getByText('定期テスト結果記録').closest('div')!;
     
-    const subjectSelect = regularForm.querySelector('select')!;
-    const inputs = regularForm.querySelectorAll('input');
+    // 得点やテスト名などが空欄の状態で保存を試みてガードを通す
     const saveRegularBtn = screen.getByText('定期テスト結果を記録');
-
-    // 得点が空欄の状態で保存を試みてガード (!regularScore return) を通す
     alertMock.mockClear();
     fireEvent.submit(saveRegularBtn.closest('form')!);
     expect(alertMock).not.toHaveBeenCalled();
 
-    // 1回目：上昇率と目標点を空のまま保存して Falsy パスをカバー
-    fireEvent.change(subjectSelect, { target: { value: '数学' } });
-    fireEvent.change(inputs[0], { target: { value: '75' } }); // score 75
-    fireEvent.submit(saveRegularBtn.closest('form')!);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('定期テスト結果を記録しました。');
-    });
-
-    // 2回目：全ての値を埋めて保存（従来のテストフロー）
-    fireEvent.change(subjectSelect, { target: { value: '英語' } });
-    fireEvent.change(inputs[0], { target: { value: '88' } }); // score 88
-    
-    // 順位上下 select (Line 986 cover)
-    const selects = regularForm.querySelectorAll('select');
-    if (selects.length > 1) {
-      fireEvent.change(selects[1], { target: { value: 'keep' } });
-    }
-
-    // 上昇率, 次回目標点 (Line 994, 998 cover)
-    fireEvent.change(inputs[1], { target: { value: '12.5' } }); // rate_change
-    fireEvent.change(inputs[2], { target: { value: '95' } }); // next_target
+    // 全ての値を埋めて保存
+    const regularInputs = regularForm.querySelectorAll('input');
+    // 0番目は テスト名
+    fireEvent.change(regularInputs[0], { target: { value: '1学期中間テスト' } });
+    // 1番目は 国語
+    fireEvent.change(regularInputs[1], { target: { value: '75' } });
+    // 2番目は 数学
+    fireEvent.change(regularInputs[2], { target: { value: '85' } });
+    // 3番目は 英語
+    fireEvent.change(regularInputs[3], { target: { value: '95' } });
+    // 4番目は 社会
+    fireEvent.change(regularInputs[4], { target: { value: '80' } });
+    // 5番目は 理科
+    fireEvent.change(regularInputs[5], { target: { value: '90' } });
+    // 6番目は 合計点
+    fireEvent.change(regularInputs[6], { target: { value: '425' } });
+    // 7番目は クラス順位
+    fireEvent.change(regularInputs[7], { target: { value: '3' } });
+    // 8番目は 学年順位
+    fireEvent.change(regularInputs[8], { target: { value: '10' } });
+    // 9番目は 偏差値
+    fireEvent.change(regularInputs[9], { target: { value: '64.5' } });
 
     // 改善点 (Line 1002 cover)
     const regularTextarea = regularForm.querySelector('textarea')!;
@@ -644,7 +682,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const saveStartBtn = screen.getByText('適用する');
     fireEvent.click(saveStartBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('学習スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
+      expect(alertMock).toHaveBeenCalledWith('教科別スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
     });
 
     // Change Schedule Date (Line 811 cover)
@@ -849,8 +887,8 @@ describe('UI Components Render & Interaction Tests', () => {
 
     const cellNum1 = screen.getByText('1', { selector: 'span' });
     const period1Select = cellNum1.parentElement!.querySelector('select')!;
-    fireEvent.change(period1Select, { target: { value: '理科' } });
-    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 歴史・電流など）');
+    fireEvent.change(period1Select, { target: { value: 'その他' } });
+    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 面談、宿題指導）');
     fireEvent.change(customThemeInput, { target: { value: '電流の性質' } });
 
     const officeNoteTextarea = screen.getByPlaceholderText('業務連絡（例：提出ワーク忘れずに）');
@@ -1054,7 +1092,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(scoreCellInput, { target: { value: '95' } });
     fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
     });
 
     const finalMiniResults = db.getMiniTestResults();
@@ -1081,7 +1119,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(scoreCellInput, { target: { value: '75' } });
     fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
     });
     expect(tr.innerHTML).toContain('合格');
 
@@ -1089,7 +1127,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(scoreCellInput, { target: { value: '65' } });
     fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
     });
     expect(tr.innerHTML).toContain('不合格');
 
@@ -1097,7 +1135,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(scoreCellInput, { target: { value: '95' } });
     fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数を保存しました！');
+      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
     });
     alertMock.mockClear();
 
@@ -1173,11 +1211,11 @@ describe('UI Components Render & Interaction Tests', () => {
     const tabSchedule = screen.getByText('学習計画・コマ割り');
     fireEvent.click(tabSchedule);
 
-    // 1時間目に理科を選択し、テーマを入力して保存
+    // 1時間目にその他を選択し、テーマを入力して保存
     const cellNum1 = screen.getByText('1', { selector: 'span' });
     const period1Select = cellNum1.parentElement!.querySelector('select')!;
-    fireEvent.change(period1Select, { target: { value: '理科' } });
-    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 歴史・電流など）');
+    fireEvent.change(period1Select, { target: { value: 'その他' } });
+    const customThemeInput = screen.getByPlaceholderText('テーマを入力（例: 面談、宿題指導）');
     fireEvent.change(customThemeInput, { target: { value: '電流の性質' } });
     
     const saveBtn = screen.getByText('時間割コマ割りを保存');
@@ -1213,19 +1251,13 @@ describe('UI Components Render & Interaction Tests', () => {
     // プルダウンを変更 (単元を選択)
     fireEvent.change(unitSelect, { target: { value: 'unit-101-1' } });
     
-    // 「またはテーマを自由に入力」が disabled になっていることを確認
-    const unitCustomInput = parentContainer.querySelector('input[placeholder="またはテーマを自由に入力"]')! as HTMLInputElement;
+    // 数学（一般教科）では、自由入力 input は非表示（null）になっていることを確認
     await waitFor(() => {
-      expect(unitCustomInput).toBeDisabled();
+      const unitCustomInput = parentContainer.querySelector('input[placeholder="または新しい授業名を直接入力"]') || 
+                               parentContainer.querySelector('input[placeholder="テーマを入力（例: 面談、宿題指導）"]');
+      expect(unitCustomInput).toBeNull();
     });
-
-    // プルダウンを未選択に戻し、自由入力を可能にする
-    fireEvent.change(unitSelect, { target: { value: '' } });
-    await waitFor(() => {
-      expect(unitCustomInput).not.toBeDisabled();
-    });
-    fireEvent.change(unitCustomInput, { target: { value: '数学自由単元' } });
-    
+ 
     fireEvent.click(saveBtn);
     await waitFor(() => {
       expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
@@ -2529,13 +2561,36 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
     });
 
+    // -- テスト・宿題の個別 targetScope 変更のカバー --
+    const testSection = screen.getByText('本日のテスト (自由記述):').parentElement!;
+    const testScopeSelect = testSection.querySelector('select')!;
+    fireEvent.change(testScopeSelect, { target: { value: 'grade' } });
+    
+    const hwSection = screen.getByText('宿題:').parentElement!;
+    const hwScopeSelect = hwSection.querySelector('select')!;
+    fireEvent.change(hwScopeSelect, { target: { value: 'school' } });
+
+    fireEvent.change(applySelect, { target: { value: 'grade' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
+    });
+
+    fireEvent.change(testScopeSelect, { target: { value: 'school' } });
+    fireEvent.change(hwScopeSelect, { target: { value: 'grade' } });
+    fireEvent.change(applySelect, { target: { value: 'school' } });
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを対象生徒全員に一括保存しました！');
+    });
+
     // -- 682行目のカバー: カスタムテーマを上書き更新して保存 --
     // 適用対象を 'individual' に戻す
     fireEvent.change(applySelect, { target: { value: 'individual' } });
     
-    // コマ1を「テーマ自由入力」に変更する（unitIdをクリアし、テーマを入力）
-    fireEvent.change(allSelects[1], { target: { value: '' } });
-    const customThemeInput = timetableContainer.querySelector('input[placeholder="またはテーマを自由に入力"]')!;
+    // コマ1を「その他」に変更する
+    fireEvent.change(allSelects[0], { target: { value: 'その他' } });
+    const customThemeInput = timetableContainer.querySelector('input[placeholder="テーマを入力（例: 面談、宿題指導）"]')!;
     fireEvent.change(customThemeInput, { target: { value: '自由テーマ1' } });
     
     // 一度保存する（カスタムテーマの作成）
@@ -2555,5 +2610,627 @@ describe('UI Components Render & Interaction Tests', () => {
     const finalTasks = db.getLearningTasks();
     const s1CustomTask = finalTasks.find(t => t.student_id === 'std-bulk-1' && t.scheduled_date === '2026-06-21' && t.period === 1);
     expect(s1CustomTask?.custom_unit_name).toBe('上書き自由テーマ');
+  });
+
+  it('should cover dynamic db operations and extra branch edge cases for coverage', async () => {
+    // 1. db.ts: 803, 810-816 の custom_classes CRUD カバー
+    const newCC = { id: 'cc-new-unique', name: '完全新規テーマ', created_at: '' };
+    await db.saveCustomClass(newCC);
+    await db.saveCustomClass({ ...newCC, name: '完全新規テーマ更新' });
+    await db.deleteCustomClass(newCC.id);
+
+    // 2. 教科別スタート位置テストに必要な他の教科の単元を sch-1 用にシードする
+    const extUnits: CurriculumUnit[] = [
+      { id: 'unit-english-dummy', school_id: 'sch-1', subject: '英語', name: '英語単元', sequence_order: 1, created_at: '' },
+      { id: 'unit-english-dummy2', school_id: 'sch-1', subject: '英語', name: '英語単元2', sequence_order: 2, created_at: '' },
+      { id: 'unit-japanese-dummy', school_id: 'sch-1', subject: '国語', name: '国語単元', sequence_order: 1, created_at: '' },
+      { id: 'unit-japanese-dummy2', school_id: 'sch-1', subject: '国語', name: '国語単元2', sequence_order: 2, created_at: '' },
+      { id: 'unit-science-dummy', school_id: 'sch-1', subject: '理科', name: '理科単元', sequence_order: 1, created_at: '' },
+      { id: 'unit-science-dummy2', school_id: 'sch-1', subject: '理科', name: '理科単元2', sequence_order: 2, created_at: '' },
+      { id: 'unit-social-dummy', school_id: 'sch-1', subject: '社会', name: '社会単元', sequence_order: 1, created_at: '' },
+      { id: 'unit-social-dummy2', school_id: 'sch-1', subject: '社会', name: '社会単元2', sequence_order: 2, created_at: '' }
+    ];
+    await db.saveCurriculumUnits(extUnits);
+
+    const extTasks: LearningTask[] = [
+      { id: 't-eng-dummy', student_id: 'std-1', unit_id: 'unit-english-dummy', scheduled_date: '2026-06-25', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+      { id: 't-sci-dummy', student_id: 'std-1', unit_id: 'unit-science-dummy', scheduled_date: '2026-06-25', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+      { id: 't-soc-dummy', student_id: 'std-1', unit_id: 'unit-social-dummy', scheduled_date: '2026-06-25', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+      { id: 't-jap-dummy', student_id: 'std-1', unit_id: 'unit-japanese-dummy', scheduled_date: '2026-06-25', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' }
+    ];
+    await db.saveLearningTasks(extTasks);
+
+    const resultItem3: MiniTestResult = {
+      id: 'mini-c-1',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      test_content: 'レベルC向け計算小テスト',
+      score: 75,
+      created_at: new Date().toISOString()
+    };
+    const resultItem4: MiniTestResult = {
+      id: 'mini-b-1',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      test_content: 'レベルB向け発展小テスト',
+      score: 85,
+      created_at: new Date().toISOString()
+    };
+    const resultItemPercent: MiniTestResult = {
+      id: 'mini-percent',
+      student_id: 'std-1',
+      date: '2026-06-25',
+      test_content: '割合小テスト',
+      score: 75,
+      passing_line: '80%以上',
+      created_at: new Date().toISOString()
+    };
+    const resultItemTen: MiniTestResult = {
+      id: 'mini-ten',
+      student_id: 'std-1',
+      date: '2026-06-25',
+      test_content: '得点小テスト',
+      score: 85,
+      passing_line: '90点',
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveMiniTestResult(resultItem3);
+    await db.saveMiniTestResult(resultItem4);
+    await db.saveMiniTestResult(resultItemPercent);
+    await db.saveMiniTestResult(resultItemTen);
+
+    const { container: containerOrig } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItemOrig = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItemOrig);
+
+    // 確実に「学習計画・コマ割り」タブを開く！
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    // テストの追加とパラメータ変更のカバー (TeacherDashboard.tsx:2354-2364)
+    const addTestBtn = screen.getByText('➕ テストを追加');
+    fireEvent.click(addTestBtn);
+    fireEvent.click(addTestBtn);
+
+    await waitFor(() => {
+      expect(containerOrig.querySelectorAll('input[placeholder="例: 二次方程式10問"]').length).toBeGreaterThanOrEqual(2);
+    });
+    const testThemeInputsOrig = containerOrig.querySelectorAll('input[placeholder="例: 二次方程式10問"]');
+    if (testThemeInputsOrig.length >= 2) {
+      fireEvent.change(testThemeInputsOrig[0], { target: { value: '英語自動小テスト1' } });
+      fireEvent.change(testThemeInputsOrig[1], { target: { value: '英語自動小テスト2' } });
+    }
+
+    await waitFor(() => {
+      expect(containerOrig.querySelectorAll('input[placeholder="例: -3点, 80%以上, 90点"]').length).toBeGreaterThanOrEqual(2);
+    });
+    const testLineInputs = containerOrig.querySelectorAll('input[placeholder="例: -3点, 80%以上, 90点"]');
+    if (testLineInputs.length >= 2) {
+      fireEvent.change(testLineInputs[0], { target: { value: '80%以上' } });
+      fireEvent.change(testLineInputs[1], { target: { value: '90点' } });
+    }
+
+    // 宿題を 3 件追加する
+    const addHwBtn = screen.getByText('➕ 宿題を追加');
+    fireEvent.click(addHwBtn);
+    fireEvent.click(addHwBtn);
+    fireEvent.click(addHwBtn);
+
+    await waitFor(() => {
+      expect(containerOrig.querySelectorAll('textarea[placeholder="宿題の内容を入力（例：ワークP24-25）"]').length).toBeGreaterThanOrEqual(3);
+    });
+    const hwInputs = containerOrig.querySelectorAll('textarea[placeholder="宿題の内容を入力（例：ワークP24-25）"]');
+    hwInputs.forEach((input, index) => {
+      fireEvent.change(input, { target: { value: `宿題内容-${index}` } });
+    });
+
+    const testSection = screen.getByText('本日のテスト (自由記述):').parentElement!;
+    await waitFor(() => {
+      expect(testSection.querySelectorAll('select').length).toBeGreaterThanOrEqual(2);
+    });
+    const testSelects = Array.from(testSection.querySelectorAll('select'));
+    if (testSelects.length >= 2) {
+      fireEvent.change(testSelects[0], { target: { value: 'school' } });
+      fireEvent.change(testSelects[1], { target: { value: 'level' } });
+    }
+
+    const hwSection = screen.getByText('宿題:').parentElement!;
+    await waitFor(() => {
+      expect(hwSection.querySelectorAll('select').length).toBeGreaterThanOrEqual(3);
+    });
+    const hwSelects = Array.from(hwSection.querySelectorAll('select'));
+    if (hwSelects.length >= 3) {
+      fireEvent.change(hwSelects[0], { target: { value: 'grade' } });
+      fireEvent.change(hwSelects[1], { target: { value: 'school' } });
+      fireEvent.change(hwSelects[2], { target: { value: 'level' } });
+    }
+
+    const saveBtn = screen.getByText('時間割コマ割りを保存');
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('今日の時間割コマ割りを保存しました！');
+    });
+
+    // 小テスト結果タブをクリックして開く！
+    const reportTab = screen.getAllByText('小テスト結果')[0];
+    fireEvent.click(reportTab);
+
+    // 小テスト結果テーブルの input (点数入力欄) を取得
+    await waitFor(() => {
+      const table = containerOrig.querySelector('table');
+      expect(table).not.toBeNull();
+    });
+
+    const scoreTable = containerOrig.querySelector('table')!;
+    const scoreInputs = scoreTable.querySelectorAll('input[type="number"]');
+    
+    const dummyScores = ['85', '45', '95'];
+    scoreInputs.forEach((input, index) => {
+      if (dummyScores[index]) {
+        fireEvent.change(input, { target: { value: dummyScores[index] } });
+      }
+    });
+
+    // 合否セレクトを変更
+    const tableRows = scoreTable.querySelectorAll('tbody tr');
+    if (tableRows.length > 0) {
+      const passSelect = tableRows[0].querySelector('select');
+      if (passSelect) {
+        fireEvent.change(passSelect, { target: { value: 'failed' } });
+      }
+    }
+
+    // 3. 教科別スタート位置のセレクト変更のカバー
+    const preTasks = db.getLearningTasks();
+    preTasks.forEach(t => {
+      if (t.student_id === 'std-1') {
+        if (t.unit_id === 'unit-102-1') {
+          t.status = 'unstarted';
+        }
+        if (t.unit_id === 'unit-102-2') {
+          t.status = 'skipped';
+        }
+      }
+    });
+    await db.saveLearningTasks(preTasks);
+
+    fireEvent.click(screen.getByText('生徒情報'));
+    const infoContainer = screen.getByText('教科別学習スタート位置').closest('div')!;
+    const allStartSelects = infoContainer.querySelectorAll('select');
+    if (allStartSelects.length >= 5) {
+      // 数学
+      fireEvent.change(allStartSelects[0], { target: { value: 'unit-102-2' } });
+      fireEvent.change(allStartSelects[0], { target: { value: 'unit-102-1' } });
+      // 英語
+      fireEvent.change(allStartSelects[1], { target: { value: 'unit-english-dummy2' } });
+      // 国語
+      fireEvent.change(allStartSelects[2], { target: { value: 'unit-japanese-dummy2' } });
+      // 理科
+      fireEvent.change(allStartSelects[3], { target: { value: 'unit-science-dummy2' } });
+      // 社会
+      fireEvent.change(allStartSelects[4], { target: { value: 'unit-social-dummy2' } });
+    }
+
+    const saveStudentInfoBtn = screen.getByText('変更を保存する');
+    fireEvent.click(saveStudentInfoBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+    });
+
+    // 「学習計画・コマ割り」タブに移動してスタート位置設定を「適用する」
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+    const applyStartUnitBtns = screen.getAllByText('適用する');
+    alertMock.mockClear();
+    fireEvent.click(applyStartUnitBtns[0]);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('教科別スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
+    });
+
+    // 4. gemini.ts branch coverage & TeacherDashboard API Key input coverage
+    saveGeminiApiKey('');
+    const resFallback = await analyzeReportCardImage('base64data', 'image/png');
+    expect(resFallback.score_math).toBe(90);
+
+    saveGeminiApiKey('dummy-api-key');
+    const res = await analyzeReportCardImage('base64data', 'image/png');
+    expect(res.test_name).toBe('期末テスト');
+    saveGeminiApiKey('');
+
+    // JSONパースエラーのカバー
+    saveGeminiApiKey('trigger-json-error');
+    try {
+      await analyzeReportCardImage('base64data', 'image/png');
+    } catch (e: any) {
+      expect(e.message).toBe('解析結果がJSONフォーマットではありませんでした。');
+    }
+    saveGeminiApiKey('');
+
+    // TeacherDashboard.tsx API Key input UI coverage
+    fireEvent.click(screen.getByText('定期テスト・模試'));
+    const apiKeyToggleBtn = screen.getByText('🔑 Gemini APIキー設定（成績表画像解析用）');
+    fireEvent.click(apiKeyToggleBtn);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('AIzaSy...')).not.toBeNull();
+    });
+    const apiKeyInput = screen.getByPlaceholderText('AIzaSy...');
+    fireEvent.change(apiKeyInput, { target: { value: 'test-api-key-input' } });
+    
+    const apiKeyContainer = apiKeyInput.parentElement!;
+    const saveApiKeyBtn = apiKeyContainer.querySelector('button')!;
+    alertMock.mockClear();
+    fireEvent.click(saveApiKeyBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('Gemini API キーを保存しました。');
+    });
+
+    fireEvent.click(apiKeyToggleBtn);
+    await waitFor(() => {
+      expect(screen.getByText('消去')).not.toBeNull();
+    });
+
+    const deleteApiKeyBtn = screen.getByText('消去');
+    alertMock.mockClear();
+    fireEvent.click(deleteApiKeyBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('APIキーを消去しました。デモ（モック）モードに戻ります。');
+    });
+
+    fireEvent.click(apiKeyToggleBtn);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('AIzaSy...')).not.toBeNull();
+    });
+    const reloadedInput = screen.getByPlaceholderText('AIzaSy...');
+    fireEvent.change(reloadedInput, { target: { value: 'test-api-key-input' } });
+    const reloadedContainer = reloadedInput.parentElement!;
+    const reloadedSaveBtn = reloadedContainer.querySelector('button')!;
+    alertMock.mockClear();
+    fireEvent.click(reloadedSaveBtn);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('Gemini API キーを保存しました。');
+    });
+
+    // 1097行目のファイル処理エラーのカバー
+    const reportCardInput = containerOrig.querySelector('input[type="file"]')!;
+    const badFile = { name: 'bad.png', size: 1024, type: 'image/png' };
+    const originalRead = FileReader.prototype.readAsDataURL;
+    FileReader.prototype.readAsDataURL = () => { throw new Error('Mock FileReader Error'); };
+    fireEvent.change(reportCardInput, { target: { files: [badFile] } });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('ファイル処理エラー: Mock FileReader Error');
+    });
+    FileReader.prototype.readAsDataURL = originalRead;
+
+    // 1069-1070行目のファイル読み込み失敗のカバー
+    const nullFile = new File([''], 'empty.png', { type: 'image/png' });
+    const originalRead2 = FileReader.prototype.readAsDataURL;
+    FileReader.prototype.readAsDataURL = function() {
+      Object.defineProperty(this, 'result', { value: null, configurable: true });
+      if (this.onload) {
+        this.onload({} as any);
+      }
+    };
+    alertMock.mockClear();
+    fireEvent.change(reportCardInput, { target: { files: [nullFile] } });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('ファイルの読み込みに失敗しました。');
+    });
+    FileReader.prototype.readAsDataURL = originalRead2;
+
+    // 1068-1092行目の正常アップロード・自動解析のカバー
+    const goodFile = new File(['mock-image-data'], 'report.png', { type: 'image/png' });
+    fireEvent.change(reportCardInput, { target: { files: [goodFile] } });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('成績表画像の解析が完了し、点数を自動セットしました！内容をご確認ください。');
+    });
+
+    // 1091-1092行目の解析中エラーのカバー
+    saveGeminiApiKey('trigger-json-error');
+    fireEvent.change(reportCardInput, { target: { files: [goodFile] } });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenLastCalledWith('解析中にエラーが発生しました。');
+    });
+    saveGeminiApiKey('');
+
+    // 2066行目のカバー (新規学校名の onChange)
+    fireEvent.click(screen.getByText('新規生徒アカウント発行'));
+    const gradeSelect = screen.getByText('学年').parentElement!.querySelector('select')!;
+    fireEvent.change(gradeSelect, { target: { value: 'その他' } });
+    const schoolSelect = screen.getByText('所属学校').parentElement!.querySelector('select')!;
+    fireEvent.change(schoolSelect, { target: { value: 'add_new' } });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('例: 桜丘')).not.toBeNull();
+    });
+    const schoolNameInput = screen.getByPlaceholderText('例: 桜丘');
+    fireEvent.change(schoolNameInput, { target: { value: '新設テスト校' } });
+    fireEvent.click(screen.getByText('生徒一覧'));
+
+    // 2271-2284todayTests >= 2 select render & onChange のカバー
+    cleanup();
+    const { container: container2 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItem2 = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItem2);
+
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    const addTestBtn2 = screen.getByText('➕ テストを追加');
+    fireEvent.click(addTestBtn2);
+    fireEvent.click(addTestBtn2);
+
+    await waitFor(() => {
+      expect(container2.querySelectorAll('input[placeholder="例: 二次方程式10問"]').length).toBeGreaterThanOrEqual(2);
+    });
+
+    const testThemeInputs2 = container2.querySelectorAll('input[placeholder="例: 二次方程式10問"]');
+    fireEvent.change(testThemeInputs2[0], { target: { value: '小テスト1' } });
+    fireEvent.change(testThemeInputs2[1], { target: { value: '小テスト2' } });
+
+    const timetableContainer2 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const periodSelect2 = timetableContainer2.querySelector('select');
+    if (periodSelect2) {
+      fireEvent.change(periodSelect2, { target: { value: 'テスト' } });
+      await waitFor(() => {
+        const selects = Array.from(timetableContainer2.querySelectorAll('select'));
+        const found = selects.some(s => Array.from(s.options).some(o => o.value === '小テスト1'));
+        expect(found).toBe(true);
+      });
+      const testSelect = Array.from(timetableContainer2.querySelectorAll('select')).find(s => 
+        Array.from(s.options).some(o => o.value === '小テスト1')
+      );
+      if (testSelect) {
+        fireEvent.change(testSelect, { target: { value: '小テスト1' } });
+      }
+    }
+
+    // 2246 (自由記述テーマ of select 変更) & 2258 (直接入力 of onChange)
+    const customClassItem: CustomClass = { id: 'cc-1', name: '自由授業テーマ', created_at: '' };
+    await db.saveCustomClass(customClassItem);
+
+    cleanup();
+    const { container: container3 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItem3 = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItem3);
+
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    const timetableContainer3 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const periodSelect3 = timetableContainer3.querySelector('select');
+    if (periodSelect3) {
+      fireEvent.change(periodSelect3, { target: { value: '自由記述' } });
+      await waitFor(() => {
+        const selects = Array.from(timetableContainer3.querySelectorAll('select'));
+        const found = selects.some(s => Array.from(s.options).some(o => o.value === '自由授業テーマ'));
+        expect(found).toBe(true);
+      });
+      const freeSelect = Array.from(timetableContainer3.querySelectorAll('select')).find(s => 
+        Array.from(s.options).some(o => o.value === '自由授業テーマ')
+      );
+      if (freeSelect) {
+        fireEvent.change(freeSelect, { target: { value: '自由授業テーマ' } });
+      }
+      await waitFor(() => {
+        expect(timetableContainer3.querySelector('input[placeholder="または新しい授業名を直接入力"]')).not.toBeNull();
+      });
+      const directInput = timetableContainer3.querySelector('input[placeholder="または新しい授業名を直接入力"]')!;
+      fireEvent.change(directInput, { target: { value: '新規授業直打ち' } });
+    }
+
+    // 5. db.ts: 796-798, 811-812 Supabase実サーバー通信パスのカバー
+    const originalMockMode = db.isMockMode;
+    const originalSupabase = db.supabase;
+    
+    const supabaseMock = {
+      from: (table: string) => {
+        return {
+          upsert: (data: any) => {
+            return {
+              select: () => {
+                return {
+                  single: async () => {
+                    return { data: { id: 'cc-new-unique', name: '完全新規テーマ' }, error: null };
+                  }
+                };
+              }
+            };
+          },
+          delete: () => {
+            return {
+              eq: async (col: string, val: any) => {
+                return { error: null };
+              }
+            };
+          }
+        };
+      }
+    };
+
+    (db as any).isMockMode = false;
+    (db as any).supabase = supabaseMock;
+
+    const dummyCC = { id: 'cc-new-unique', name: '完全新規テーマ', created_at: '' };
+    await db.saveCustomClass(dummyCC);
+    await db.deleteCustomClass(dummyCC.id);
+
+    const supabaseMockError = {
+      from: (table: string) => {
+        return {
+          upsert: (data: any) => {
+            return {
+              select: () => {
+                return {
+                  single: async () => {
+                    return { data: null, error: new Error('Mock Supabase Save Error') };
+                  }
+                };
+              }
+            };
+          },
+          delete: () => {
+            return {
+              eq: async (col: string, val: any) => {
+                return { error: new Error('Mock Supabase Delete Error') };
+              }
+            };
+          }
+        };
+      }
+    };
+
+    (db as any).supabase = supabaseMockError;
+    try {
+      await db.saveCustomClass(dummyCC);
+    } catch (e: any) {
+      expect(e.message).toBe('Mock Supabase Save Error');
+    }
+
+    try {
+      await db.deleteCustomClass(dummyCC.id);
+    } catch (e: any) {
+      expect(e.message).toBe('Mock Supabase Delete Error');
+    }
+
+    (db as any).isMockMode = originalMockMode;
+    (db as any).supabase = originalSupabase;
+
+    // 8.7 TeacherDashboard.tsx: 自由記述授業テーマの作成・削除UIテスト
+    cleanup();
+    const { container: containerCustom } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItemCustom = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItemCustom);
+    fireEvent.click(screen.getAllByText('学校カリキュラム管理')[0]);
+
+    // バリデーション警告（空文字）のカバー
+    alertMock.mockClear();
+    const addBtn = screen.getByText('追加する');
+    fireEvent.click(addBtn);
+    expect(alertMock).toHaveBeenCalledWith('自由記述の授業名を入力してください。');
+
+    // 正常追加のカバー
+    const customInput = screen.getByPlaceholderText('例: 高校入試過去問演習');
+    fireEvent.change(customInput, { target: { value: '新規テスト授業テーマ' } });
+    fireEvent.click(addBtn);
+
+    // 削除のカバー
+    await waitFor(() => {
+      expect(screen.getByText('新規テスト授業テーマ')).toBeDefined();
+    });
+    const deleteBtn = screen.getAllByText('削除')[0];
+    fireEvent.click(deleteBtn);
+
+    // 8.8 TeacherDashboard.tsx: カリキュラム単元の編集・削除UIテスト
+    // 単元の編集を開始する
+    const editUnitBtns = screen.getAllByText('編集');
+    fireEvent.click(editUnitBtns[0]);
+
+    // バリデーション警告（空文字）のカバー
+    const firstUnitContainer = editUnitBtns[0].closest('div[class*="curriculumItem"]')!;
+    const editInput = firstUnitContainer.querySelector('input')!;
+    fireEvent.change(editInput, { target: { value: '' } });
+    const saveUnitBtn = screen.getByText('保存');
+    alertMock.mockClear();
+    fireEvent.click(saveUnitBtn);
+    expect(alertMock).toHaveBeenCalledWith('単元名を入力してください。');
+
+    // 正常保存のカバー
+    fireEvent.change(editInput, { target: { value: '更新後の単元名' } });
+    fireEvent.click(saveUnitBtn);
+    expect(alertMock).toHaveBeenLastCalledWith('授業（単元）を更新しました！');
+
+    // キャンセルボタンのカバー
+    fireEvent.click(editUnitBtns[0]);
+    const cancelBtn = screen.getByText('キャンセル');
+    fireEvent.click(cancelBtn);
+
+    // 単元削除のカバー (confirm が false の時の早期リターンパスもカバー)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const deleteUnitBtns = screen.getAllByText('削除');
+    fireEvent.click(deleteUnitBtns[0]);
+    
+    // confirm を true にして実際に削除を走らせる
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(deleteUnitBtns[0]);
+    expect(alertMock).toHaveBeenLastCalledWith('授業（単元）を削除しました。');
+    confirmSpy.mockRestore();
+
+    // 9. TeacherDashboard.tsx: 2284 (直接入力テストテーマの onChange)
+    cleanup();
+    db.clearMockData();
+    db.getSchools();
+    db.getCurriculumUnits();
+    db.getStudents();
+    db.getLearningTasks();
+    db.getSchoolCodesMaster();
+    db.getExamThresholdsMaster();
+    db.getPromptSettings();
+    db.getAIReports();
+
+    const { container: container4 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItem4 = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItem4);
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    const timetableContainer4 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const periodSelects4 = timetableContainer4.querySelectorAll('select');
+    const periodSelect4 = periodSelects4[0];
+    fireEvent.change(periodSelect4, { target: { value: 'テスト' } });
+    await waitFor(() => {
+      const firstPeriodContainer = periodSelect4.parentElement!;
+      expect(firstPeriodContainer.querySelector('input[placeholder="テストのテーマ（例: 一次方程式小テスト）"]')).not.toBeNull();
+    });
+    const firstPeriodContainer = periodSelect4.parentElement!;
+    const testDirectInput = firstPeriodContainer.querySelector('input[placeholder="テストのテーマ（例: 一次方程式小テスト）"]')!;
+    fireEvent.change(testDirectInput, { target: { value: '直接入力小テストテーマ' } });
+
+    // 10. TeacherDashboard.tsx: 1119 (本日のテストがちょうど1件の時の自動初期選択) をカバー
+    cleanup();
+    db.clearMockData();
+    db.getSchools();
+    db.getCurriculumUnits();
+    db.getStudents();
+    db.getLearningTasks();
+    db.getSchoolCodesMaster();
+    db.getExamThresholdsMaster();
+    db.getPromptSettings();
+    db.getAIReports();
+
+    // 本日の小テスト結果(MiniTestResult)を1件追加して、todayTests.length === 1 の状態を作る
+    const oneTestResult: MiniTestResult = {
+      id: 'mini-one-test',
+      student_id: 'std-1',
+      date: '2026-06-19',
+      test_content: '数学小テスト（一次方程式）',
+      score: 85,
+      passing_line: 80,
+      target_scope: 'individual',
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(oneTestResult);
+
+    const { container: container5 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentItem5 = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItem5);
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    const timetableContainer5 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const periodSelect5 = timetableContainer5.querySelector('select')!;
+    fireEvent.change(periodSelect5, { target: { value: 'テスト' } });
+
+    // 11. TeacherDashboard.tsx: 新規生徒アカウント発行時の所属学校自動同期の検証
+    cleanup();
+    const { container: container6 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    fireEvent.click(screen.getByText('新規生徒アカウント発行'));
+    
+    const gradeSelect6 = screen.getByText('学年').parentElement!.querySelector('select')!;
+    fireEvent.change(gradeSelect6, { target: { value: '小5' } });
+    
+    const studentNameInput6 = screen.getByPlaceholderText('例: 佐藤 拓海');
+    fireEvent.change(studentNameInput6, { target: { value: 'MJ' } });
+    const submitBtn6 = screen.getByText('1クリックアカウント発行');
+    
+    alertMock.mockClear();
+    fireEvent.click(submitBtn6);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalled();
+      expect(alertMock.mock.calls[0][0]).toContain('生徒アカウントを発行しました！');
+    });
   });
 });

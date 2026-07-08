@@ -72,13 +72,24 @@ CREATE TABLE IF NOT EXISTS test_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     record_type TEXT NOT NULL CHECK (record_type IN ('regular_test', 'mock_exam')),
-    subject TEXT NOT NULL,
-    score INTEGER NOT NULL,
+    subject TEXT, -- NULL 許容に変更 (定期テスト全体レコードなどに対応)
+    score INTEGER, -- NULL 許容に変更 (定期テスト全体レコードなどに対応)
     rank_change TEXT CHECK (rank_change IN ('up', 'down', 'keep')),
     rate_change NUMERIC(5,2), -- 上昇・下降率 (%)
     next_target_score INTEGER,
     improvement_plan TEXT, -- 改善点
     target_school_code TEXT, -- 志望校コード（模試用）
+    -- 定期テスト用の追加カラム
+    test_name TEXT,
+    score_japanese INTEGER,
+    score_math INTEGER,
+    score_english INTEGER,
+    score_social INTEGER,
+    score_science INTEGER,
+    score_total INTEGER,
+    class_rank TEXT,
+    school_rank TEXT,
+    deviation_value NUMERIC(4,1),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -241,3 +252,31 @@ CREATE TABLE IF NOT EXISTS homework_results (
     status TEXT NOT NULL DEFAULT 'incomplete' CHECK (status IN ('incomplete', 'completed', 'skipped')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- 18. 自作授業用のYouTubeリンク等のカラムをcurriculum_unitsに追加
+ALTER TABLE curriculum_units ADD COLUMN IF NOT EXISTS link_url TEXT;
+
+-- 19. 自由記述用の授業マスタテーブルを新規追加
+CREATE TABLE IF NOT EXISTS custom_classes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 20. studentsテーブルへ教科別の学習スタート位置カラムを追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_math UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_english UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_science UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_social UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_japanese UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+
+-- 21. 小テスト結果およびタスクに合格ラインカラムを追加
+ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS passing_line TEXT;
+ALTER TABLE learning_tasks ADD COLUMN IF NOT EXISTS passing_line TEXT;
+
+-- 22. 小テスト結果および宿題に適用対象（scope）カラムを追加
+ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS target_scope TEXT NOT NULL DEFAULT 'individual';
+ALTER TABLE homework_results ADD COLUMN IF NOT EXISTS target_scope TEXT NOT NULL DEFAULT 'individual';
+
+-- 23. 小テスト結果テーブルへ合格フラグ passed カラムを追加
+ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS passed BOOLEAN;

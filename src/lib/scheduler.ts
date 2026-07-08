@@ -64,10 +64,22 @@ export function calculateProgressGap(
     const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
     const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
     currentSequence = Math.max(0, ...completedUnits.map(u => u.sequence_order));
-  } else if (student.start_unit_id) {
-    const startUnit = subjectUnits.find(u => u.id === student.start_unit_id);
-    if (startUnit) {
-      currentSequence = startUnit.sequence_order - 1;
+  } else {
+    let startUnitId: string | null | undefined = null;
+    const sub = subject;
+    if (sub === '数学' || sub === '算数') startUnitId = student.start_unit_math;
+    else if (sub === '英語') startUnitId = student.start_unit_english;
+    else if (sub === '理科') startUnitId = student.start_unit_science;
+    else if (sub === '社会' || sub === '歴史' || sub === '地理') startUnitId = student.start_unit_social;
+    else if (sub === '国語') startUnitId = student.start_unit_japanese;
+
+    if (!startUnitId) startUnitId = student.start_unit_id;
+
+    if (startUnitId) {
+      const startUnit = subjectUnits.find(u => u.id === startUnitId);
+      if (startUnit) {
+        currentSequence = startUnit.sequence_order - 1;
+      }
     }
   }
 
@@ -443,4 +455,61 @@ export function generateAIReportText(
   }
 
   return text;
+}
+
+/**
+ * 未完了の学習予定タスクを、本来のカリキュラム順序（sequence_order）を守りながら、
+ * 指定された日程以降へ順次後ろ倒し（再スケジューリング）します。
+ */
+export function rescheduleFutureUncompletedTasks(
+  studentId: string,
+  allTasks: LearningTask[],
+  curriculumUnits: CurriculumUnit[],
+  startDate: string,
+  futureDates: string[]
+): LearningTask[] {
+  const studentTasks = allTasks.filter(t => t.student_id === studentId);
+  const otherTasks = allTasks.filter(t => t.student_id !== studentId);
+
+  const todayMs = new Date(startDate).getTime() - 24 * 60 * 60 * 1000;
+  const todayStr = new Date(todayMs).toISOString().split('T')[0];
+
+  const completedTasks = studentTasks.filter(t => t.status === 'completed' || (t.scheduled_date === todayStr && t.period !== null));
+  const uncompletedTasks = studentTasks.filter(t => t.status !== 'completed' && !(t.scheduled_date === todayStr && t.period !== null));
+
+  if (uncompletedTasks.length === 0 || futureDates.length === 0) {
+    return allTasks;
+  }
+
+  // startDate 以降の有効な未来日を抽出・ソート
+  const validDates = futureDates
+    .filter(d => d >= startDate)
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+  if (validDates.length === 0) {
+    return allTasks;
+  }
+
+  // 未完了タスクを教科別 ➔ sequence_order順にソートする
+  const sortedUncompleted = [...uncompletedTasks].sort((a, b) => {
+    const unitA = curriculumUnits.find(u => u.id === a.unit_id);
+    const unitB = curriculumUnits.find(u => u.id === b.unit_id);
+    if (!unitA || !unitB) return 0;
+    if (unitA.subject !== unitB.subject) {
+      return unitA.subject.localeCompare(unitB.subject);
+    }
+    return unitA.sequence_order - unitB.sequence_order;
+  });
+
+  // 日付に対して順次割り当て直す（1日あたり最大2タスクを目安に配置）
+  const rescheduled = sortedUncompleted.map((task, index) => {
+    const dateIdx = Math.floor(index / 2); // 1日最大2コマ
+    const scheduled_date = validDates[Math.min(dateIdx, validDates.length - 1)];
+    return {
+      ...task,
+      scheduled_date,
+    };
+  });
+
+  return [...otherTasks, ...completedTasks, ...rescheduled];
 }

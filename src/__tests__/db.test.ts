@@ -67,6 +67,14 @@ describe('Database Service CRUD Tests', () => {
 
     const freshUnits = db.getCurriculumUnits();
     expect(freshUnits.find(u => u.id === 'unit-test')).toBeDefined();
+
+    // 単一の curriculum unit の操作 (LocalStorage モックモード)
+    const singleCU = { id: 'unit-single-test', school_id: 'sch-1', subject: '数学', name: '単体テスト単元', sequence_order: 100, created_at: '' };
+    const savedSingle = await db.saveCurriculumUnit(singleCU);
+    expect(savedSingle.id).toBe('unit-single-test');
+    await db.deleteCurriculumUnit('unit-single-test');
+    const remains = db.getCurriculumUnits();
+    expect(remains.find(u => u.id === 'unit-single-test')).toBeUndefined();
   });
 
   it('should manage learning tasks', async () => {
@@ -276,6 +284,10 @@ describe('Database Service CRUD Tests', () => {
     const savedUnits = await localDb.saveCurriculumUnits([unit]);
     expect(savedUnits).toBeDefined();
 
+    const savedUnit = await localDb.saveCurriculumUnit(unit);
+    expect(savedUnit.id).toBe('sup-id');
+    await localDb.deleteCurriculumUnit('sup-1');
+
     const task = { id: 'sup-1', student_id: 'S', unit_id: 'S', scheduled_date: '2026-06-19', period: null, status: 'unstarted' as const, video_watched: false, test_passed: false, created_at: '' };
     const savedTasks = await localDb.saveLearningTasks([task]);
     expect(savedTasks).toBeDefined();
@@ -373,6 +385,9 @@ describe('Database Service CRUD Tests', () => {
 
     const unit = { id: 'sup-1', school_id: 'S', subject: 'S', name: 'S', sequence_order: 1, created_at: '' };
     await expect(localDb.saveCurriculumUnits([unit])).rejects.toThrow('Database Error');
+
+    await expect(localDb.saveCurriculumUnit(unit)).rejects.toThrow('Database Error');
+    await expect(localDb.deleteCurriculumUnit('sup-1')).rejects.toThrow('Database Error');
 
     const task = { id: 'sup-1', student_id: 'S', unit_id: 'S', scheduled_date: '2026-06-19', period: null, status: 'unstarted' as const, video_watched: false, test_passed: false, created_at: '' };
     await expect(localDb.saveLearningTasks([task])).rejects.toThrow('Database Error');

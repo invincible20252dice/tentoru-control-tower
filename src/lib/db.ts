@@ -36,6 +36,11 @@ export interface Student {
   registered_grade?: string;
   registered_year?: number;
   school_name?: string;
+  start_unit_math?: string | null;
+  start_unit_english?: string | null;
+  start_unit_science?: string | null;
+  start_unit_social?: string | null;
+  start_unit_japanese?: string | null;
 }
 
 export interface StudentInteraction {
@@ -49,6 +54,7 @@ export interface StudentInteraction {
 }
 
 export const GRADES = [
+  '園児',
   '小1', '小2', '小3', '小4', '小5', '小6',
   '中1', '中2', '中3',
   '高1', '高2', '高3',
@@ -105,6 +111,7 @@ export interface CurriculumUnit {
   name: string;
   sequence_order: number;
   google_drive_url?: string;
+  link_url?: string | null;
   created_at: string;
 }
 
@@ -121,6 +128,7 @@ export interface LearningTask {
   actual_completed_date?: string;
   subject?: string;
   custom_unit_name?: string;
+  passing_line?: string | null;
   created_at: string;
 }
 
@@ -140,14 +148,26 @@ export interface TestRecord {
   id: string;
   student_id: string;
   record_type: 'regular_test' | 'mock_exam';
-  subject: string;
-  score: number;
+  subject?: string;
+  score?: number | null;
   rank_change?: 'up' | 'down' | 'keep';
   rate_change?: number;
   next_target_score?: number;
   improvement_plan?: string;
   target_school_code?: string;
   created_at: string;
+
+  // 定期テスト用追加項目 (5教科＋合計＋順位＋偏差値)
+  test_name?: string;
+  score_japanese?: number | null;
+  score_math?: number | null;
+  score_english?: number | null;
+  score_social?: number | null;
+  score_science?: number | null;
+  score_total?: number | null;
+  class_rank?: string | null;
+  school_rank?: string | null;
+  deviation_value?: number | null;
 }
 
 export interface SchoolCodeMaster {
@@ -196,6 +216,9 @@ export interface MiniTestResult {
   date: string; // YYYY-MM-DD
   test_content: string; // 自由記述テスト内容
   score: number | null; // 結果点数
+  passed?: boolean | null; // 合格したかどうか
+  passing_line?: string | null; // 合格ライン
+  target_scope?: string; // 対象 (例: 'individual', 'grade', 'school', 'level')
   created_at: string;
 }
 
@@ -206,6 +229,13 @@ export interface HomeworkResult {
   homework_content: string;
   homework_deadline: string; // YYYY-MM-DD
   status: 'incomplete' | 'completed' | 'skipped';
+  target_scope?: string;
+  created_at: string;
+}
+
+export interface CustomClass {
+  id: string;
+  name: string;
   created_at: string;
 }
 
@@ -258,6 +288,14 @@ class DatabaseService {
   private saveMockData<T>(key: string, data: T[]): void {
     if (!this.isBrowser()) return;
     localStorage.setItem(`tentoru_${key}`, JSON.stringify(data));
+  }
+
+  public getCustomClasses(): CustomClass[] {
+    const seed: CustomClass[] = [
+      { id: 'cc-1', name: '自習・質問', created_at: new Date().toISOString() },
+      { id: 'cc-2', name: '単元面談', created_at: new Date().toISOString() }
+    ];
+    return this.getMockData('custom_classes', seed);
   }
 
   // Seed Data Initializers
@@ -590,11 +628,66 @@ class DatabaseService {
 
   public getTestRecords(): TestRecord[] {
     const seed: TestRecord[] = [
-      { id: 'tr-1', student_id: 'std-1', record_type: 'regular_test', subject: '数学', score: 72, rank_change: 'up', rate_change: 8.5, next_target_score: 85, improvement_plan: '一次方程式の計算手順の再確認', created_at: new Date().toISOString() },
-      { id: 'tr-3', student_id: 'std-1', record_type: 'regular_test', subject: '英語', score: 60, rank_change: 'down', rate_change: -2.0, next_target_score: 75, improvement_plan: '単語練習の徹底', created_at: new Date().toISOString() },
+      {
+        id: 'tr-1',
+        student_id: 'std-1',
+        record_type: 'regular_test',
+        test_name: '1学期中間テスト',
+        score_japanese: 70,
+        score_math: 72,
+        score_english: 68,
+        score_social: 65,
+        score_science: 80,
+        score_total: 355,
+        class_rank: '12',
+        school_rank: '45',
+        deviation_value: 52.5,
+        rank_change: 'up',
+        rate_change: 8.5,
+        next_target_score: 85,
+        improvement_plan: '一次方程式の計算手順の再確認',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'tr-3',
+        student_id: 'std-1',
+        record_type: 'regular_test',
+        test_name: '1学期期末テスト',
+        score_japanese: 65,
+        score_math: 60,
+        score_english: 70,
+        score_social: 55,
+        score_science: 75,
+        score_total: 325,
+        class_rank: 'ー',
+        school_rank: 'ー',
+        deviation_value: 48.0,
+        rank_change: 'down',
+        rate_change: -2.0,
+        next_target_score: 75,
+        improvement_plan: '単語練習の徹底',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'tr-4',
+        student_id: 'std-1',
+        record_type: 'regular_test',
+        test_name: '中間測定テスト',
+        created_at: new Date().toISOString()
+      },
       { id: 'tr-2', student_id: 'std-1', record_type: 'mock_exam', subject: '総合', score: 320, target_school_code: 'schcode-A', created_at: new Date().toISOString() }
     ];
-    return this.getMockData('test_records', seed);
+    const list = this.getMockData('test_records', seed);
+    return list.map(tr => {
+      if (tr.record_type === 'regular_test') {
+        return {
+          ...tr,
+          class_rank: tr.class_rank || 'ー',
+          school_rank: tr.school_rank || 'ー'
+        };
+      }
+      return tr;
+    });
   }
 
   public getSchoolCodesMaster(): SchoolCodeMaster[] {
@@ -670,6 +763,60 @@ class DatabaseService {
   // Data Mutators (Hybrid Implementation)
   // -------------------------------------------------------------
   
+  // Curriculum CRUD
+  public async saveCurriculumUnit(unit: CurriculumUnit): Promise<CurriculumUnit> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('curriculum_units').upsert(unit).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getCurriculumUnits();
+      const idx = list.findIndex(u => u.id === unit.id);
+      if (idx >= 0) list[idx] = unit;
+      else list.push(unit);
+      this.saveMockData('curriculum_units', list);
+      return unit;
+    }
+  }
+
+  public async deleteCurriculumUnit(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('curriculum_units').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      const list = this.getCurriculumUnits();
+      const filtered = list.filter(u => u.id !== id);
+      this.saveMockData('curriculum_units', filtered);
+    }
+  }
+
+  // CustomClasses CRUD
+  public async saveCustomClass(customClass: CustomClass): Promise<CustomClass> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('custom_classes').upsert(customClass).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getCustomClasses();
+      const idx = list.findIndex(c => c.id === customClass.id);
+      if (idx >= 0) list[idx] = customClass;
+      else list.push(customClass);
+      this.saveMockData('custom_classes', list);
+      return customClass;
+    }
+  }
+
+  public async deleteCustomClass(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('custom_classes').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      const list = this.getCustomClasses();
+      const filtered = list.filter(c => c.id !== id);
+      this.saveMockData('custom_classes', filtered);
+    }
+  }
+
   // 1. Schools CRUD
   public async saveSchool(school: School): Promise<School> {
     if (!this.isMockMode && this.supabase) {
@@ -787,17 +934,23 @@ class DatabaseService {
 
   // 6. TestRecords CRUD
   public async saveTestRecord(record: TestRecord): Promise<TestRecord> {
+    const updatedRecord = { ...record };
+    if (updatedRecord.record_type === 'regular_test') {
+      updatedRecord.class_rank = updatedRecord.class_rank || 'ー';
+      updatedRecord.school_rank = updatedRecord.school_rank || 'ー';
+    }
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('test_records').upsert(record).select().single();
+      const { data, error } = await this.supabase.from('test_records').upsert(updatedRecord).select().single();
       if (error) throw error;
       return data;
     } else {
       const list = this.getTestRecords();
-      const idx = list.findIndex(r => r.id === record.id);
-      if (idx >= 0) list[idx] = record;
-      else list.push(record);
+      const idx = list.findIndex(r => r.id === updatedRecord.id);
+      if (idx >= 0) list[idx] = updatedRecord;
+      else list.push(updatedRecord);
       this.saveMockData('test_records', list);
-      return record;
+      return updatedRecord;
     }
   }
 
@@ -1065,31 +1218,72 @@ class DatabaseService {
       { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'A', chapter: '定期テスト対策', target_theme_name: '' }
     ];
 
-    // 中1 数学 レベルB
+    // 中1 数学 レベルB (ユーザー指定の標準年間計画)
     const m1MathB: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
-      { month: 4, week_number: 1, unit_name: '絶対値', target_sequence_order: 6, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '絶対値' },
-      { month: 4, week_number: 2, unit_name: '加減混合', target_sequence_order: 17, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '加法と減法が混ざった計算' },
-      { month: 4, week_number: 3, unit_name: '乗除混合', target_sequence_order: 26, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '3つ以上の数の乗除' },
-      { month: 4, week_number: 4, unit_name: '分配法則と利用', target_sequence_order: 34, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '正の数・負の数の利用' },
-      { month: 5, week_number: 1, unit_name: 'GW休暇', target_sequence_order: 34, is_holiday: true, holiday_name: 'GW休暇', level: 'B', chapter: 'GW休暇', target_theme_name: '' },
-      { month: 5, week_number: 2, unit_name: '素因数分解', target_sequence_order: 37, is_holiday: false, level: 'B', chapter: '第1章 正の数・負の数', target_theme_name: '素因数分解の利用' },
-      { month: 5, week_number: 3, unit_name: '式の値', target_sequence_order: 39, is_holiday: false, level: 'B', chapter: '第2章 文字の式', target_theme_name: '式の値' },
-      { month: 5, week_number: 4, unit_name: '文字式の計算', target_sequence_order: 41, is_holiday: false, level: 'B', chapter: '第2章 文字の式', target_theme_name: '文字式の利用（数量の表し方）' },
-      { month: 6, week_number: 1, unit_name: '等式の性質と解き方', target_sequence_order: 44, is_holiday: false, level: 'B', chapter: '第3章 方程式', target_theme_name: '一次方程式の解き方' },
-      { month: 6, week_number: 2, unit_name: '方程式の利用', target_sequence_order: 45, is_holiday: false, level: 'B', chapter: '第3章 方程式', target_theme_name: '一次方程式の利用（文章題）' },
-      { month: 6, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
-      { month: 6, week_number: 4, unit_name: '定期テスト対策', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト対策期間（前期中間）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
-      { month: 7, week_number: 1, unit_name: '定期テスト休み', target_sequence_order: 45, is_holiday: true, holiday_name: '定期テスト休み', level: 'B', chapter: '定期テスト休み', target_theme_name: '' },
-      { month: 7, week_number: 2, unit_name: '比例', target_sequence_order: 47, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '座標と比例のグラフ' },
-      { month: 7, week_number: 3, unit_name: '反比例', target_sequence_order: 48, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '反比例とそのグラフ' },
-      { month: 7, week_number: 4, unit_name: '比例・反比例の利用', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '第4章 比例と反比例', target_theme_name: '比例・反比例の利用' },
-      { month: 8, week_number: 1, unit_name: 'iスクール模試', target_sequence_order: 49, is_holiday: true, holiday_name: 'iスクール模試', level: 'B', chapter: '模試', target_theme_name: '' },
-      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 49, is_holiday: true, holiday_name: 'お盆休み', level: 'B', chapter: 'お盆休み', target_theme_name: '' },
-      { month: 8, week_number: 3, unit_name: '復習', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
-      { month: 8, week_number: 4, unit_name: '応用演習', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
-      { month: 9, week_number: 1, unit_name: '予備', target_sequence_order: 49, is_holiday: false, level: 'B', chapter: '復習・応用', target_theme_name: '比例・反比例の利用' },
-      { month: 9, week_number: 2, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' },
-      { month: 9, week_number: 3, unit_name: '定期テスト対策', target_sequence_order: 49, is_holiday: true, holiday_name: '定期テスト対策期間（前期期末）', level: 'B', chapter: '定期テスト対策', target_theme_name: '' }
+      // 3月
+      { month: 3, week_number: 1, unit_name: '1章 正の数・負の数', is_holiday: false, level: 'B', chapter: '1章 正の数・負の数' },
+      { month: 3, week_number: 2, unit_name: '1章 正の数・負の数', is_holiday: false, level: 'B', chapter: '1章 正の数・負の数' },
+      { month: 3, week_number: 3, unit_name: '1章 正の数・負の数', is_holiday: false, level: 'B', chapter: '1章 正の数・負の数' },
+      { month: 3, week_number: 4, unit_name: '1章 正の数・負の数', is_holiday: false, level: 'B', chapter: '1章 正の数・負の数' },
+      // 4月
+      { month: 4, week_number: 1, unit_name: '2章 文字の式', is_holiday: false, level: 'B', chapter: '2章 文字の式' },
+      { month: 4, week_number: 2, unit_name: '2章 文字の式', is_holiday: false, level: 'B', chapter: '2章 文字の式' },
+      { month: 4, week_number: 3, unit_name: '2章 文字の式', is_holiday: false, level: 'B', chapter: '2章 文字の式' },
+      { month: 4, week_number: 4, unit_name: '2章 文字の式', is_holiday: false, level: 'B', chapter: '2章 文字の式' },
+      // 5月
+      { month: 5, week_number: 1, unit_name: 'GW休暇', is_holiday: true, holiday_name: 'GW休暇', level: 'B', chapter: 'GW休暇' },
+      { month: 5, week_number: 2, unit_name: '3章 方程式', is_holiday: false, level: 'B', chapter: '3章 方程式' },
+      { month: 5, week_number: 3, unit_name: '3章 方程式', is_holiday: false, level: 'B', chapter: '3章 方程式' },
+      { month: 5, week_number: 4, unit_name: '3章 方程式', is_holiday: false, level: 'B', chapter: '3章 方程式' },
+      // 6月
+      { month: 6, week_number: 1, unit_name: '3章 方程式', is_holiday: false, level: 'B', chapter: '3章 方程式' },
+      { month: 6, week_number: 2, unit_name: '3章 方程式', is_holiday: false, level: 'B', chapter: '3章 方程式' },
+      { month: 6, week_number: 3, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      { month: 6, week_number: 4, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      // 7月
+      { month: 7, week_number: 1, unit_name: '定期テスト休み', is_holiday: true, holiday_name: '定期テスト休み', level: 'B', chapter: 'テスト休み' },
+      { month: 7, week_number: 2, unit_name: '1章〜3章の復習', is_holiday: false, level: 'B', chapter: '復習' },
+      { month: 7, week_number: 3, unit_name: '1章〜3章の復習', is_holiday: false, level: 'B', chapter: '復習' },
+      { month: 7, week_number: 4, unit_name: '1章〜3章の復習', is_holiday: false, level: 'B', chapter: '復習' },
+      // 8月
+      { month: 8, week_number: 1, unit_name: '夏休み', is_holiday: true, holiday_name: '夏休み', level: 'B', chapter: '夏休み' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', is_holiday: true, holiday_name: 'お盆休み', level: 'B', chapter: 'お盆休み' },
+      { month: 8, week_number: 3, unit_name: '1章〜3章の復習', is_holiday: false, level: 'B', chapter: '復習' },
+      { month: 8, week_number: 4, unit_name: '1章〜3章の復習', is_holiday: false, level: 'B', chapter: '復習' },
+      // 9月
+      { month: 9, week_number: 1, unit_name: '予備', is_holiday: false, level: 'B', chapter: '予備' },
+      { month: 9, week_number: 2, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      { month: 9, week_number: 3, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      { month: 9, week_number: 4, unit_name: 'シルバーウィーク休み', is_holiday: true, holiday_name: 'シルバーウィーク休み', level: 'B', chapter: '休み' },
+      // 10月
+      { month: 10, week_number: 1, unit_name: '4章 変化の割合', is_holiday: false, level: 'B', chapter: '4章 変化の割合' },
+      { month: 10, week_number: 2, unit_name: '4章 変化の割合', is_holiday: false, level: 'B', chapter: '4章 変化の割合' },
+      { month: 10, week_number: 3, unit_name: '4章 変化の割合', is_holiday: false, level: 'B', chapter: '4章 変化の割合' },
+      { month: 10, week_number: 4, unit_name: '4章 変化の割合', is_holiday: false, level: 'B', chapter: '4章 変化の割合' },
+      // 11月
+      { month: 11, week_number: 1, unit_name: '5章 平面図形', is_holiday: false, level: 'B', chapter: '5章 平面図形' },
+      { month: 11, week_number: 2, unit_name: '5章 平面図形', is_holiday: false, level: 'B', chapter: '5章 平面図形' },
+      { month: 11, week_number: 3, unit_name: '5章 平面図形', is_holiday: false, level: 'B', chapter: '5章 平面図形' },
+      { month: 11, week_number: 4, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      // 12月
+      { month: 12, week_number: 1, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      { month: 12, week_number: 2, unit_name: '定期テスト対策', is_holiday: true, holiday_name: '定期テスト対策期間', level: 'B', chapter: 'テスト対策' },
+      { month: 12, week_number: 3, unit_name: '冬休み', is_holiday: true, holiday_name: '冬休み', level: 'B', chapter: '冬休み' },
+      { month: 12, week_number: 4, unit_name: '年末年始休み', is_holiday: true, holiday_name: '年末年始休み', level: 'B', chapter: '年末年始休み' },
+      // 1月
+      { month: 1, week_number: 1, unit_name: '正月休み', is_holiday: true, holiday_name: '正月休み', level: 'B', chapter: '正月休み' },
+      { month: 1, week_number: 2, unit_name: '6章 空間図形', is_holiday: false, level: 'B', chapter: '6章 空間図形' },
+      { month: 1, week_number: 3, unit_name: '6章 空間図形', is_holiday: false, level: 'B', chapter: '6章 空間図形' },
+      { month: 1, week_number: 4, unit_name: '6章 空間図形', is_holiday: false, level: 'B', chapter: '6章 空間図形' },
+      // 2月
+      { month: 2, week_number: 1, unit_name: '7章 データの活用', is_holiday: false, level: 'B', chapter: '7章 データの活用' },
+      { month: 2, week_number: 2, unit_name: '学年末テスト対策', is_holiday: true, holiday_name: '学年末テスト対策', level: 'B', chapter: 'テスト対策' },
+      { month: 2, week_number: 3, unit_name: '学年末テスト対策', is_holiday: true, holiday_name: '学年末テスト対策', level: 'B', chapter: 'テスト対策' },
+      { month: 2, week_number: 4, unit_name: '学年末テスト対策', is_holiday: true, holiday_name: '学年末テスト対策', level: 'B', chapter: 'テスト対策' },
+      // 3月 (翌年)
+      { month: 3, week_number: 1, unit_name: '', is_holiday: false, level: 'B', chapter: '' },
+      { month: 3, week_number: 2, unit_name: '', is_holiday: false, level: 'B', chapter: '' },
+      { month: 3, week_number: 3, unit_name: '', is_holiday: false, level: 'B', chapter: '' }
     ];
 
     // 中1 数学 レベルC
@@ -1150,9 +1344,26 @@ class DatabaseService {
     });
 
     m1MathB.forEach(p => {
+      // 中1 数学 レベルB
       seed.push({
         id: `mp-m1math-levelB-${p.month}-${p.week_number}`,
         grade: '中1',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+      // 中2 数学 レベルB
+      seed.push({
+        id: `mp-m2math-levelB-${p.month}-${p.week_number}`,
+        grade: '中2',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+      // 中3 数学 レベルB
+      seed.push({
+        id: `mp-m3math-levelB-${p.month}-${p.week_number}`,
+        grade: '中3',
         subject: '数学',
         course: 'standard',
         ...p

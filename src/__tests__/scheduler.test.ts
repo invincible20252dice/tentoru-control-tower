@@ -8,7 +8,8 @@ import {
   learnFromTeacherCorrections,
   schedulerConfig,
   getYearMonthWeek,
-  calculateProgressGap
+  calculateProgressGap,
+  rescheduleFutureUncompletedTasks
 } from '../lib/scheduler';
 import { CurriculumUnit, LearningTask, Student, TestRecord, ExamThresholdMaster, MilestonePlan } from '../lib/db';
 
@@ -408,6 +409,37 @@ describe('Scheduler and Core Logic Tests', () => {
       const resultEmpty = calculateProgressGap(student, tasks, milestonePlans, curriculumUnits, '2026-12-01', '数学');
       expect(resultEmpty.gapWeeks).toBe(0);
       expect(resultEmpty.status).toBe('normal');
+
+      // 理科・社会・国語・音楽（未知の教科）の各判定パスのカバー
+      const studentExt: Student = {
+        ...student,
+        start_unit_science: 'u-sci',
+        start_unit_social: 'u-soc',
+        start_unit_japanese: 'u-jap'
+      };
+      const extUnits: CurriculumUnit[] = [
+        { id: 'u-sci', school_id: 'sch-1', subject: '理科', name: '理科1', sequence_order: 1, created_at: '' },
+        { id: 'u-soc', school_id: 'sch-1', subject: '社会', name: '社会1', sequence_order: 1, created_at: '' },
+        { id: 'u-jap', school_id: 'sch-1', subject: '国語', name: '国語1', sequence_order: 1, created_at: '' }
+      ];
+      const extMilestones: MilestonePlan[] = [
+        { id: 'mp-sci', grade: '中3', subject: '理科', course: 'standard', month: 6, week_number: 1, target_sequence_order: 1, is_holiday: false },
+        { id: 'mp-soc', grade: '中3', subject: '社会', course: 'standard', month: 6, week_number: 1, target_sequence_order: 1, is_holiday: false },
+        { id: 'mp-jap', grade: '中3', subject: '国語', course: 'standard', month: 6, week_number: 1, target_sequence_order: 1, is_holiday: false },
+        { id: 'mp-mus', grade: '中3', subject: '音楽', course: 'standard', month: 6, week_number: 1, target_sequence_order: 1, is_holiday: false }
+      ];
+
+      const resSci = calculateProgressGap(studentExt, [], extMilestones, extUnits, '2026-06-01', '理科');
+      expect(resSci.gapWeeks).toBe(-1);
+
+      const resSoc = calculateProgressGap(studentExt, [], extMilestones, extUnits, '2026-06-01', '社会');
+      expect(resSoc.gapWeeks).toBe(-1);
+
+      const resJap = calculateProgressGap(studentExt, [], extMilestones, extUnits, '2026-06-01', '国語');
+      expect(resJap.gapWeeks).toBe(-1);
+
+      const resMus = calculateProgressGap(studentExt, [], extMilestones, extUnits, '2026-06-01', '音楽');
+      expect(resMus.gapWeeks).toBe(-1);
     });
 
     it('should fallback target_sequence_order to 0 if null or undefined', () => {
@@ -499,6 +531,33 @@ describe('Scheduler and Core Logic Tests', () => {
         curriculumUnits
       );
       expect(resSunday.isPunked).toBeDefined();
+    });
+
+    // rescheduleFutureUncompletedTasks の挙動とエッジケースの検証
+    describe('rescheduleFutureUncompletedTasks', () => {
+      it('should reschedule delayed uncompleted tasks and handle edge cases', () => {
+        const studentId = 'std-test';
+        
+        // 1. uncompletedTasks が空の場合 (早期リターン)
+        const resEmpty = rescheduleFutureUncompletedTasks(studentId, [], [], '2026-06-20', ['2026-06-21']);
+        expect(resEmpty).toEqual([]);
+
+        // 2. 未来の目標予定日 (validDates) がない場合 (過去日のみ)
+        const mockTasksPast: LearningTask[] = [
+          { id: 't-1', student_id: studentId, unit_id: 'u-1', scheduled_date: '2026-06-18', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' }
+        ];
+        const resPastOnly = rescheduleFutureUncompletedTasks(studentId, mockTasksPast, [], '2026-06-20', ['2026-06-15']);
+        expect(resPastOnly.length).toBe(1);
+        expect(resPastOnly[0].scheduled_date).toBe('2026-06-18'); // 変更されない
+
+        // 3. ユニット定義が見つからない場合のガードパスの検証 (!unitA || !unitB)
+        const mockTasksUnknown: LearningTask[] = [
+          { id: 't-unk1', student_id: studentId, unit_id: 'u-unknown-1', scheduled_date: '2026-06-18', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-unk2', student_id: studentId, unit_id: 'u-unknown-2', scheduled_date: '2026-06-18', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' }
+        ];
+        const resGuard = rescheduleFutureUncompletedTasks(studentId, mockTasksUnknown, [], '2026-06-20', ['2026-06-21', '2026-06-22']);
+        expect(resGuard.length).toBe(2);
+      });
     });
   });
 });
