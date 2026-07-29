@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styles from './TeacherDashboard.module.css';
+import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 import { 
   db, 
   Student, 
@@ -39,9 +40,10 @@ import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../li
 interface TeacherDashboardProps {
   onBackToPortal: () => void;
   theme?: 'light' | 'dark';
+  teacherType?: 'elementary' | 'junior_high' | 'high_school';
 }
 
-export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: TeacherDashboardProps) {
+export default function TeacherDashboard({ onBackToPortal, theme = 'light', teacherType }: TeacherDashboardProps) {
   // State
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -76,12 +78,34 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   // 検索フィルター用のState
   const [filterSchoolId, setFilterSchoolId] = useState<string>('');
   const [filterGrade, setFilterGrade] = useState<string>('');
-  const [filterCategory, setFilterCategory] = useState<'all' | 'junior_high' | 'elementary'>('all');
+  const [filterCategory, setFilterCategory] = useState<'all' | 'junior_high' | 'elementary' | 'high_school'>(() => {
+    if (teacherType === 'elementary') return 'elementary';
+    if (teacherType === 'junior_high') return 'junior_high';
+    if (teacherType === 'high_school') return 'high_school';
+    return 'all';
+  });
   const [filterName, setFilterName] = useState<string>('');
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
-  const [newStudentGrade, setNewStudentGrade] = useState('中1');
+  const [newStudentGrade, setNewStudentGrade] = useState(() => {
+    if (teacherType === 'elementary') return '小1';
+    if (teacherType === 'high_school') return '高1';
+    return '中1';
+  });
+
+  useEffect(() => {
+    if (teacherType === 'elementary') {
+      setFilterCategory('elementary');
+      setNewStudentGrade('小1');
+    } else if (teacherType === 'junior_high') {
+      setFilterCategory('junior_high');
+      setNewStudentGrade('中1');
+    } else if (teacherType === 'high_school') {
+      setFilterCategory('high_school');
+      setNewStudentGrade('高1');
+    }
+  }, [teacherType]);
   const [newStudentSchoolId, setNewStudentSchoolId] = useState('');
   const [newCustomSchoolName, setNewCustomSchoolName] = useState('');
   const [newUnitName, setNewUnitName] = useState('');
@@ -121,8 +145,20 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
   // 宿題・テスト用の State
   const [todayTests, setTodayTests] = useState<{ id: string; content: string; passingLine?: string; targetScope?: string }[]>([]);
   const [todayHomeworks, setTodayHomeworks] = useState<{ id: string; content: string; deadline: string; targetScope?: string }[]>([]);
+  const [miniTestSearchQuery, setMiniTestSearchQuery] = useState('');
+  const [homeworkSearchQuery, setHomeworkSearchQuery] = useState('');
   const [showApiKeySetting, setShowApiKeySetting] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
+
+  // 小テスト管理用フィルター・ソート State
+  const [miniTestGradeFilter, setMiniTestGradeFilter] = useState('all');
+  const [miniTestSubjectFilter, setMiniTestSubjectFilter] = useState('all');
+  const [miniTestSortOrder, setMiniTestSortOrder] = useState<'date_desc' | 'date_asc' | 'name_asc' | 'unsubmitted_first' | 'passed_first'>('date_desc');
+
+  // 宿題管理用フィルター・ソート State
+  const [homeworkGradeFilter, setHomeworkGradeFilter] = useState('all');
+  const [homeworkSubjectFilter, setHomeworkSubjectFilter] = useState('all');
+  const [homeworkSortOrder, setHomeworkSortOrder] = useState<'date_desc' | 'date_asc' | 'name_asc' | 'unsubmitted_first' | 'completed_first'>('date_desc');
 
   // 小テスト結果リスト
   const [miniTestResultsList, setMiniTestResultsList] = useState<MiniTestResult[]>([]);
@@ -253,6 +289,9 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
           start_unit_science: (freshSt as any).start_unit_science || null,
           start_unit_social: (freshSt as any).start_unit_social || null,
           start_unit_japanese: (freshSt as any).start_unit_japanese || null,
+          weekly_sessions_count: (freshSt as any).weekly_sessions_count || '2回',
+          weekly_duration_minutes: (freshSt as any).weekly_duration_minutes || '120分',
+          period_count: freshSt.period_count || 2
         });
 
         const allTasks = db.getLearningTasks();
@@ -1925,11 +1964,18 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       className={styles.select}
                     >
                       <option value="">すべて</option>
+                      <option value="小1">小学1年生</option>
+                      <option value="小2">小学2年生</option>
+                      <option value="小3">小学3年生</option>
+                      <option value="小4">小学4年生</option>
                       <option value="小5">小学5年生</option>
                       <option value="小6">小学6年生</option>
                       <option value="中1">中学1年生</option>
                       <option value="中2">中学2年生</option>
                       <option value="中3">中学3年生</option>
+                      <option value="高1">高校1年生</option>
+                      <option value="高2">高校2年生</option>
+                      <option value="高3">高校3年生</option>
                     </select>
                   </div>
 
@@ -1945,6 +1991,13 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       </button>
                       <button
                         type="button"
+                        className={`${styles.segmentBtn} ${filterCategory === 'elementary' ? styles.segmentBtnActive : ''}`}
+                        onClick={() => setFilterCategory('elementary')}
+                      >
+                        小学生
+                      </button>
+                      <button
+                        type="button"
                         className={`${styles.segmentBtn} ${filterCategory === 'junior_high' ? styles.segmentBtnActive : ''}`}
                         onClick={() => setFilterCategory('junior_high')}
                       >
@@ -1952,10 +2005,10 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                       </button>
                       <button
                         type="button"
-                        className={`${styles.segmentBtn} ${filterCategory === 'elementary' ? styles.segmentBtnActive : ''}`}
-                        onClick={() => setFilterCategory('elementary')}
+                        className={`${styles.segmentBtn} ${filterCategory === 'high_school' ? styles.segmentBtnActive : ''}`}
+                        onClick={() => setFilterCategory('high_school')}
                       >
-                        小学生
+                        高校生
                       </button>
                     </div>
                   </div>
@@ -1982,8 +2035,13 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                     if (filterGrade && st.grade !== filterGrade) return false;
                     
                     const school = schools.find(s => s.id === st.school_id);
-                    if (filterCategory === 'junior_high' && (!school || school.type !== 'junior_high')) return false;
-                    if (filterCategory === 'elementary' && (!school || school.type !== 'elementary')) return false;
+                    const isElem = st.grade.startsWith('小') || st.grade === '園児' || school?.type === 'elementary';
+                    const isJhs = st.grade.startsWith('中') || school?.type === 'junior_high';
+                    const isHigh = st.grade.startsWith('高') || st.grade === '既卒' || school?.type === 'high_school';
+
+                    if (filterCategory === 'elementary' && !isElem) return false;
+                    if (filterCategory === 'junior_high' && !isJhs) return false;
+                    if (filterCategory === 'high_school' && !isHigh) return false;
                     
                     if (filterName && !st.name.includes(filterName)) return false;
                     return true;
@@ -2205,7 +2263,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                   <div className={styles.schedulerGrid}>
                     <div>
                       <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>コマ割り設定 (標準2コマ / 最大10コマ)</h4>
-                      <div style={{ marginBottom: '12px' }}>
+                      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
                         <input 
                           type="date" 
@@ -2214,6 +2272,32 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                           className={styles.input}
                           style={{ width: 'auto', display: 'inline-block' }}
                         />
+                        {scheduleDate && (() => {
+                          const d = new Date(scheduleDate);
+                          if (isNaN(d.getTime())) return null;
+                          const month = d.getMonth() + 1;
+                          const date = d.getDate();
+                          const days = ['日', '月', '火', '水', '木', '金', '土'];
+                          const dayOfWeek = days[d.getDay()];
+                          const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+                          const weekNum = Math.ceil((date + firstDay.getDay()) / 7);
+                          return (
+                            <span 
+                              data-testid="japanese-date-badge"
+                              style={{ 
+                                padding: '4px 10px', 
+                                background: '#e0e7ff', 
+                                color: '#3730a3', 
+                                borderRadius: '6px', 
+                                fontWeight: 600, 
+                                fontSize: '0.82rem',
+                                border: '1px solid #c7d2fe'
+                              }}
+                            >
+                              📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
+                            </span>
+                          );
+                        })()}
                       </div>
                       
                       <div className={styles.timetableSetup}>
@@ -2621,6 +2705,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         {editingUnitId === unit.id && (
                           <div style={{ display: 'flex', gap: '8px', marginTop: '4px', padding: '8px', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
                             <input 
+                              id="edit-unit-name-input"
                               type="text"
                               value={editingUnitName}
                               onChange={e => setEditingUnitName(e.target.value)}
@@ -2693,13 +2778,138 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
               {/* Tab: 小テスト結果 */}
               {activeTab === 'mini-tests' && (
                 <div className={styles.card}>
-                  <div className={styles.cardTitle}>
-                    小テスト結果管理
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+                    <div className={styles.cardTitle} style={{ margin: 0 }}>
+                      小テスト結果管理
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      {/* 学年選択フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="minitest-grade-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>学年:</label>
+                        <select
+                          id="minitest-grade-filter"
+                          value={miniTestGradeFilter}
+                          onChange={e => setMiniTestGradeFilter(e.target.value)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="all">すべての学年</option>
+                          <option value="小学生">小学生全員</option>
+                          <option value="中学生">中学生全員</option>
+                          <option value="高校生">高校生全員</option>
+                          {GRADES.map(g => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 教科選択フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="minitest-subject-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>教科:</label>
+                        <select
+                          id="minitest-subject-filter"
+                          value={miniTestSubjectFilter}
+                          onChange={e => setMiniTestSubjectFilter(e.target.value)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="all">すべての教科</option>
+                          <option value="数学">算数・数学</option>
+                          <option value="英語">英語</option>
+                          <option value="理科">理科</option>
+                          <option value="社会">社会</option>
+                          <option value="国語">国語</option>
+                        </select>
+                      </div>
+
+                      {/* 並び順フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="minitest-sort-order" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>並び順:</label>
+                        <select
+                          id="minitest-sort-order"
+                          value={miniTestSortOrder}
+                          onChange={e => setMiniTestSortOrder(e.target.value as any)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="date_desc">日付 (新しい順)</option>
+                          <option value="date_asc">日付 (古い順)</option>
+                          <option value="name_asc">生徒名 (あいうえお順)</option>
+                          <option value="unsubmitted_first">未入力・不合格優先</option>
+                          <option value="passed_first">合格優先</option>
+                        </select>
+                      </div>
+
+                      {/* キーワード検索窓 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <label htmlFor="minitest-search" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>検索:</label>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <input
+                            id="minitest-search"
+                            type="text"
+                            placeholder="題名・生徒名・単元で検索..."
+                            value={miniTestSearchQuery}
+                            onChange={e => setMiniTestSearchQuery(e.target.value)}
+                            className={styles.input}
+                            style={{ fontSize: '0.8rem', padding: '4px 24px 4px 10px', width: '180px' }}
+                          />
+                          {miniTestSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setMiniTestSearchQuery('')}
+                              style={{
+                                position: 'absolute',
+                                right: '6px',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#94a3b8',
+                                fontSize: '0.85rem',
+                                padding: '0 2px'
+                              }}
+                              title="検索をクリア"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   
-                  {miniTestResultsList.length === 0 ? (
+                  {miniTestResultsList
+                    .filter(r => {
+                      const student = students.find(s => s.id === r.student_id);
+
+                      // 学年フィルター
+                      if (miniTestGradeFilter !== 'all') {
+                        if (!student) return false;
+                        if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
+                        if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
+                        if (miniTestGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                        if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
+                      }
+
+                      // 教科フィルター
+                      if (miniTestSubjectFilter !== 'all') {
+                        const targetSub = miniTestSubjectFilter;
+                        const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.test_content && r.test_content.includes(targetSub));
+                        if (!matchSubject) return false;
+                      }
+
+                      // 検索クエリ
+                      if (!miniTestSearchQuery.trim()) return true;
+                      const query = miniTestSearchQuery.toLowerCase().trim();
+                      return (
+                        (r.test_content && r.test_content.toLowerCase().includes(query)) ||
+                        (r.subject && r.subject.toLowerCase().includes(query)) ||
+                        (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
+                        (student && student.name.toLowerCase().includes(query))
+                      );
+                    }).length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
-                      記録された小テスト結果はありません。
+                      {miniTestSearchQuery || miniTestGradeFilter !== 'all' || miniTestSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された小テスト結果はありません。'}
                     </div>
                   ) : (
                     <div style={{ overflowX: 'auto' }}>
@@ -2717,7 +2927,63 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         </thead>
                         <tbody>
                           {miniTestResultsList
-                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                            .filter(r => {
+                              const student = students.find(s => s.id === r.student_id);
+
+                              // 学年フィルター
+                              if (miniTestGradeFilter !== 'all') {
+                                if (!student) return false;
+                                if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
+                                if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
+                                if (miniTestGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                                if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
+                              }
+
+                              // 教科フィルター
+                              if (miniTestSubjectFilter !== 'all') {
+                                const targetSub = miniTestSubjectFilter;
+                                const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.test_content && r.test_content.includes(targetSub));
+                                if (!matchSubject) return false;
+                              }
+
+                              // 検索クエリ
+                              if (!miniTestSearchQuery.trim()) return true;
+                              const query = miniTestSearchQuery.toLowerCase().trim();
+                              return (
+                                (r.test_content && r.test_content.toLowerCase().includes(query)) ||
+                                (r.subject && r.subject.toLowerCase().includes(query)) ||
+                                (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
+                                (student && student.name.toLowerCase().includes(query))
+                              );
+                            })
+                            .sort((a, b) => {
+                              const studentA = students.find(s => s.id === a.student_id);
+                              const studentB = students.find(s => s.id === b.student_id);
+
+                              if (miniTestSortOrder === 'date_asc') {
+                                return new Date(a.date).getTime() - new Date(b.date).getTime();
+                              }
+                              if (miniTestSortOrder === 'name_asc') {
+                                const nameA = studentA?.name_kana || studentA?.name || '';
+                                const nameB = studentB?.name_kana || studentB?.name || '';
+                                return nameA.localeCompare(nameB, 'ja');
+                              }
+                              if (miniTestSortOrder === 'unsubmitted_first') {
+                                const isUnsubmittedA = r => (r.score === null || r.score === undefined) && !tempScores[r.id];
+                                const scoreAUnset = isUnsubmittedA(a);
+                                const scoreBUnset = isUnsubmittedA(b);
+                                if (scoreAUnset && !scoreBUnset) return -1;
+                                if (!scoreAUnset && scoreBUnset) return 1;
+                              }
+                              if (miniTestSortOrder === 'passed_first') {
+                                const statusA = tempPassedStatuses[a.id] || (a.score !== null && a.score >= 70 ? 'passed' : 'failed');
+                                const statusB = tempPassedStatuses[b.id] || (b.score !== null && b.score >= 70 ? 'passed' : 'failed');
+                                if (statusA === 'passed' && statusB !== 'passed') return -1;
+                                if (statusA !== 'passed' && statusB === 'passed') return 1;
+                              }
+                              // デフォルト: 日付新しい順
+                              return new Date(b.date).getTime() - new Date(a.date).getTime();
+                            })
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id);
                               const stLevel = student?.level || 'A';
@@ -2813,13 +3079,138 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
               {/* Tab: 宿題提出状況 */}
               {activeTab === 'homeworks' && (
                 <div className={styles.card}>
-                  <div className={styles.cardTitle}>
-                    宿題提出状況管理
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+                    <div className={styles.cardTitle} style={{ margin: 0 }}>
+                      宿題提出状況管理
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      {/* 学年選択フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="homework-grade-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>学年:</label>
+                        <select
+                          id="homework-grade-filter"
+                          value={homeworkGradeFilter}
+                          onChange={e => setHomeworkGradeFilter(e.target.value)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="all">すべての学年</option>
+                          <option value="小学生">小学生全員</option>
+                          <option value="中学生">中学生全員</option>
+                          <option value="高校生">高校生全員</option>
+                          {GRADES.map(g => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 教科選択フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="homework-subject-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>教科:</label>
+                        <select
+                          id="homework-subject-filter"
+                          value={homeworkSubjectFilter}
+                          onChange={e => setHomeworkSubjectFilter(e.target.value)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="all">すべての教科</option>
+                          <option value="数学">算数・数学</option>
+                          <option value="英語">英語</option>
+                          <option value="理科">理科</option>
+                          <option value="社会">社会</option>
+                          <option value="国語">国語</option>
+                        </select>
+                      </div>
+
+                      {/* 並び順フィルター */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="homework-sort-order" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>並び順:</label>
+                        <select
+                          id="homework-sort-order"
+                          value={homeworkSortOrder}
+                          onChange={e => setHomeworkSortOrder(e.target.value as any)}
+                          className={styles.select}
+                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                        >
+                          <option value="date_desc">日付 (新しい順)</option>
+                          <option value="date_asc">日付 (古い順)</option>
+                          <option value="name_asc">生徒名 (あいうえお順)</option>
+                          <option value="unsubmitted_first">未完・未提出優先</option>
+                          <option value="completed_first">提出済み優先</option>
+                        </select>
+                      </div>
+
+                      {/* キーワード検索窓 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <label htmlFor="homework-search" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>検索:</label>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <input
+                            id="homework-search"
+                            type="text"
+                            placeholder="題名・生徒名・単元で検索..."
+                            value={homeworkSearchQuery}
+                            onChange={e => setHomeworkSearchQuery(e.target.value)}
+                            className={styles.input}
+                            style={{ fontSize: '0.8rem', padding: '4px 24px 4px 10px', width: '180px' }}
+                          />
+                          {homeworkSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setHomeworkSearchQuery('')}
+                              style={{
+                                position: 'absolute',
+                                right: '6px',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#94a3b8',
+                                fontSize: '0.85rem',
+                                padding: '0 2px'
+                              }}
+                              title="検索をクリア"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   
-                  {homeworkResultsList.length === 0 ? (
+                  {homeworkResultsList
+                    .filter(r => {
+                      const student = students.find(s => s.id === r.student_id);
+
+                      // 学年フィルター
+                      if (homeworkGradeFilter !== 'all') {
+                        if (!student) return false;
+                        if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
+                        if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
+                        if (homeworkGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                        if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
+                      }
+
+                      // 教科フィルター
+                      if (homeworkSubjectFilter !== 'all') {
+                        const targetSub = homeworkSubjectFilter;
+                        const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.homework_content && r.homework_content.includes(targetSub));
+                        if (!matchSubject) return false;
+                      }
+
+                      // 検索クエリ
+                      if (!homeworkSearchQuery.trim()) return true;
+                      const query = homeworkSearchQuery.toLowerCase().trim();
+                      return (
+                        (r.homework_content && r.homework_content.toLowerCase().includes(query)) ||
+                        (r.subject && r.subject.toLowerCase().includes(query)) ||
+                        (r.homework_deadline && r.homework_deadline.toLowerCase().includes(query)) ||
+                        (student && student.name.toLowerCase().includes(query))
+                      );
+                    }).length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
-                      記録された宿題はありません。
+                      {homeworkSearchQuery || homeworkGradeFilter !== 'all' || homeworkSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された宿題はありません。'}
                     </div>
                   ) : (
                     <div style={{ overflowX: 'auto' }}>
@@ -2836,7 +3227,62 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                         </thead>
                         <tbody>
                           {homeworkResultsList
-                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                            .filter(r => {
+                              const student = students.find(s => s.id === r.student_id);
+
+                              // 学年フィルター
+                              if (homeworkGradeFilter !== 'all') {
+                                if (!student) return false;
+                                if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
+                                if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
+                                if (homeworkGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                                if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
+                              }
+
+                              // 教科フィルター
+                              if (homeworkSubjectFilter !== 'all') {
+                                const targetSub = homeworkSubjectFilter;
+                                const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.homework_content && r.homework_content.includes(targetSub));
+                                if (!matchSubject) return false;
+                              }
+
+                              // 検索クエリ
+                              if (!homeworkSearchQuery.trim()) return true;
+                              const query = homeworkSearchQuery.toLowerCase().trim();
+                              return (
+                                (r.homework_content && r.homework_content.toLowerCase().includes(query)) ||
+                                (r.subject && r.subject.toLowerCase().includes(query)) ||
+                                (r.homework_deadline && r.homework_deadline.toLowerCase().includes(query)) ||
+                                (student && student.name.toLowerCase().includes(query))
+                              );
+                            })
+                            .sort((a, b) => {
+                              const studentA = students.find(s => s.id === a.student_id);
+                              const studentB = students.find(s => s.id === b.student_id);
+
+                              if (homeworkSortOrder === 'date_asc') {
+                                return new Date(a.date).getTime() - new Date(b.date).getTime();
+                              }
+                              if (homeworkSortOrder === 'name_asc') {
+                                const nameA = studentA?.name_kana || studentA?.name || '';
+                                const nameB = studentB?.name_kana || studentB?.name || '';
+                                return nameA.localeCompare(nameB, 'ja');
+                              }
+                              if (homeworkSortOrder === 'unsubmitted_first') {
+                                const statusA = tempHomeworkStatuses[a.id] || a.status;
+                                const statusB = tempHomeworkStatuses[b.id] || b.status;
+                                if (statusA === 'incomplete' && statusB !== 'incomplete') return -1;
+                                if (statusA !== 'incomplete' && statusB === 'incomplete') return 1;
+                              }
+                              if (homeworkSortOrder === 'completed_first') {
+                                const statusA = tempHomeworkStatuses[a.id] || a.status;
+                                const statusB = tempHomeworkStatuses[b.id] || b.status;
+                                if (statusA === 'completed' && statusB !== 'completed') return -1;
+                                if (statusA !== 'completed' && statusB === 'completed') return 1;
+                              }
+                              // デフォルト: 日付新しい順
+                              return new Date(b.date).getTime() - new Date(a.date).getTime();
+                            })
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id);
                               return (
@@ -3956,6 +4402,57 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light' }: Te
                             className={styles.input}
                             placeholder="例: 18:00 - 21:00"
                           />
+                        </div>
+                      </div>
+
+                      {/* 週の回数、1回の時間、コマ数設定 */}
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '16px' }}>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>📅 通塾条件・コマ数設定</h4>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="edit-weekly-frequency">週の通塾回数</label>
+                            <select 
+                              id="edit-weekly-frequency"
+                              value={(editForm as any).weekly_sessions_count || '2回'} 
+                              onChange={e => setEditForm({ ...editForm, weekly_sessions_count: e.target.value } as any)}
+                              className={styles.select}
+                            >
+                              <option value="2回">週2回</option>
+                              <option value="3回">週3回</option>
+                              <option value="4回">週4回</option>
+                              <option value="5回">週5回</option>
+                              <option value="無制限">無制限</option>
+                            </select>
+                          </div>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="edit-weekly-duration">1回の時間</label>
+                            <select 
+                              id="edit-weekly-duration"
+                              value={(editForm as any).weekly_duration_minutes || '120分'} 
+                              onChange={e => setEditForm({ ...editForm, weekly_duration_minutes: e.target.value } as any)}
+                              className={styles.select}
+                            >
+                              <option value="60分">60分</option>
+                              <option value="90分">90分</option>
+                              <option value="120分">120分</option>
+                              <option value="180分">180分</option>
+                              <option value="240分">240分</option>
+                              <option value="無制限">無制限</option>
+                            </select>
+                          </div>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="edit-default-slots">標準コマ数</label>
+                            <select 
+                              id="edit-default-slots"
+                              value={editForm.period_count || 2} 
+                              onChange={e => setEditForm({ ...editForm, period_count: parseInt(e.target.value) || 2 })}
+                              className={styles.select}
+                            >
+                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+                                <option key={num} value={num}>{num}コマ</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
 

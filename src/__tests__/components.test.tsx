@@ -194,12 +194,6 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenCalled();
     });
 
-    // 5. Simulator reset action
-    const simResetBtn = screen.getByText('🔄 全データをリセット');
-    fireEvent.click(simResetBtn);
-    expect(reloadMock).toHaveBeenCalled();
-
-    // Restore location
     window.location = originalLocation;
   });
 
@@ -785,6 +779,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 2. Teacher login under Dark theme (covers page.tsx line 57 theme === 'dark')
     const teacherLoginCard = screen.getByText('講師・管理者');
     fireEvent.click(teacherLoginCard);
+    fireEvent.click(screen.getByText('中学生'));
     expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
 
     // Back to portal
@@ -812,6 +807,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 4b. Teacher login under Light theme (covers page.tsx line 57 theme === 'light')
     const teacherLoginCardLight = screen.getByText('講師・管理者');
     fireEvent.click(teacherLoginCardLight);
+    fireEvent.click(screen.getByText('中学生'));
     expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
     
     // Back to portal
@@ -1972,7 +1968,7 @@ describe('UI Components Render & Interaction Tests', () => {
     
     // 保存ボタンをクリック
     const saveBtn = screen.getByText('変更を保存する');
-    fireEvent.submit(saveBtn.closest('form')!);
+    fireEvent.click(saveBtn);
     
     await waitFor(() => {
       expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
@@ -1985,7 +1981,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // 学年はすでに '中1' で、期待される学年と同じになっているため、今度は学年変更なしでの保存 (db.ts 703 行目の false ブランチのカバー)
     const saveBtn2 = screen.getByText('変更を保存する');
-    fireEvent.submit(saveBtn2.closest('form')!);
+    fireEvent.click(saveBtn2);
     await waitFor(() => {
       expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
     });
@@ -1993,11 +1989,11 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // ここで、先ほど登録したテストデータがロードされていることをアサートする (3140, 3181 の true ブランチ)
     await waitFor(() => {
-      expect(screen.getByText(/定期テスト（最新）/)).toBeInTheDocument();
-      expect(screen.getByText(/80/)).toBeInTheDocument();
+      expect(screen.getAllByText(/定期テスト（最新）/)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/80/)[0]).toBeInTheDocument();
       expect(screen.getByText(/▲ 上昇/)).toBeInTheDocument();
-      expect(screen.getByText(/模試実績（最新）/)).toBeInTheDocument();
-      expect(screen.getByText(/85/)).toBeInTheDocument();
+      expect(screen.getAllByText(/模試実績（最新）/)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/85/)[0]).toBeInTheDocument();
       expect(screen.getByText(/unknown-sch/)).toBeInTheDocument();
     });
 
@@ -3130,9 +3126,13 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(saveUnitBtn);
     expect(alertMock).toHaveBeenCalledWith('単元名を入力してください。');
 
-    // 正常保存のカバー
-    fireEvent.change(editInput, { target: { value: '更新後の単元名' } });
-    fireEvent.click(saveUnitBtn);
+    // 正常保存のカバー (act で State 更新を確実に同期)
+    await act(async () => {
+      fireEvent.change(firstUnitContainer.querySelector('input')!, { target: { value: '更新後の単元名' } });
+    });
+    await act(async () => {
+      fireEvent.click(saveUnitBtn);
+    });
     expect(alertMock).toHaveBeenLastCalledWith('授業（単元）を更新しました！');
 
     // キャンセルボタンのカバー
@@ -3147,7 +3147,9 @@ describe('UI Components Render & Interaction Tests', () => {
     
     // confirm を true にして実際に削除を走らせる
     confirmSpy.mockReturnValue(true);
-    fireEvent.click(deleteUnitBtns[0]);
+    await act(async () => {
+      fireEvent.click(deleteUnitBtns[0]);
+    });
     expect(alertMock).toHaveBeenLastCalledWith('授業（単元）を削除しました。');
     confirmSpy.mockRestore();
 
@@ -3232,5 +3234,53 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenCalled();
       expect(alertMock.mock.calls[0][0]).toContain('生徒アカウントを発行しました！');
     });
+
+    // 12. TeacherDashboard.tsx: 小テスト・宿題管理画面の「キーワード検索（フリーワード入力）」、クリアボタン(✕)、および0件時メッセージの検証
+    cleanup();
+    render(<TeacherDashboard teacherType="junior_high" onBackToPortal={() => {}} />);
+
+    // 生徒を選択する
+    const studentItemTest = screen.getAllByText(/佐藤 拓海/)[0];
+    fireEvent.click(studentItemTest);
+
+    // 小テスト結果タブを開く
+    fireEvent.click(screen.getByText('小テスト結果'));
+    
+    // キーワード検索窓の存在確認と入力テスト
+    const miniSearchInput = screen.getAllByPlaceholderText('題名・生徒名・単元で検索...')[0] as HTMLInputElement;
+    expect(miniSearchInput).toBeDefined();
+
+    await act(async () => {
+      fireEvent.change(miniSearchInput, { target: { value: '存在しないテストキーワード9999' } });
+    });
+
+    // 該当なしメッセージが表示されることを確認
+    expect(screen.getByText('該当するテスト・宿題が見つかりませんでした。')).toBeInTheDocument();
+
+    // クリアボタン(✕)をクリック
+    const clearMiniBtn = screen.getAllByTitle('検索をクリア')[0];
+    await act(async () => {
+      fireEvent.click(clearMiniBtn);
+    });
+    expect(miniSearchInput.value).toBe('');
+
+    // 宿題提出状況タブを開く
+    fireEvent.click(screen.getByText('宿題提出状況'));
+
+    const hwSearchInput = screen.getAllByPlaceholderText('題名・生徒名・単元で検索...')[0] as HTMLInputElement;
+    expect(hwSearchInput).toBeDefined();
+
+    await act(async () => {
+      fireEvent.change(hwSearchInput, { target: { value: '存在しない宿題キーワード9999' } });
+    });
+
+    // 該当なしメッセージが表示されることを確認
+    expect(screen.getByText('該当するテスト・宿題が見つかりませんでした。')).toBeInTheDocument();
+
+    const clearHwBtn = screen.getAllByTitle('検索をクリア')[0];
+    await act(async () => {
+      fireEvent.click(clearHwBtn);
+    });
+    expect(hwSearchInput.value).toBe('');
   });
 });

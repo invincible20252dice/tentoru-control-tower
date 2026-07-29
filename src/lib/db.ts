@@ -41,6 +41,22 @@ export interface Student {
   start_unit_science?: string | null;
   start_unit_social?: string | null;
   start_unit_japanese?: string | null;
+  start_unit_basic_english?: string | null;
+  start_unit_basic_kanji?: string | null;
+  start_unit_basic_calculation?: string | null;
+  weekly_sessions_count?: string | null;
+  weekly_duration_minutes?: string | null;
+  selected_days?: string[];
+  default_slots?: number;
+}
+
+export interface StudentScheduleConfig {
+  student_id: string;
+  weekly_frequency: string; // '2', '3', '4', '5', 'unlimited', etc.
+  weekly_duration: string;  // '60min', '90min', '120min', '180min', '240min', 'unlimited', etc.
+  selected_days: string[];  // e.g. ['tuesday', 'friday'] or ['火', '金']
+  default_slots: number;    // コマ数初期値
+  updated_at?: string;
 }
 
 export interface StudentInteraction {
@@ -214,6 +230,7 @@ export interface MiniTestResult {
   id: string;
   student_id: string;
   date: string; // YYYY-MM-DD
+  subject?: string; // 教科 (算数, 数学, 英語, etc.)
   test_content: string; // 自由記述テスト内容
   score: number | null; // 結果点数
   passed?: boolean | null; // 合格したかどうか
@@ -226,6 +243,7 @@ export interface HomeworkResult {
   id: string;
   student_id: string;
   date: string; // YYYY-MM-DD
+  subject?: string; // 教科 (算数, 数学, 英語, etc.)
   homework_content: string;
   homework_deadline: string; // YYYY-MM-DD
   status: 'incomplete' | 'completed' | 'skipped';
@@ -236,6 +254,12 @@ export interface HomeworkResult {
 export interface CustomClass {
   id: string;
   name: string;
+  created_at: string;
+}
+
+export interface CustomApplyScope {
+  id: string;
+  label: string;
   created_at: string;
 }
 
@@ -296,6 +320,11 @@ class DatabaseService {
       { id: 'cc-2', name: '単元面談', created_at: new Date().toISOString() }
     ];
     return this.getMockData('custom_classes', seed);
+  }
+
+  public getCustomApplyScopes(): CustomApplyScope[] {
+    const seed: CustomApplyScope[] = [];
+    return this.getMockData('custom_apply_scopes', seed);
   }
 
   // Seed Data Initializers
@@ -456,6 +485,118 @@ class DatabaseService {
       });
     });
 
+    // 添付画像に基づく英語・理科・社会の単元マスター定義
+    const imgEnglishUnits = [
+      '1 I am〜 You are〜の文',
+      '2 This(That) is〜の文',
+      '3 He(She) is 〜〜の文',
+      '4 一般動詞',
+      '5 What〜の文',
+      '6 形容詞',
+      '7 複数',
+      '8 命令文',
+      '9 三人称単数',
+      '10 疑問詞を用いた疑問文',
+      '11 現在進行形',
+      '12 〜できる（can）',
+      '13 過去形（規則動詞）',
+      '14 過去形（不規則動詞）'
+    ];
+
+    const imgScienceUnits = [
+      '1章1節身近な生物の観察',
+      '1章2節花のおつくりとはたらき',
+      '1章3節植物のなかま分け',
+      '1章4節動物のなかま',
+      '1章 生物分野補足',
+      '2章0節器具の基本操作を覚えよう',
+      '2章1節いろいろな物質',
+      '2章2節気体の発生と性質',
+      '2章3節物質の状態変化',
+      '2章4節水溶液',
+      '3章1節光の性質',
+      '3章2節音の性質',
+      '3章3節 力のはたらき',
+      '4章1節火山',
+      '4章2節地震',
+      '4章3節地層',
+      '4章4節大地の変動'
+    ];
+
+    const imgSocialUnits = [
+      '第1章 古代までの日本',
+      '第2章 中世の日本',
+      '第3章 近世の日本'
+    ];
+
+    imgEnglishUnits.forEach((name, index) => {
+      seed.push({
+        id: `unit-img-eng-${index + 1}`,
+        school_id: 'sch-1',
+        subject: '英語',
+        name,
+        sequence_order: 100 + index + 1,
+        created_at: new Date().toISOString()
+      });
+    });
+
+    imgScienceUnits.forEach((name, index) => {
+      seed.push({
+        id: `unit-img-sci-${index + 1}`,
+        school_id: 'sch-1',
+        subject: '理科',
+        name,
+        sequence_order: 100 + index + 1,
+        created_at: new Date().toISOString()
+      });
+    });
+
+    const imgMathUnits = [
+      '1章 正の数・負の数',
+      '2章 文字の式',
+      '3章 方程式',
+      '4章 変化の割合',
+      '5章 平面図形',
+      '6章 空間図形',
+      '7章 データの活用',
+      '1章式の計算',
+      '2章連立方程式',
+      '3章一次関数',
+      '4章図形の調べ方',
+      '5章図形の性質と証明',
+      '6章確率',
+      '1章式の展開と因数分解',
+      '2章平方根',
+      '3章二次方程式',
+      '4章二次関数',
+      '5章図形と相似',
+      '6章円の性質',
+      '7章三平方の定理',
+      '8章標本調査'
+    ];
+
+    imgMathUnits.forEach((name, index) => {
+      seed.push({
+        id: `unit-img-math-${index + 1}`,
+        school_id: 'sch-1',
+        subject: '数学',
+        name,
+        sequence_order: 100 + index + 1,
+        created_at: new Date().toISOString()
+      });
+    });
+
+    imgSocialUnits.forEach((name, index) => {
+      seed.push({
+        id: `unit-img-soc-${index + 1}`,
+        school_id: 'sch-1',
+        subject: '社会',
+        name,
+        sequence_order: 100 + index + 1,
+        created_at: new Date().toISOString()
+      });
+    });
+
     // sch-2: テントル小学校 (算数)
     const elemThemes = [
       // unit-301 (整数と小数)
@@ -490,6 +631,60 @@ class DatabaseService {
       });
     });
 
+    // 基礎テスト（英語）
+    const basicEnglishTests = [
+      { id: 'unit-be-1', name: '基礎テスト（英単語1-50）', order: 1 },
+      { id: 'unit-be-2', name: '基礎テスト（英単語51-100）', order: 2 },
+      { id: 'unit-be-3', name: '基礎テスト（中1基本文）', order: 3 }
+    ];
+    basicEnglishTests.forEach(unit => {
+      seed.push({
+        id: unit.id,
+        school_id: 'sch-1',
+        subject: '基礎テスト（英語）',
+        name: unit.name,
+        sequence_order: unit.order,
+        google_drive_url: '',
+        created_at: new Date().toISOString()
+      });
+    });
+
+    // 基礎テスト（漢字）
+    const basicKanjiTests = [
+      { id: 'unit-bk-1', name: '基礎テスト（漢字1級-5級）', order: 1 },
+      { id: 'unit-bk-2', name: '基礎テスト（漢字同音異義語）', order: 2 },
+      { id: 'unit-bk-3', name: '基礎テスト（四字熟語）', order: 3 }
+    ];
+    basicKanjiTests.forEach(unit => {
+      seed.push({
+        id: unit.id,
+        school_id: 'sch-1',
+        subject: '基礎テスト（漢字）',
+        name: unit.name,
+        sequence_order: unit.order,
+        google_drive_url: '',
+        created_at: new Date().toISOString()
+      });
+    });
+
+    // 基礎テスト（計算）
+    const basicCalcTests = [
+      { id: 'unit-bc-1', name: '基礎テスト（正負の数四則）', order: 1 },
+      { id: 'unit-bc-2', name: '基礎テスト（文字式計算）', order: 2 },
+      { id: 'unit-bc-3', name: '基礎テスト（一次方程式計算）', order: 3 }
+    ];
+    basicCalcTests.forEach(unit => {
+      seed.push({
+        id: unit.id,
+        school_id: 'sch-1',
+        subject: '基礎テスト（計算）',
+        name: unit.name,
+        sequence_order: unit.order,
+        google_drive_url: '',
+        created_at: new Date().toISOString()
+      });
+    });
+
     return this.getMockData('curriculum_units', seed);
   }
 
@@ -519,7 +714,9 @@ class DatabaseService {
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
         registered_grade: '中3',
-        registered_year: 2026
+        registered_year: 2026,
+        weekly_sessions_count: '2回',
+        weekly_duration_minutes: '120分'
       },
       {
         id: 'std-2',
@@ -545,7 +742,9 @@ class DatabaseService {
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
         registered_grade: '小5',
-        registered_year: 2025
+        registered_year: 2025,
+        weekly_sessions_count: '3回',
+        weekly_duration_minutes: '90分'
       }
     ];
     const rawList = this.getMockData('students', seed);
@@ -814,6 +1013,33 @@ class DatabaseService {
       const list = this.getCustomClasses();
       const filtered = list.filter(c => c.id !== id);
       this.saveMockData('custom_classes', filtered);
+    }
+  }
+
+  // CustomApplyScopes CRUD
+  public async saveCustomApplyScope(customScope: CustomApplyScope): Promise<CustomApplyScope> {
+    if (!this.isMockMode && this.supabase) {
+      const { data, error } = await this.supabase.from('custom_apply_scopes').upsert(customScope).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getCustomApplyScopes();
+      const idx = list.findIndex(c => c.id === customScope.id);
+      if (idx >= 0) list[idx] = customScope;
+      else list.push(customScope);
+      this.saveMockData('custom_apply_scopes', list);
+      return customScope;
+    }
+  }
+
+  public async deleteCustomApplyScope(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('custom_apply_scopes').delete().eq('id', id);
+      if (error) throw error;
+    } else {
+      const list = this.getCustomApplyScopes();
+      const filtered = list.filter(c => c.id !== id);
+      this.saveMockData('custom_apply_scopes', filtered);
     }
   }
 
@@ -1533,6 +1759,122 @@ class DatabaseService {
         this.saveMockData('personality_options', list);
       }
       return name;
+    }
+  }
+
+  // 16. TeacherOptions CRUD
+  public getTeacherOptions(): string[] {
+    const seed = [
+      '福田 尚弘',
+      '鈴木 健太郎',
+      '佐藤 舞'
+    ];
+    return this.getMockData<string>('teacher_options', seed);
+  }
+
+  public async addTeacherOption(name: string): Promise<string> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('teacher_options').insert({ name });
+      if (error && error.code !== '23505') throw error;
+      return name;
+    } else {
+      const list = this.getTeacherOptions();
+      if (!list.includes(name)) {
+        list.push(name);
+        this.saveMockData('teacher_options', list);
+      }
+      return name;
+    }
+  }
+
+  public async removeTeacherOption(name: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('teacher_options').delete().eq('name', name);
+      if (error) throw error;
+    } else {
+      let list = this.getTeacherOptions();
+      list = list.filter(item => item !== name);
+      this.saveMockData('teacher_options', list);
+    }
+  }
+
+  public async updateTeacherOption(oldName: string, newName: string): Promise<string> {
+    if (!oldName || !newName || oldName === newName) return oldName;
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('teacher_options').update({ name: newName }).eq('name', oldName);
+      if (error) throw error;
+      return newName;
+    } else {
+      let list = this.getTeacherOptions();
+      const idx = list.indexOf(oldName);
+      if (idx !== -1) {
+        list[idx] = newName;
+        this.saveMockData('teacher_options', list);
+      }
+      return newName;
+    }
+  }
+
+  public getStudentScheduleConfig(studentId: string): StudentScheduleConfig {
+    const configs = this.getMockData<StudentScheduleConfig>('student_schedule_configs', []);
+    const found = configs.find(c => c.student_id === studentId);
+    if (found) return found;
+
+    const student = this.getStudents().find(s => s.id === studentId);
+    const weekly_frequency = student?.weekly_sessions_count || '2回';
+    const weekly_duration = student?.weekly_duration_minutes || '120分';
+    const selected_days = student?.selected_days || ['tuesday', 'friday'];
+    const default_slots = student?.default_slots || 2;
+
+    return {
+      student_id: studentId,
+      weekly_frequency,
+      weekly_duration,
+      selected_days,
+      default_slots,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  public async saveStudentScheduleConfig(config: StudentScheduleConfig): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase
+          .from('student_settings')
+          .upsert({
+            student_id: config.student_id,
+            weekly_frequency: config.weekly_frequency,
+            weekly_duration: config.weekly_duration,
+            selected_days: config.selected_days,
+            default_slots: config.default_slots,
+            updated_at: new Date().toISOString(),
+          });
+        if (error) console.error('Supabase saveStudentScheduleConfig error:', error);
+      } catch (err) {
+        console.error('saveStudentScheduleConfig exception:', err);
+      }
+    }
+
+    const configs = this.getMockData<StudentScheduleConfig>('student_schedule_configs', []);
+    const idx = configs.findIndex(c => c.student_id === config.student_id);
+    if (idx !== -1) {
+      configs[idx] = { ...config, updated_at: new Date().toISOString() };
+    } else {
+      configs.push({ ...config, updated_at: new Date().toISOString() });
+    }
+    this.saveMockData('student_schedule_configs', configs);
+
+    const students = this.getStudents();
+    const stIdx = students.findIndex(s => s.id === config.student_id);
+    if (stIdx !== -1) {
+      students[stIdx] = {
+        ...students[stIdx],
+        weekly_sessions_count: config.weekly_frequency,
+        weekly_duration_minutes: config.weekly_duration,
+        selected_days: config.selected_days,
+        default_slots: config.default_slots,
+      };
+      this.saveMockData('students', students);
     }
   }
 }

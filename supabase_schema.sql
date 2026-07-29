@@ -280,3 +280,7 @@ ALTER TABLE homework_results ADD COLUMN IF NOT EXISTS target_scope TEXT NOT NULL
 
 -- 23. 小テスト結果テーブルへ合格フラグ passed カラムを追加
 ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS passed BOOLEAN;
+
+-- 24. studentsテーブルへ週の授業回数、授業時間カラムを追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS weekly_sessions_count TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS weekly_duration_minutes TEXT;

@@ -11,6 +11,8 @@ export default function Home() {
   const [studentsList, setStudentsList] = useState<Student[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [showTeacherTypeSelector, setShowTeacherTypeSelector] = useState(false);
+  const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>('junior_high');
 
   // Load students for selector
   useEffect(() => {
@@ -37,15 +39,12 @@ export default function Home() {
     }
   };
 
-  // 講師ビューに入る
-  const handleTeacherLogin = () => {
-    setCurrentView('teacher');
-  };
 
   // ポータルに戻る
   const handleBackToPortal = () => {
     setCurrentView('portal');
     setSelectedStudentId('');
+    setShowTeacherTypeSelector(false);
   };
 
   const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
@@ -55,7 +54,7 @@ export default function Home() {
   if (currentView === 'teacher') {
     return (
       <div className={theme === 'dark' ? 'dark-mode' : ''} style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
-        <TeacherDashboard onBackToPortal={handleBackToPortal} theme={theme} />
+        <TeacherDashboard onBackToPortal={handleBackToPortal} theme={theme} teacherType={teacherType} />
       </div>
     );
   }
@@ -107,18 +106,57 @@ export default function Home() {
 
         <div className={styles.rolesGrid}>
           {/* Teacher login option */}
-          <div className={styles.roleCard} onClick={handleTeacherLogin}>
-            <div className={styles.roleIcon}>
-              {/* Teacher/Clipboard Icon */}
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-              </svg>
-            </div>
-            <div className={styles.roleTitle}>講師・管理者</div>
-            <div className={styles.roleDesc}>
-              生徒のアカウント発行、学習計画（時間割・スタート位置）調整、カリキュラム順序変更、模試判定、AI指導報告書の作成を行います。
-            </div>
+          <div className={styles.roleCard} style={{ minHeight: '260px', cursor: showTeacherTypeSelector ? 'default' : 'pointer' }}>
+            {!showTeacherTypeSelector ? (
+              <div onClick={() => setShowTeacherTypeSelector(true)} style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div className={styles.roleIcon}>
+                  {/* Teacher/Clipboard Icon */}
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                  </svg>
+                </div>
+                <div className={styles.roleTitle}>講師・管理者</div>
+                <div className={styles.roleDesc}>
+                  生徒のアカウント発行、学習計画（時間割・スタート位置）調整、カリキュラム順序変更、模試判定、AI指導報告書の作成を行います。
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between', width: '100%', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--primary)' }}>対象の学年区分を選択</span>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowTeacherTypeSelector(false); }} 
+                    style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.8rem', padding: '4px' }}
+                  >
+                    戻る
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                  <button 
+                    onClick={() => { setTeacherType('elementary'); setCurrentView('teacher'); }} 
+                    style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
+                    id="teacher-select-elementary"
+                  >
+                    小学生
+                  </button>
+                  <button 
+                    onClick={() => { setTeacherType('junior_high'); setCurrentView('teacher'); }} 
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
+                    id="teacher-select-junior-high"
+                  >
+                    中学生
+                  </button>
+                  <button 
+                    onClick={() => { setTeacherType('high_school'); setCurrentView('teacher'); }} 
+                    style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
+                    id="teacher-select-high-school"
+                  >
+                    高校生
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Student login option */}

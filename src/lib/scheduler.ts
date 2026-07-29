@@ -4,6 +4,37 @@ export const schedulerConfig = {
   maxDailyTasksDefault: 3,
 };
 
+/**
+ * 学年区分と通塾時間から「標準コマ数」を自動算出するユーティリティ関数
+ * @param gradeType 'elementary' (小学生) または 'junior_high' (中学生/高校生)
+ * @param weeklyDuration 通塾時間 ('60min', '90min', '120min', '180min', '240min', 'unlimited', '120' など)
+ * @returns コマ数 (2〜10)
+ */
+export function calculateDefaultSlots(
+  gradeType: 'elementary' | 'junior_high' | string,
+  weeklyDuration: string
+): number {
+  if (gradeType === 'elementary') {
+    return 2;
+  }
+
+  const durationStr = (weeklyDuration || '').toLowerCase().replace('min', '').trim();
+  if (durationStr === '120') return 2;
+  if (durationStr === '180') return 3;
+  if (durationStr === '240') return 4;
+  if (durationStr === 'unlimited' || durationStr === '無制限') return 5;
+
+  const numDuration = parseInt(durationStr, 10);
+  if (!isNaN(numDuration)) {
+    if (numDuration <= 120) return 2;
+    if (numDuration <= 180) return 3;
+    if (numDuration <= 240) return 4;
+    return Math.min(10, Math.max(2, Math.round(numDuration / 60)));
+  }
+
+  return 2;
+}
+
 // -------------------------------------------------------------
 // 0. 日付・進捗ギャップユーティリティ
 // -------------------------------------------------------------

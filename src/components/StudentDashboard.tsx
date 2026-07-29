@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
-import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult, HomeworkResult } from '../lib/db';
+import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
 import SugorokuMap from './SugorokuMap';
+import { TestScoreRadarChart } from './TestScoreRadarChart';
+import { WeeklyScheduleViewer } from './WeeklyScheduleViewer';
+import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 
 interface StudentDashboardProps {
   student: Student;
@@ -13,14 +16,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [tasks, setTasks] = useState<LearningTask[]>([]);
   const [units, setUnits] = useState<CurriculumUnit[]>([]);
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>([]);
+  const [showScheduleConfig, setShowScheduleConfig] = useState(false);
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-06-19'); // デモ用初期日付
   const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>([]);
   const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>([]);
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
+  const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(undefined);
 
   const loadData = () => {
     const allTasks = db.getLearningTasks();
     const allUnits = db.getCurriculumUnits();
+    const config = db.getStudentScheduleConfig(student.id);
+    setScheduleConfig(config);
     
     // 生徒のタスク
     const studentTasks = allTasks.filter(t => t.student_id === student.id);
@@ -276,14 +283,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             <span>アカウント状況: {getStatusBadge(student.status)}</span>
           </div>
         </div>
-        <button onClick={onBackToPortal} className={styles.backBtn}>
-          {/* Back Icon */}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-          ログアウト（ポータルへ）
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            onClick={() => setShowScheduleConfig(!showScheduleConfig)} 
+            className={styles.backBtn}
+            style={{ background: '#4f46e5', color: '#fff' }}
+          >
+            ⚙️ 通塾設定
+          </button>
+          {onBackToPortal && (
+            <button onClick={onBackToPortal} className={styles.backBtn}>
+              ログアウト（ポータルへ）
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={styles.grid}>
@@ -504,6 +517,35 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           ) : (
             <SugorokuMap subject="算数" units={units} tasks={tasks} theme={theme} />
           )}
+        </div>
+
+        {/* 週間スケジュール・仮予定表示ビュー */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <WeeklyScheduleViewer
+            tasks={tasks}
+            scheduleConfig={scheduleConfig}
+            currentDateStr={currentDateStr}
+          />
+        </div>
+
+        {/* テスト結果レーダーチャート */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <TestScoreRadarChart
+            title={`${student.name} さんの教科別理解度・得点レーダーチャート`}
+            data={student.grade.startsWith('小') ? [
+              { subject: '国語', score: 78 },
+              { subject: '算数', score: 85 },
+              { subject: '英語', score: 90 },
+              { subject: '理科', score: 72 },
+              { subject: '社会', score: 68 },
+            ] : [
+              { subject: '国語', score: 75 },
+              { subject: '数学', score: 88 },
+              { subject: '英語', score: 82 },
+              { subject: '理科', score: 79 },
+              { subject: '社会', score: 70 },
+            ]}
+          />
         </div>
 
         {/* Bottom Simulation Panel */}

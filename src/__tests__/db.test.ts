@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { db, getSchoolYear, calculateCurrentGrade } from '../lib/db';
+import { getGeminiApiKey, saveGeminiApiKey } from '@/lib/gemini';
 
 describe('Database Service CRUD Tests', () => {
   beforeEach(() => {
@@ -39,14 +40,21 @@ describe('Database Service CRUD Tests', () => {
       school_id: 'sch-1',
       status: 'normal' as const,
       start_unit_id: null,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      weekly_sessions_count: '2回',
+      weekly_duration_minutes: '120分'
     };
 
     const saved = await db.saveStudent(newStudent);
     expect(saved.id).toBe('std-test');
+    expect(saved.weekly_sessions_count).toBe('2回');
+    expect(saved.weekly_duration_minutes).toBe('120分');
 
     const freshStudents = db.getStudents();
-    expect(freshStudents.find(s => s.id === 'std-test')).toBeDefined();
+    const found = freshStudents.find(s => s.id === 'std-test');
+    expect(found).toBeDefined();
+    expect(found?.weekly_sessions_count).toBe('2回');
+    expect(found?.weekly_duration_minutes).toBe('120分');
   });
 
   it('should manage curriculum units', async () => {
@@ -671,5 +679,61 @@ describe('Database Service CRUD Tests', () => {
     // 無効な学年の calculateCurrentGrade
     const invalidGrade = calculateCurrentGrade('無効な学年', 2025, 2026);
     expect(invalidGrade).toBe('無効な学年');
+  });
+
+  it('should cover CustomApplyScope CRUD methods in db.ts', async () => {
+    // 1. getCustomApplyScopes initial
+    const initialScopes = db.getCustomApplyScopes();
+    expect(Array.isArray(initialScopes)).toBe(true);
+
+    // 2. saveCustomApplyScope (create)
+    const newScope = {
+      id: 'custom_scope_test1',
+      label: '特進Aクラス',
+      created_at: new Date().toISOString()
+    };
+    await db.saveCustomApplyScope(newScope);
+    let scopes = db.getCustomApplyScopes();
+    expect(scopes.find(s => s.id === 'custom_scope_test1')?.label).toBe('特進Aクラス');
+
+    // 3. saveCustomApplyScope (update)
+    const updatedScope = { ...newScope, label: '特進Sクラス' };
+    await db.saveCustomApplyScope(updatedScope);
+    scopes = db.getCustomApplyScopes();
+    expect(scopes.find(s => s.id === 'custom_scope_test1')?.label).toBe('特進Sクラス');
+
+    // 4. deleteCustomApplyScope
+    await db.deleteCustomApplyScope('custom_scope_test1');
+    scopes = db.getCustomApplyScopes();
+    expect(scopes.find(s => s.id === 'custom_scope_test1')).toBeUndefined();
+
+    // 5. Supabase non-mock mode test
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: newScope, error: null })
+          })
+        }),
+        delete: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null })
+        })
+      })
+    };
+    const savedScope = await localDb.saveCustomApplyScope(newScope);
+    expect(savedScope.id).toBe('custom_scope_test1');
+    await expect(localDb.deleteCustomApplyScope('custom_scope_test1')).resolves.not.toThrow();
+  });
+});
+
+describe('Gemini API Key Utility Tests', () => {
+  it('should cover all branches in getGeminiApiKey and saveGeminiApiKey', () => {
+    saveGeminiApiKey('sample-key-999');
+    expect(getGeminiApiKey()).toBe('sample-key-999');
+
+    saveGeminiApiKey('');
+    expect(localStorage.getItem('tentoru_gemini_api_key')).toBeNull();
   });
 });
