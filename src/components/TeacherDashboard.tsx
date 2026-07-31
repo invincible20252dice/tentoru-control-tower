@@ -457,7 +457,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
 
         // suffix 補完
         const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
-        const suffix = isElem ? '小学校' : '中学校';
+        const isHigh = newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
+        const suffix = isElem ? '小学校' : isHigh ? '高校' : '中学校';
         let finalizedSchoolName = newCustomSchoolName.trim();
         if (!finalizedSchoolName.endsWith('小学校') && !finalizedSchoolName.endsWith('中学校') && !finalizedSchoolName.endsWith('高校') && !finalizedSchoolName.endsWith('学校')) {
           finalizedSchoolName += suffix;
@@ -473,7 +474,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
           const newSchool = {
             id: newSchoolId,
             name: finalizedSchoolName,
-            type: isElem ? 'elementary' as const : 'junior_high' as const,
+            type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
             created_at: new Date().toISOString()
           };
           await db.saveSchool(newSchool);
@@ -2969,7 +2970,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                                 return nameA.localeCompare(nameB, 'ja');
                               }
                               if (miniTestSortOrder === 'unsubmitted_first') {
-                                const isUnsubmittedA = r => (r.score === null || r.score === undefined) && !tempScores[r.id];
+                                const isUnsubmittedA = (r: any) => (r.score === null || r.score === undefined) && !tempScores[r.id];
                                 const scoreAUnset = isUnsubmittedA(a);
                                 const scoreBUnset = isUnsubmittedA(b);
                                 if (scoreAUnset && !scoreBUnset) return -1;

@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS schools (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('elementary', 'junior_high')),
+    type TEXT NOT NULL CHECK (type IN ('elementary', 'junior_high', 'high_school')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

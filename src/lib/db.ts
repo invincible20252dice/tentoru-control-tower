@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 export interface School {
   id: string;
   name: string;
-  type: 'elementary' | 'junior_high';
+  type: 'elementary' | 'junior_high' | 'high_school';
   created_at: string;
 }
 
@@ -136,7 +136,7 @@ export interface LearningTask {
   student_id: string;
   unit_id: string;
   scheduled_date: string; // YYYY-MM-DD
-  period: number | null; // 1 to 10
+  period?: number | null; // 1 to 10
   status: 'unstarted' | 'skipped' | 'completed' | 'failed';
   video_watched: boolean;
   test_passed: boolean;
