@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styles from './TeacherDashboard.module.css';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
+import { HorizontalDatePicker } from './HorizontalDatePicker';
 import { 
   db, 
   Student, 
@@ -2234,36 +2235,16 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                     )}
                   </div>
 
-                  {/* Start Position Config */}
-                  <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                    <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>学習スタート位置の設定</h4>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      <select 
-                        value={startUnitId} 
-                        onChange={e => setStartUnitId(e.target.value)}
-                        className={styles.select}
-                        style={{ maxWidth: '300px' }}
-                      >
-                        <option value="">-- 最初からスタートする --</option>
-                        {db.getCurriculumUnits()
-                          .filter(u => u.school_id === selectedStudent.school_id)
-                          .map(u => (
-                            <option key={u.id} value={u.id}>[{u.subject}] {u.name}</option>
-                          ))}
-                      </select>
-                      <button onClick={handleSaveStartUnit} className={styles.btn} style={{ width: 'auto' }}>
-                        適用する
-                      </button>
-                    </div>
-                    <p style={{ margin: '6px 0 0 0', fontSize: '0.7rem', color: '#64748b' }}>
-                      ※指定した開始単元より前の範囲は「スキップ（未着手）」ステータスとして生徒画面にビジュアルとして残し、日々のタスクからは除外します。
-                    </p>
-                  </div>
+
 
                   {/* Timetable planner */}
                   <div className={styles.schedulerGrid}>
                     <div>
                       <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>コマ割り設定 (標準2コマ / 最大10コマ)</h4>
+                      <HorizontalDatePicker 
+                        selectedDate={scheduleDate} 
+                        onChangeDate={setScheduleDate} 
+                      />
                       <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
                         <input 

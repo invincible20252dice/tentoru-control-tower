@@ -668,17 +668,6 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(dateInputReloadForSkip, { target: { value: '2026-06-20' } });
     fireEvent.change(dateInputReloadForSkip, { target: { value: '2026-06-19' } });
 
-    // Change start position (Line 782 cover)
-    const startSelect = screen.getByText('学習スタート位置の設定').parentElement!.querySelector('select')!;
-    fireEvent.change(startSelect, { target: { value: 'unit-102-1' } });
-
-    // Save start position
-    const saveStartBtn = screen.getByText('適用する');
-    fireEvent.click(saveStartBtn);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('教科別スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
-    });
-
     // Change Schedule Date (Line 811 cover)
     const dateInput = container.querySelector('input[type="date"]')!;
     fireEvent.change(dateInput, { target: { value: '2026-06-20' } });
@@ -2813,14 +2802,8 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
     });
 
-    // 「学習計画・コマ割り」タブに移動してスタート位置設定を「適用する」
+    // 「学習計画・コマ割り」タブに移動
     fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
-    const applyStartUnitBtns = screen.getAllByText('適用する');
-    alertMock.mockClear();
-    fireEvent.click(applyStartUnitBtns[0]);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('教科別スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
-    });
 
     // 4. gemini.ts branch coverage & TeacherDashboard API Key input coverage
     saveGeminiApiKey('');
