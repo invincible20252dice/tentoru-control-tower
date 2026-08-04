@@ -204,7 +204,17 @@ describe('Comprehensive Test Suite for High Coverage', () => {
       const backBtn = screen.getByText('戻る');
       fireEvent.click(backBtn);
 
-      // Re-open and click elementary
+      // Re-open and test high_school, junior_high, elementary teacher selections
+      fireEvent.click(screen.getByText('講師・管理者'));
+      const highBtn = screen.getByText('高校生');
+      fireEvent.click(highBtn);
+      fireEvent.click(screen.getByText('ポータルへ戻る'));
+
+      fireEvent.click(screen.getByText('講師・管理者'));
+      const jhBtn = screen.getByText('中学生');
+      fireEvent.click(jhBtn);
+      fireEvent.click(screen.getByText('ポータルへ戻る'));
+
       fireEvent.click(screen.getByText('講師・管理者'));
       const elemBtn = screen.getByText('小学生');
       fireEvent.click(elemBtn);

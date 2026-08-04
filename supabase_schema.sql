@@ -284,3 +284,33 @@ ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS passed BOOLEAN;
 -- 24. studentsテーブルへ週の授業回数、授業時間カラムを追加
 ALTER TABLE students ADD COLUMN IF NOT EXISTS weekly_sessions_count TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS weekly_duration_minutes TEXT;
+
+-- 25. 小テスト結果および宿題への教科(subject)カラム追加
+ALTER TABLE mini_test_results ADD COLUMN IF NOT EXISTS subject TEXT;
+ALTER TABLE homework_results ADD COLUMN IF NOT EXISTS subject TEXT;
+
+-- 26. 生徒テーブルへの基礎単元スタート位置・通塾曜日・コマ数初期値カラム追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_basic_english UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_basic_kanji UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS start_unit_basic_calculation UUID REFERENCES curriculum_units(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS selected_days TEXT[] DEFAULT '{"tuesday", "friday"}';
+ALTER TABLE students ADD COLUMN IF NOT EXISTS default_slots INTEGER DEFAULT 2;
+
+-- 27. 通塾設定テーブル (生徒ごとの週回数・時間・曜日・コマ数)
+CREATE TABLE IF NOT EXISTS student_schedule_configs (
+    student_id UUID PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+    weekly_frequency TEXT NOT NULL DEFAULT '2回',
+    weekly_duration TEXT NOT NULL DEFAULT '120分',
+    selected_days TEXT[] NOT NULL DEFAULT '{"tuesday", "friday"}',
+    default_slots INTEGER NOT NULL DEFAULT 2,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS student_settings (
+    student_id UUID PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+    weekly_frequency TEXT NOT NULL DEFAULT '2回',
+    weekly_duration TEXT NOT NULL DEFAULT '120分',
+    selected_days TEXT[] NOT NULL DEFAULT '{"tuesday", "friday"}',
+    default_slots INTEGER NOT NULL DEFAULT 2,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);

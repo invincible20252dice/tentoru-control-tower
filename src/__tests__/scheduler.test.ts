@@ -9,7 +9,8 @@ import {
   schedulerConfig,
   getYearMonthWeek,
   calculateProgressGap,
-  rescheduleFutureUncompletedTasks
+  rescheduleFutureUncompletedTasks,
+  calculateDefaultSlots
 } from '../lib/scheduler';
 import { CurriculumUnit, LearningTask, Student, TestRecord, ExamThresholdMaster, MilestonePlan } from '../lib/db';
 
@@ -557,6 +558,11 @@ describe('Scheduler and Core Logic Tests', () => {
         ];
         const resGuard = rescheduleFutureUncompletedTasks(studentId, mockTasksUnknown, [], '2026-06-20', ['2026-06-21', '2026-06-22']);
         expect(resGuard.length).toBe(2);
+      });
+
+      it('should calculate default slots for >240min duration correctly', () => {
+        const slots = calculateDefaultSlots('2回', '300分', 'junior_high');
+        expect(slots).toBe(5);
       });
     });
   });

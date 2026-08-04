@@ -6,6 +6,9 @@ import TeacherDashboard from '../components/TeacherDashboard';
 import StudentDashboard from '../components/StudentDashboard';
 import Portal from '../app/page';
 import { db, CurriculumUnit, LearningTask, Student, CustomClass, MiniTestResult } from '../lib/db';
+import { TestScoreRadarChart } from '../components/TestScoreRadarChart';
+import { WeeklyScheduleViewer } from '../components/WeeklyScheduleViewer';
+import { StudentScheduleConfigForm } from '../components/StudentScheduleConfigForm';
 import { saveGeminiApiKey, getGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
 import { calculateProgressGap, rescheduleFutureUncompletedTasks, getYearMonthWeek } from '../lib/scheduler';
 
@@ -158,6 +161,11 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // Initial state check
     expect(screen.getByText(/佐藤 拓海 さんの学習画面/)).toBeInTheDocument();
+
+    // Toggle schedule config modal in StudentDashboard
+    const configBtn = screen.getByText(/通塾設定/i);
+    fireEvent.click(configBtn);
+    fireEvent.click(configBtn);
 
     // Watch video for failed status task (Line 43 status !== 'unstarted')
     const watchFailedBtn = screen.getAllByText('動画を視聴する (10分)')[1];
@@ -3265,5 +3273,513 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(clearHwBtn);
     });
     expect(hwSearchInput.value).toBe('');
+  });
+
+  it('should achieve full branch coverage across StudentScheduleConfigForm, TeacherDashboard filters/sorts, TestScoreRadarChart, and WeeklyScheduleViewer', async () => {
+    // 1. TestScoreRadarChart coverage
+    const testScoreData = [
+      { subject: '数学', score: 85, fullMark: 100 },
+      { subject: '英語', score: 70, fullMark: 100 },
+      { subject: '理科', score: 45, fullMark: 100 },
+    ];
+    const { unmount: unmountRadar } = render(
+      <TestScoreRadarChart data={testScoreData} title="能力分析チャート" showTable={true} dataKeyName="生徒スコア" />
+    );
+    expect(screen.getByText('能力分析チャート')).toBeInTheDocument();
+    expect(screen.getByText('得意')).toBeInTheDocument();
+    expect(screen.getByText('良好')).toBeInTheDocument();
+    expect(screen.getByText('要強化')).toBeInTheDocument();
+    unmountRadar();
+
+    const { unmount: unmountRadarEmpty } = render(
+      <TestScoreRadarChart data={[]} title="" showTable={false} />
+    );
+    expect(screen.getByText('表示できる点数データがありません')).toBeInTheDocument();
+    unmountRadarEmpty();
+
+    // 2. WeeklyScheduleViewer coverage
+    const { unmount: unmountWeeklyFull } = render(
+      <WeeklyScheduleViewer
+        studentConfig={{
+          student_id: 'std-1',
+          weekly_frequency: '2回',
+          weekly_duration: '120分',
+          selected_days: ['tuesday', 'friday'],
+          default_slots: 2,
+        }}
+        tasks={[
+          { id: 't-1', student_id: 'std-1', unit_id: 'u-1', scheduled_date: '2026-06-16', period: 1, status: 'completed', video_watched: true, test_passed: true, created_at: '', office_note: 'コマ1ノート' }
+        ]}
+        currentDateStr="2026-06-15"
+      />
+    );
+    expect(screen.getByText('週表示 (Week View)')).toBeInTheDocument();
+    
+    // Switch to Day view
+    const dayViewBtn = screen.getByText('日表示 (Day View)');
+    fireEvent.click(dayViewBtn);
+
+    // Click non-school day tab (水曜日)
+    const wedBtn = screen.getByText('水曜日');
+    fireEvent.click(wedBtn);
+    expect(screen.getByText('通塾日外のため「授業予定なし」')).toBeInTheDocument();
+
+    // Click school day tab (火曜日)
+    const tueBtn = screen.getByText('火曜日');
+    fireEvent.click(tueBtn);
+    expect(screen.getByText('コマ1ノート')).toBeInTheDocument();
+    unmountWeeklyFull();
+
+    // Empty selected_days branch
+    const { unmount: unmountWeeklyEmpty } = render(
+      <WeeklyScheduleViewer
+        studentConfig={{
+          student_id: 'std-1',
+          weekly_frequency: '2回',
+          weekly_duration: '120分',
+          selected_days: [],
+          default_slots: 2,
+        }}
+        tasks={[]}
+        currentDateStr="2026-06-15"
+      />
+    );
+    expect(screen.getByText('週表示 (Week View)')).toBeInTheDocument();
+    unmountWeeklyEmpty();
+
+    // Invalid selected_days branch
+    const { unmount: unmountWeeklyInvalid } = render(
+      <WeeklyScheduleViewer
+        studentConfig={{
+          student_id: 'std-1',
+          weekly_frequency: '2回',
+          weekly_duration: '120分',
+          selected_days: ['invalid_day'],
+          default_slots: 2,
+        }}
+        tasks={[]}
+        currentDateStr="2026-06-15"
+      />
+    );
+    expect(screen.getByText('週表示 (Week View)')).toBeInTheDocument();
+    unmountWeeklyInvalid();
+
+    // 3. StudentScheduleConfigForm coverage (all frequency & duration options)
+    const { unmount: unmountConfigUnlim } = render(
+      <StudentScheduleConfigForm studentId="std-1" gradeType="junior_high" />
+    );
+    const freqSelectEl = document.querySelector('#weekly-frequency-select') as HTMLSelectElement;
+    if (freqSelectEl) {
+      const freqs = ['2回', '3回', '4回', '5回', '無制限', '自由追加'];
+      for (const f of freqs) {
+        fireEvent.change(freqSelectEl, { target: { value: f } });
+      }
+      fireEvent.click(screen.getByText('月曜日'));
+      fireEvent.click(screen.getByText('水曜日'));
+      fireEvent.click(screen.getByText('木曜日'));
+    }
+
+    const durSelectEl = document.querySelector('#weekly-duration-select') as HTMLSelectElement;
+    if (durSelectEl) {
+      const durs = ['120分', '180分', '240分', '無制限', '自由追加'];
+      for (const d of durs) {
+        fireEvent.change(durSelectEl, { target: { value: d } });
+      }
+    }
+    unmountConfigUnlim();
+
+    // 3. StudentScheduleConfigForm coverage
+    const onSavedMock = vi.fn();
+    const { unmount: unmountConfig } = render(
+      <StudentScheduleConfigForm studentId="std-1" gradeType="elementary" onSaved={onSavedMock} />
+    );
+
+    // Toggle Wednesday (3rd day when max is 2)
+    const wedToggle = screen.getByText('水曜日');
+    fireEvent.click(wedToggle);
+    expect(screen.getByText(/週回数（2回）を超える曜日は選択できません/i)).toBeInTheDocument();
+
+    // Click Save button
+    const saveConfigBtn = screen.getByText('通塾設定を保存する');
+    await act(async () => {
+      fireEvent.click(saveConfigBtn);
+    });
+    expect(onSavedMock).toHaveBeenCalled();
+    unmountConfig();
+
+    // StudentScheduleConfigForm error toast path
+    const spySaveConfig = vi.spyOn(db, 'saveStudentScheduleConfig').mockRejectedValueOnce(new Error('Save Error Test'));
+    const { unmount: unmountConfigErr } = render(
+      <StudentScheduleConfigForm studentId="std-1" gradeType="elementary" />
+    );
+    const saveConfigBtnErr = screen.getByText('通塾設定を保存する');
+    await act(async () => {
+      fireEvent.click(saveConfigBtnErr);
+    });
+    expect(screen.getByText('設定の保存に失敗しました。')).toBeInTheDocument();
+    spySaveConfig.mockRestore();
+    unmountConfigErr();
+
+    // StudentScheduleConfigForm max days limit error toast path
+    const { unmount: unmountConfigMaxErr } = render(
+      <StudentScheduleConfigForm studentId="std-max-err-2" gradeType="junior_high" />
+    );
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    const freqSelMaxErr = document.querySelector('#weekly-frequency-select') as HTMLSelectElement;
+    if (freqSelMaxErr) {
+      fireEvent.change(freqSelMaxErr, { target: { value: '3回' } });
+    }
+
+    fireEvent.click(screen.getByText('月曜日'));
+    fireEvent.click(screen.getByText('水曜日'));
+
+    if (freqSelMaxErr) {
+      fireEvent.change(freqSelMaxErr, { target: { value: '2回' } });
+    }
+
+    const saveBtnMaxErr = screen.getByText('通塾設定を保存する');
+    await act(async () => {
+      fireEvent.click(saveBtnMaxErr);
+    });
+    expect(screen.getByText(/選択中の曜日は最大2つまでに制限されています。/i)).toBeInTheDocument();
+    unmountConfigMaxErr();
+
+    // 4. TeacherDashboard filters, sort options, basic info select changes, and HorizontalDatePicker navigation
+    await db.saveMiniTestResult({
+      id: 'mini-sort-1',
+      student_id: 'std-1',
+      date: '2026-06-18',
+      test_content: '小テストA',
+      score: 90,
+      passed: true,
+      created_at: '2026-06-18T10:00:00Z'
+    });
+    await db.saveMiniTestResult({
+      id: 'mini-sort-2',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      test_content: '小テストB',
+      score: null,
+      passed: false,
+      created_at: '2026-06-19T10:00:00Z'
+    });
+
+    await db.saveHomeworkResult({
+      id: 'hw-sort-1',
+      student_id: 'std-1',
+      date: '2026-06-18',
+      homework_content: '宿題A',
+      homework_deadline: '2026-06-25',
+      status: 'completed',
+      created_at: '2026-06-18T10:00:00Z'
+    });
+    await db.saveHomeworkResult({
+      id: 'hw-sort-2',
+      student_id: 'std-2',
+      date: '2026-06-19',
+      homework_content: '宿題B',
+      homework_deadline: '2026-06-26',
+      status: 'incomplete',
+      created_at: '2026-06-19T10:00:00Z'
+    });
+    await db.saveHomeworkResult({
+      id: 'hw-sort-3',
+      student_id: 'std-1',
+      date: '2026-06-20',
+      homework_content: '宿題C',
+      homework_deadline: '2026-06-27',
+      status: 'incomplete',
+      created_at: '2026-06-20T10:00:00Z'
+    });
+
+    render(<TeacherDashboard teacherType="junior_high" onBackToPortal={vi.fn()} />);
+
+    // Filter student by name search
+    const filterNameInput = screen.queryByPlaceholderText('生徒名で検索...') as HTMLInputElement;
+    if (filterNameInput) {
+      await act(async () => {
+        fireEvent.change(filterNameInput, { target: { value: '拓海' } });
+      });
+    }
+    
+    // Open Student List & Select 佐藤 拓海
+    const studentItem = screen.getAllByText(/佐藤 拓海/i)[0];
+    fireEvent.click(studentItem);
+
+    // Click 遅れチェック ＆ 自動リスケ button
+    const autoReschedBtn = screen.getByText('遅れチェック ＆ 自動リスケ');
+    fireEvent.click(autoReschedBtn);
+
+    // Open 生徒情報 tab via sidebar
+    const studentInfoSidebarBtn = screen.getByText('生徒情報');
+    fireEvent.click(studentInfoSidebarBtn);
+
+    // Open 基本情報・属性設定 sub tab
+    const detailTab = screen.getByText('基本情報・属性設定');
+    fireEvent.click(detailTab);
+
+    const nameInputEdit = screen.getByPlaceholderText('氏名（漢字）');
+    fireEvent.change(nameInputEdit, { target: { value: '佐藤 拓海 (更新)' } });
+
+    const nameKanaInputEdit = screen.getByPlaceholderText('氏名（フリガナ）');
+    fireEvent.change(nameKanaInputEdit, { target: { value: 'サトウ タクミ' } });
+
+    const imageUrlInput = screen.getByPlaceholderText(/顔写真画像URL/i);
+    fireEvent.change(imageUrlInput, { target: { value: 'https://example.com/avatar.jpg' } });
+
+    const schoolNameInput = screen.getByPlaceholderText('学校名');
+    fireEvent.change(schoolNameInput, { target: { value: '天登第一中学校' } });
+
+    const gradeSelectEdit = document.querySelector('#student-grade') as HTMLSelectElement;
+    if (gradeSelectEdit) fireEvent.change(gradeSelectEdit, { target: { value: '中3' } });
+
+    // Change weekly frequency, weekly duration, period count selects
+    const freqSelect = document.querySelector('#edit-weekly-frequency') as HTMLSelectElement;
+    if (freqSelect) fireEvent.change(freqSelect, { target: { value: '3回' } });
+
+    const durSelect = document.querySelector('#edit-weekly-duration') as HTMLSelectElement;
+    if (durSelect) fireEvent.change(durSelect, { target: { value: '180分' } });
+
+    const slotsSelect = document.querySelector('#edit-default-slots') as HTMLSelectElement;
+    if (slotsSelect) fireEvent.change(slotsSelect, { target: { value: '3' } });
+
+    const saveDetailBtn = screen.getByText('変更を保存する');
+    await act(async () => {
+      fireEvent.click(saveDetailBtn);
+    });
+
+    // Open 小テスト結果 tab
+    const miniTestTab = screen.getAllByText('小テスト結果')[0];
+    fireEvent.click(miniTestTab);
+
+    // Test Grade Filters
+    const gradeSelect = document.querySelector('#minitest-grade-filter') as HTMLSelectElement;
+    if (gradeSelect) {
+      const gradeOptions = ['all', '小学生', '中学生', '高校生', '小6', '中3', '高1'];
+      for (const gOpt of gradeOptions) {
+        await act(async () => {
+          fireEvent.change(gradeSelect, { target: { value: gOpt } });
+        });
+      }
+    }
+
+    // Test Subject Filters
+    const subjectSelect = document.querySelector('#minitest-subject-filter') as HTMLSelectElement;
+    if (subjectSelect) {
+      const subOptions = ['all', '数学', '英語', '理科', '社会', '国語'];
+      for (const sOpt of subOptions) {
+        await act(async () => {
+          fireEvent.change(subjectSelect, { target: { value: sOpt } });
+        });
+      }
+    }
+
+    // Test Sort Orders in Mini Tests
+    const sortSelect = document.querySelector('#minitest-sort-order') as HTMLSelectElement;
+    if (sortSelect) {
+      const sortOptions = ['date_desc', 'date_asc', 'name_asc', 'unsubmitted_first', 'passed_first'];
+      for (const sortOpt of sortOptions) {
+        await act(async () => {
+          fireEvent.change(sortSelect, { target: { value: sortOpt } });
+        });
+      }
+    }
+
+    const miniSearchInput = document.querySelector('#minitest-search') as HTMLInputElement;
+    if (miniSearchInput) {
+      await act(async () => {
+        fireEvent.change(miniSearchInput, { target: { value: '小テスト' } });
+      });
+    }
+
+    // Switch to 宿題提出状況 tab and test all sort options
+    fireEvent.click(screen.getByText('宿題提出状況'));
+    const hwSearchInput = document.querySelector('#homework-search') as HTMLInputElement;
+    if (hwSearchInput) {
+      await act(async () => {
+        fireEvent.change(hwSearchInput, { target: { value: '宿題' } });
+      });
+    }
+    const hwGradeSelect = document.querySelector('#homework-grade-filter') as HTMLSelectElement || document.querySelector('select');
+    if (hwGradeSelect) {
+      await act(async () => {
+        fireEvent.change(hwGradeSelect, { target: { value: '小学生' } });
+      });
+    }
+
+    const hwSortSelect = document.querySelector('#homework-sort-order') as HTMLSelectElement;
+    if (hwSortSelect) {
+      const hwSortOptions = ['date_desc', 'date_asc', 'name_asc', 'unsubmitted_first', 'completed_first'];
+      for (const sortOpt of hwSortOptions) {
+        await act(async () => {
+          fireEvent.change(hwSortSelect, { target: { value: sortOpt } });
+        });
+      }
+    }
+
+    // Open 学習計画・コマ割り tab and test HorizontalDatePicker prev/next buttons
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+    const prevWeekBtn = screen.getByLabelText('前週へ');
+    const nextWeekBtn = screen.getByLabelText('次週へ');
+    fireEvent.click(prevWeekBtn);
+    fireEvent.click(nextWeekBtn);
+
+    const dateCardBtns = document.querySelectorAll('button[type="button"]');
+    if (dateCardBtns.length > 5) {
+      fireEvent.click(dateCardBtns[3]);
+    }
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    if (dateInput) fireEvent.change(dateInput, { target: { value: '2026-06-20' } });
+
+    const noteInput = screen.queryByPlaceholderText(/1学期中間テスト対策特別コマ/i);
+    if (noteInput) fireEvent.change(noteInput, { target: { value: 'テスト対策特別コマ' } });
+
+    // Select 佐藤 拓海 then return to schedule tab
+    const studentItemForTT = screen.getAllByText(/佐藤 拓海/i)[0];
+    fireEvent.click(studentItemForTT);
+    fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
+
+    // Test applyScope selects and handleSaveTimetable
+    const scopeSelect = screen.getByTestId('apply-scope-select') as HTMLSelectElement;
+    if (scopeSelect) {
+      const scopes = ['individual', 'school', 'grade', 'level'];
+      for (const scopeVal of scopes) {
+        await act(async () => {
+          fireEvent.change(scopeSelect, { target: { value: scopeVal } });
+        });
+        const saveTTBtn = screen.getByText('時間割コマ割りを保存');
+        await act(async () => {
+          fireEvent.click(saveTTBtn);
+        });
+      }
+    }
+
+    // Open 新規生徒アカウント発行 tab & create student with custom school
+    fireEvent.click(screen.getByText('新規生徒アカウント発行'));
+    const nameInput = screen.getByPlaceholderText('例: 佐藤 拓海');
+    fireEvent.change(nameInput, { target: { value: '新規テスト生徒' } });
+
+    const schoolSelect = screen.getByDisplayValue(/天登第一中学校/i);
+    fireEvent.change(schoolSelect, { target: { value: 'add_new' } });
+
+    const customSchoolInput = screen.getByPlaceholderText('例: 桜丘');
+    fireEvent.change(customSchoolInput, { target: { value: '富士見' } });
+
+    const createForm = nameInput.closest('form');
+    if (createForm) {
+      await act(async () => {
+        fireEvent.submit(createForm);
+      });
+    }
+
+    // Open 年間計画（マイルストーン） for student
+    const studentItemForMS = screen.getAllByText(/佐藤 拓海/i)[0];
+    fireEvent.click(studentItemForMS);
+    fireEvent.click(screen.getByText('年間計画（マイルストーン）'));
+
+    const chUpBtns = screen.queryAllByTitle('章を上へ移動');
+    if (chUpBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(chUpBtns[0]);
+      });
+    }
+    const chDownBtns = screen.queryAllByTitle('章を下へ移動');
+    if (chDownBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(chDownBtns[0]);
+      });
+    }
+
+    const holidayToggleBtns = screen.queryAllByTitle('休校日の切り替え');
+    if (holidayToggleBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(holidayToggleBtns[0]);
+      });
+    }
+    const deleteRowBtns = screen.queryAllByTitle('行削除');
+    if (deleteRowBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(deleteRowBtns[0]);
+      });
+    }
+
+    fireEvent.click(screen.getByText('学校カリキュラム管理'));
+    const upBtns = screen.queryAllByTitle('上へ移動');
+    if (upBtns.length > 0) fireEvent.click(upBtns[0]);
+    const downBtns = screen.queryAllByTitle('下へ移動');
+    if (downBtns.length > 0) fireEvent.click(downBtns[0]);
+
+    const editUnitBtns = screen.queryAllByText('編集');
+    if (editUnitBtns.length > 0) {
+      fireEvent.click(editUnitBtns[0]);
+      const editInput = document.querySelector('#edit-unit-name-input') as HTMLInputElement;
+      if (editInput) fireEvent.change(editInput, { target: { value: '更新された単元名' } });
+      const saveUnitBtns = screen.queryAllByText('保存');
+      if (saveUnitBtns.length > 0) fireEvent.click(saveUnitBtns[0]);
+    }
+
+    const customClassInput = screen.getByPlaceholderText('例: 高校入試過去問演習');
+    fireEvent.change(customClassInput, { target: { value: '追加マスターテーマ' } });
+    fireEvent.click(screen.getByText('追加する'));
+
+    const studentItemForTests = screen.getAllByText(/佐藤 拓海/i)[0];
+    fireEvent.click(studentItemForTests);
+
+    fireEvent.click(screen.getByText('定期テスト・模試'));
+    const toggleApiKeyBtn = screen.getByText('🔑 Gemini APIキー設定（成績表画像解析用）');
+    fireEvent.click(toggleApiKeyBtn);
+    const keyInput = screen.getByPlaceholderText('AIzaSy...');
+    fireEvent.change(keyInput, { target: { value: 'test-api-key' } });
+    fireEvent.click(screen.getByText('消去'));
+    fireEvent.click(toggleApiKeyBtn);
+    fireEvent.click(screen.getByText('保存'));
+
+    const regTestNameInput = screen.getByPlaceholderText('例：1学期中間テスト、前期期末テスト');
+    fireEvent.change(regTestNameInput, { target: { value: '中間テスト' } });
+    const saveRegTestBtn = screen.getByText('定期テスト結果を記録');
+    await act(async () => {
+      fireEvent.click(saveRegTestBtn);
+    });
+
+    const mockFormInputs = document.querySelectorAll('input[required]');
+    if (mockFormInputs.length >= 2) {
+      fireEvent.change(mockFormInputs[0], { target: { value: '全県模試' } });
+      fireEvent.change(mockFormInputs[1], { target: { value: '380' } });
+    }
+    const mockSelectEl = document.querySelector('select[required]') as HTMLSelectElement;
+    if (mockSelectEl && mockSelectEl.options.length > 1) {
+      fireEvent.change(mockSelectEl, { target: { value: mockSelectEl.options[1].value } });
+    }
+    const saveMockBtn = screen.queryByText('模試点数を入力して合格判定算出');
+    if (saveMockBtn) {
+      await act(async () => {
+        fireEvent.click(saveMockBtn);
+      });
+    }
+
+    const studentItemForAI = screen.getAllByText(/佐藤 拓海/i)[0];
+    fireEvent.click(studentItemForAI);
+    fireEvent.click(screen.getByText('AI指導報告書'));
+    const genReportBtn = screen.getByText('今月の学習ログから報告書を自動生成 (AI分析ステップ)');
+    await act(async () => {
+      fireEvent.click(genReportBtn);
+    });
+    const saveReportBtn = screen.getByText('報告書を保存 ＆ 修正履歴を学習 (パターンB)');
+    await act(async () => {
+      fireEvent.click(saveReportBtn);
+    });
+
+    // TeacherDashboard elementary & high_school modes
+    const { unmount: unmountElemTD } = render(<TeacherDashboard teacherType="elementary" />);
+    expect(screen.getAllByText(/司令塔ダッシュボード/i)[0]).toBeInTheDocument();
+    unmountElemTD();
+
+    const { unmount: unmountHighTD } = render(<TeacherDashboard teacherType="high_school" />);
+    expect(screen.getAllByText(/司令塔ダッシュボード/i)[0]).toBeInTheDocument();
+    unmountHighTD();
   });
 });

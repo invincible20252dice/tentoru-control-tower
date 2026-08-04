@@ -1836,6 +1836,22 @@ class DatabaseService {
     };
   }
 
+  public async fetchStudentScheduleConfig(studentId: string): Promise<StudentScheduleConfig> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('student_schedule_configs')
+          .select('*')
+          .eq('student_id', studentId)
+          .single();
+        if (data && !error) return data as StudentScheduleConfig;
+      } catch (err) {
+        console.error('fetchStudentScheduleConfig exception:', err);
+      }
+    }
+    return this.getStudentScheduleConfig(studentId);
+  }
+
   public async saveStudentScheduleConfig(config: StudentScheduleConfig): Promise<void> {
     if (!this.isMockMode && this.supabase) {
       try {

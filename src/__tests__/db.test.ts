@@ -726,6 +726,101 @@ describe('Database Service CRUD Tests', () => {
     expect(savedScope.id).toBe('custom_scope_test1');
     await expect(localDb.deleteCustomApplyScope('custom_scope_test1')).resolves.not.toThrow();
   });
+
+  it('should cover teacher options CRUD and saveStudentScheduleConfig branches', async () => {
+    // 1. teacher options CRUD in mock mode
+    const teacherList = ['福田 尚弘', '佐藤 講師'];
+    (db as any).saveMockData('teacher_options', teacherList);
+    const addedName = await db.addTeacherOption('高橋 講師');
+    expect(addedName).toBe('高橋 講師');
+    const updatedName = await db.updateTeacherOption('福田 尚弘', '福田 主任講師');
+    expect(updatedName).toBe('福田 主任講師');
+    await db.removeTeacherOption('佐藤 講師');
+
+    // 2. getStudentScheduleConfig for non-existent student (fallback defaults)
+    const fallbackConfig = db.getStudentScheduleConfig('std-unknown-999');
+    expect(fallbackConfig.weekly_frequency).toBe('2回');
+    expect(fallbackConfig.weekly_duration).toBe('120分');
+
+    // 3. saveStudentScheduleConfig in Supabase non-mock mode
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+        insert: vi.fn().mockResolvedValue({ error: null }),
+        update: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null })
+        }),
+        delete: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null })
+        })
+      })
+    };
+    await localDb.addTeacherOption('Supabase講師');
+    await localDb.updateTeacherOption('Supabase講師', 'Supabase主任');
+    await localDb.removeTeacherOption('Supabase主任');
+
+    const configToSave = {
+      student_id: 'std-1',
+      weekly_frequency: '3回',
+      weekly_duration: '180分',
+      selected_days: ['monday', 'wednesday', 'friday'],
+      default_slots: 3
+    };
+    await localDb.saveStudentScheduleConfig(configToSave);
+
+    // Supabase error branch
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockRejectedValue(new Error('Supabase Config Error'))
+      })
+    };
+    await localDb.saveStudentScheduleConfig(configToSave);
+  });
+
+  it('should cover fetchStudentScheduleConfig in mock and Supabase modes', async () => {
+    const config = await db.fetchStudentScheduleConfig('std-1');
+    expect(config.student_id).toBe('std-1');
+
+    const mockDb = new (db.constructor as any)();
+    (mockDb as any).isMockMode = false;
+    (mockDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: {
+                student_id: 'std-sup-1',
+                weekly_frequency: '3回',
+                weekly_duration: '180分',
+                selected_days: ['monday', 'wednesday'],
+                default_slots: 3
+              },
+              error: null
+            })
+          })
+        })
+      })
+    };
+
+    const fetchedSupConfig = await mockDb.fetchStudentScheduleConfig('std-sup-1');
+    expect(fetchedSupConfig.student_id).toBe('std-sup-1');
+    expect(fetchedSupConfig.weekly_frequency).toBe('3回');
+
+    // Supabase exception path
+    (mockDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockRejectedValue(new Error('Supabase Fetch Error'))
+          })
+        })
+      })
+    };
+    const fetchedErrConfig = await mockDb.fetchStudentScheduleConfig('std-sup-err');
+    expect(fetchedErrConfig.student_id).toBe('std-sup-err');
+  });
 });
 
 describe('Gemini API Key Utility Tests', () => {
