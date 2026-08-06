@@ -20,6 +20,7 @@ import {
   CustomClass,
   MilestonePlan,
   MilestoneTemplate,
+  TargetSchoolItem,
   GRADES,
   StudentInteraction,
   getSchoolYear
@@ -268,6 +269,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         const listPersonalities = db.getPersonalityOptions();
         setPersonalityOptions(listPersonalities);
 
+        let initialTargetSchools: TargetSchoolItem[] = [];
+        if (freshSt.target_schools && Array.isArray(freshSt.target_schools) && freshSt.target_schools.length > 0) {
+          initialTargetSchools = freshSt.target_schools;
+        } else if (freshSt.target_school) {
+          initialTargetSchools = [{ school_name: freshSt.target_school, course_name: '' }];
+        } else {
+          initialTargetSchools = [{ school_name: '', course_name: '' }];
+        }
+
         setEditForm({
           name: freshSt.name,
           name_kana: freshSt.name_kana || '',
@@ -277,12 +287,14 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
           club_activities: freshSt.club_activities || '',
           hobbies: freshSt.hobbies || '',
           parent_name: freshSt.parent_name || '',
+          parent_name_kana: freshSt.parent_name_kana || '',
+          parent_image_url: freshSt.parent_image_url || '',
           contact_phone: freshSt.contact_phone || '',
           contact_time: freshSt.contact_time || '',
           image_url: freshSt.image_url || '',
           personalities: freshSt.personalities || [],
-          target_school: freshSt.target_school || '',
-          classroom: freshSt.classroom || '',
+          target_school: freshSt.target_school || (initialTargetSchools[0]?.school_name || ''),
+          target_schools: initialTargetSchools,
           teacher_in_charge: freshSt.teacher_in_charge || '',
           level: freshSt.level || 'A',
           start_unit_math: (freshSt as any).start_unit_math || null,
@@ -556,9 +568,13 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
     e.preventDefault();
     if (!selectedStudent) return;
     try {
+      const rawTargetSchools = (editForm as any).target_schools || [];
+      const cleanTargetSchools = rawTargetSchools.filter((s: any) => s.school_name?.trim() || s.course_name?.trim());
       const updated = {
         ...selectedStudent,
-        ...editForm
+        ...editForm,
+        target_schools: cleanTargetSchools.length > 0 ? cleanTargetSchools : undefined,
+        target_school: cleanTargetSchools[0]?.school_name || (editForm.target_school || '')
       } as Student;
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
@@ -4175,29 +4191,93 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                     <form onSubmit={handleSaveStudentDetail}>
                       {/* Avatar and Name */}
                       <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
-                        <div style={{
-                          width: '72px',
-                          height: '72px',
-                          borderRadius: '50%',
-                          backgroundColor: '#4f46e5',
-                          color: '#ffffff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '1.8rem',
-                          fontWeight: 'bold',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                          overflow: 'hidden'
-                        }}>
-                          {editForm.image_url ? (
-                            <img src={editForm.image_url} alt="顔写真" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            selectedStudent.name.charAt(0)
+                        <div style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
+                          <div style={{
+                            width: '76px',
+                            height: '76px',
+                            borderRadius: '50%',
+                            backgroundColor: '#4f46e5',
+                            color: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '1.8rem',
+                            fontWeight: 'bold',
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                            overflow: 'hidden'
+                          }}>
+                            {editForm.image_url ? (
+                              <img src={editForm.image_url} alt="顔写真" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              selectedStudent.name.charAt(0)
+                            )}
+                          </div>
+                          <label title="生徒写真を挿入" style={{
+                            position: 'absolute',
+                            bottom: '-4px',
+                            right: '-4px',
+                            backgroundColor: '#3b82f6',
+                            color: '#ffffff',
+                            borderRadius: '50%',
+                            width: '28px',
+                            height: '28px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                            border: '2px solid #ffffff'
+                          }}>
+                            📷
+                            <input
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={e => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = evt => {
+                                    const res = evt.target?.result as string;
+                                    if (res) setEditForm({ ...editForm, image_url: res });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                          {editForm.image_url && (
+                            <button
+                              type="button"
+                              title="生徒写真を削除"
+                              onClick={() => setEditForm({ ...editForm, image_url: '' })}
+                              style={{
+                                position: 'absolute',
+                                top: '-4px',
+                                right: '-4px',
+                                backgroundColor: '#ef4444',
+                                color: '#ffffff',
+                                borderRadius: '50%',
+                                width: '22px',
+                                height: '22px',
+                                border: '2px solid #ffffff',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.65rem',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                              }}
+                            >
+                              ✕
+                            </button>
                           )}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
-                            <div style={{ flex: 2 }}>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（漢字）</label>
                               <input 
                                 type="text" 
                                 value={editForm.name || ''} 
@@ -4207,7 +4287,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                                 required
                               />
                             </div>
-                            <div style={{ flex: 2 }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（フリガナ）</label>
                               <input 
                                 type="text" 
                                 value={editForm.name_kana || ''} 
@@ -4217,14 +4298,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                               />
                             </div>
                           </div>
-                          <input 
-                            type="text" 
-                            value={editForm.image_url || ''} 
-                            onChange={e => setEditForm({ ...editForm, image_url: e.target.value })}
-                            className={styles.input} 
-                            placeholder="顔写真画像URL (ダミー画像URLなど)"
-                            style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-                          />
                         </div>
                       </div>
 
@@ -4291,19 +4364,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
-                          <label>教室</label>
-                          <select 
-                            value={editForm.classroom} 
-                            onChange={e => setEditForm({ ...editForm, classroom: e.target.value })}
-                            className={styles.select}
-                          >
-                            <option value="">-- 指定なし --</option>
-                            <option value="恵比寿教室">恵比寿教室</option>
-                            <option value="渋谷教室">渋谷教室</option>
-                            <option value="新宿教室">新宿教室</option>
-                          </select>
-                        </div>
-                        <div className={styles.formGroup}>
                           <label>担当講師</label>
                           <select 
                             value={editForm.teacher_in_charge} 
@@ -4316,9 +4376,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             <option value="佐藤 舞">佐藤 舞</option>
                           </select>
                         </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
                           <label>部活（自由記述）</label>
                           <input 
@@ -4329,6 +4386,9 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             placeholder="例: サッカー部"
                           />
                         </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
                           <label>趣味（自由記述）</label>
                           <input 
@@ -4337,42 +4397,6 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             onChange={e => setEditForm({ ...editForm, hobbies: e.target.value })}
                             className={styles.input}
                             placeholder="例: 将棋・動画編集"
-                          />
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                        <div className={styles.formGroup}>
-                          <label>保護者名</label>
-                          <input 
-                            type="text" 
-                            value={editForm.parent_name || ''} 
-                            onChange={e => setEditForm({ ...editForm, parent_name: e.target.value })}
-                            className={styles.input}
-                            placeholder="例: 佐藤 健二"
-                          />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label>志望校</label>
-                          <input 
-                            type="text" 
-                            value={editForm.target_school || ''} 
-                            onChange={e => setEditForm({ ...editForm, target_school: e.target.value })}
-                            className={styles.input}
-                            placeholder="例: 天登星雲高校"
-                          />
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
-                        <div className={styles.formGroup}>
-                          <label>連絡先 (電話番号)</label>
-                          <input 
-                            type="text" 
-                            value={editForm.contact_phone || ''} 
-                            onChange={e => setEditForm({ ...editForm, contact_phone: e.target.value })}
-                            className={styles.input}
-                            placeholder="例: 090-7039-0656"
                           />
                         </div>
                         <div className={styles.formGroup}>
@@ -4384,6 +4408,203 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             className={styles.input}
                             placeholder="例: 18:00 - 21:00"
                           />
+                        </div>
+                      </div>
+
+                      {/* 保護者情報セクション */}
+                      <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                        <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>👨‍👩‍👧 保護者情報設定</h4>
+                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                          <div style={{ position: 'relative', width: '64px', height: '64px', flexShrink: 0 }}>
+                            <div style={{
+                              width: '64px',
+                              height: '64px',
+                              borderRadius: '50%',
+                              backgroundColor: '#cbd5e1',
+                              color: '#334155',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.4rem',
+                              fontWeight: 'bold',
+                              overflow: 'hidden',
+                              position: 'relative'
+                            }}>
+                              {editForm.parent_image_url ? (
+                                <img src={editForm.parent_image_url} alt="保護者アイコン" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                (editForm.parent_name || '保').charAt(0)
+                              )}
+                            </div>
+                            <label title="保護者アイコン画像を挿入" style={{
+                              position: 'absolute',
+                              bottom: '-4px',
+                              right: '-4px',
+                              backgroundColor: '#3b82f6',
+                              color: '#ffffff',
+                              borderRadius: '50%',
+                              width: '24px',
+                              height: '24px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                              border: '2px solid #ffffff'
+                            }}>
+                              📷
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={e => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = evt => {
+                                      const res = evt.target?.result as string;
+                                      if (res) setEditForm({ ...editForm, parent_image_url: res });
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                              />
+                            </label>
+                            {editForm.parent_image_url && (
+                              <button
+                                type="button"
+                                title="保護者アイコンを削除"
+                                onClick={() => setEditForm({ ...editForm, parent_image_url: '' })}
+                                style={{
+                                  position: 'absolute',
+                                  top: '-4px',
+                                  right: '-4px',
+                                  backgroundColor: '#ef4444',
+                                  color: '#ffffff',
+                                  borderRadius: '50%',
+                                  width: '20px',
+                                  height: '20px',
+                                  border: '2px solid #ffffff',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.65rem',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                              <label>保護者氏名（漢字）</label>
+                              <input 
+                                type="text" 
+                                value={editForm.parent_name || ''} 
+                                onChange={e => setEditForm({ ...editForm, parent_name: e.target.value })}
+                                className={styles.input}
+                                placeholder="例: 佐藤 健二"
+                              />
+                            </div>
+                            <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                              <label>保護者氏名（フリガナ）</label>
+                              <input 
+                                type="text" 
+                                value={editForm.parent_name_kana || ''} 
+                                onChange={e => setEditForm({ ...editForm, parent_name_kana: e.target.value })}
+                                className={styles.input}
+                                placeholder="例: サトウ ケンジ"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: '12px' }}>
+                          <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                            <label>連絡先 (電話番号)</label>
+                            <input 
+                              type="text" 
+                              value={editForm.contact_phone || ''} 
+                              onChange={e => setEditForm({ ...editForm, contact_phone: e.target.value })}
+                              className={styles.input}
+                              placeholder="例: 090-7039-0656"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 志望校設定セクション */}
+                      <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>🎯 志望校設定（最大3校まで登録可能）</h4>
+                          {((editForm as any).target_schools || []).length < 3 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const current = (editForm as any).target_schools || [{ school_name: editForm.target_school || '', course_name: '' }];
+                                if (current.length < 3) {
+                                  const updated = [...current, { school_name: '', course_name: '' }];
+                                  setEditForm({ ...editForm, target_schools: updated, target_school: updated[0]?.school_name || '' } as any);
+                                }
+                              }}
+                              style={{ padding: '4px 10px', fontSize: '0.75rem', backgroundColor: '#4f46e5', color: '#ffffff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+                            >
+                              ＋ 志望校を追加
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {((editForm as any).target_schools || [{ school_name: editForm.target_school || '', course_name: '' }]).map((sch: any, idx: number) => (
+                            <div key={idx} style={{ display: 'flex', gap: '10px', alignItems: 'center', backgroundColor: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4f46e5', width: '60px', flexShrink: 0 }}>
+                                {idx === 0 ? '第1志望' : idx === 1 ? '第2志望' : '第3志望'}
+                              </span>
+                              <div style={{ flex: 2 }}>
+                                <input
+                                  type="text"
+                                  placeholder="志望校名（例: 天登星雲高校）"
+                                  value={sch.school_name || ''}
+                                  onChange={e => {
+                                    const current = [...((editForm as any).target_schools || [{ school_name: '', course_name: '' }])];
+                                    current[idx] = { ...current[idx], school_name: e.target.value };
+                                    setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
+                                  }}
+                                  className={styles.input}
+                                  style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                                />
+                              </div>
+                              <div style={{ flex: 2 }}>
+                                <input
+                                  type="text"
+                                  placeholder="学科・コース名（例: 普通科 特進コース）"
+                                  value={sch.course_name || ''}
+                                  onChange={e => {
+                                    const current = [...((editForm as any).target_schools || [{ school_name: '', course_name: '' }])];
+                                    current[idx] = { ...current[idx], course_name: e.target.value };
+                                    setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
+                                  }}
+                                  className={styles.input}
+                                  style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                                />
+                              </div>
+                              {((editForm as any).target_schools || []).length > 1 && (
+                                <button
+                                  type="button"
+                                  title="この志望校を削除"
+                                  onClick={() => {
+                                    const current = [...((editForm as any).target_schools || [])];
+                                    current.splice(idx, 1);
+                                    setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
+                                  }}
+                                  style={{ padding: '4px 8px', fontSize: '0.75rem', backgroundColor: '#ef4444', color: '#ffffff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                                >
+                                  削除
+                                </button>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
 

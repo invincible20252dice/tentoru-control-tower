@@ -1923,9 +1923,6 @@ describe('UI Components Render & Interaction Tests', () => {
     const nameKanaInput = screen.getByPlaceholderText('氏名（フリガナ）');
     fireEvent.change(nameKanaInput, { target: { value: 'スズキ ユイコ' } });
 
-    const imageUrlInput = screen.getByPlaceholderText('顔写真画像URL (ダミー画像URLなど)');
-    fireEvent.change(imageUrlInput, { target: { value: 'http://dummy.png' } });
-
     // 存在しない学校名
     const schoolNameInput = screen.getByPlaceholderText('学校名');
     fireEvent.change(schoolNameInput, { target: { value: '存在しない学校名' } });
@@ -1934,9 +1931,6 @@ describe('UI Components Render & Interaction Tests', () => {
 
     const birthdayInput = screen.getByLabelText('生年月日');
     fireEvent.change(birthdayInput, { target: { value: '2013-05-15' } });
-
-    const classroomSelect = screen.getByDisplayValue('恵比寿教室');
-    fireEvent.change(classroomSelect, { target: { value: '渋谷教室' } });
 
     const teacherSelect = screen.getByDisplayValue('福田 尚弘');
     fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
@@ -1950,8 +1944,23 @@ describe('UI Components Render & Interaction Tests', () => {
     const parentInput = screen.getByPlaceholderText('例: 佐藤 健二');
     fireEvent.change(parentInput, { target: { value: '鈴木 太郎' } });
 
-    const targetSchoolInput = screen.getByPlaceholderText('例: 天登星雲高校');
-    fireEvent.change(targetSchoolInput, { target: { value: '恵比寿第一高校' } });
+    const parentKanaInput = screen.getByPlaceholderText('例: サトウ ケンジ');
+    fireEvent.change(parentKanaInput, { target: { value: 'スズキ タロウ' } });
+
+    // 志望校テスト（最大3校および追加・削除）
+    const addTargetSchoolBtn = screen.getByText('＋ 志望校を追加');
+    fireEvent.click(addTargetSchoolBtn);
+
+    const targetSchoolInputs = screen.getAllByPlaceholderText('志望校名（例: 天登星雲高校）');
+    fireEvent.change(targetSchoolInputs[0], { target: { value: '恵比寿第一高校' } });
+    if (targetSchoolInputs[1]) {
+      fireEvent.change(targetSchoolInputs[1], { target: { value: '渋谷第二高校' } });
+    }
+
+    const courseInputs = screen.getAllByPlaceholderText('学科・コース名（例: 普通科 特進コース）');
+    if (courseInputs[0]) {
+      fireEvent.change(courseInputs[0], { target: { value: '普通科 特進コース' } });
+    }
 
     const phoneInput = screen.getByPlaceholderText('例: 090-7039-0656');
     fireEvent.change(phoneInput, { target: { value: '080-1234-5678' } });
@@ -2039,6 +2048,32 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(screen.getByText('キープ')).toBeInTheDocument();
     });
 
+    // 画像ファイル添付テスト (生徒写真・保護者写真)
+    const fileInputList = document.querySelectorAll('input[type="file"]');
+    const dummyFile = new File(['dummy content'], 'photo.png', { type: 'image/png' });
+    
+    if (fileInputList[0]) {
+      fireEvent.change(fileInputList[0], { target: { files: [dummyFile] } });
+    }
+
+    if (fileInputList[1]) {
+      fireEvent.change(fileInputList[1], { target: { files: [dummyFile] } });
+    }
+
+    // 志望校追加 (最大3校まで)
+    const addTargetBtn = screen.getByText('＋ 志望校を追加');
+    fireEvent.click(addTargetBtn); // 2校目
+    fireEvent.click(addTargetBtn); // 3校目
+
+    const extraTargetSchoolInputs = screen.getAllByPlaceholderText('志望校名（例: 天登星雲高校）');
+    expect(extraTargetSchoolInputs.length).toBe(3);
+
+    // 削除ボタンテスト
+    const deleteBtns = screen.getAllByTitle('この志望校を削除');
+    if (deleteBtns.length > 0) {
+      fireEvent.click(deleteBtns[0]);
+    }
+
     // 2. 個性の追加・削除テスト
     // 未入力・未選択での追加テスト (guard clause)
     const addPersonalityBtn = screen.getByText('＋ 追加');
@@ -2075,10 +2110,7 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     // 重複した個性を追加しようとするとアラートが出るテスト
-    fireEvent.change(personalitySelect, { target: { value: '合唱実行委員長' } });
-    await waitFor(() => {
-      expect(personalitySelect).toHaveValue('合唱実行委員長');
-    });
+    fireEvent.change(personalityInput, { target: { value: '負けず嫌い' } });
     await act(async () => {
       fireEvent.click(addPersonalityBtn);
     });
@@ -3527,8 +3559,10 @@ describe('UI Components Render & Interaction Tests', () => {
     const nameKanaInputEdit = screen.getByPlaceholderText('氏名（フリガナ）');
     fireEvent.change(nameKanaInputEdit, { target: { value: 'サトウ タクミ' } });
 
-    const imageUrlInput = screen.getByPlaceholderText(/顔写真画像URL/i);
-    fireEvent.change(imageUrlInput, { target: { value: 'https://example.com/avatar.jpg' } });
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    if (fileInputs[0]) {
+      fireEvent.change(fileInputs[0], { target: { files: [new File([''], 'avatar.png')] } });
+    }
 
     const schoolNameInput = screen.getByPlaceholderText('学校名');
     fireEvent.change(schoolNameInput, { target: { value: '天登第一中学校' } });

@@ -8,6 +8,11 @@ export interface School {
   created_at: string;
 }
 
+export interface TargetSchoolItem {
+  school_name: string;
+  course_name?: string;
+}
+
 export interface Student {
   id: string;
   student_id: string;
@@ -26,11 +31,14 @@ export interface Student {
   club_activities?: string;
   hobbies?: string;
   parent_name?: string;
+  parent_name_kana?: string;
+  parent_image_url?: string;
   contact_phone?: string;
   contact_time?: string;
   image_url?: string;
   personalities?: string[];
   target_school?: string;
+  target_schools?: TargetSchoolItem[];
   classroom?: string;
   teacher_in_charge?: string;
   registered_grade?: string;

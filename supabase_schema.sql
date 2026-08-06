@@ -314,3 +314,8 @@ CREATE TABLE IF NOT EXISTS student_settings (
     default_slots INTEGER NOT NULL DEFAULT 2,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- 28. 保護者情報拡張（画像・フリガナ）および複数志望校JSONBカラム追加
+ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name_kana TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_image_url TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS target_schools JSONB DEFAULT '[]'::jsonb;
