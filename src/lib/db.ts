@@ -1088,8 +1088,12 @@ class DatabaseService {
     }
 
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('students').upsert(toSave).select().single();
-      if (error) throw error;
+      const { school_name, ...payloadToSave } = toSave as any;
+      const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
+      if (error) {
+        console.error('Supabase saveStudent error:', error);
+        throw new Error(`Supabase Error [${error.code || 'UNKNOWN'}]: ${error.message || error.details || JSON.stringify(error)}`);
+      }
       return data;
     } else {
       const rawList = this.getMockData<Student>('students', []);

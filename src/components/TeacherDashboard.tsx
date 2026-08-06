@@ -583,9 +583,10 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
       setStudents(listSt);
       loadData();
       alert('生徒情報を保存しました。');
-    } catch (err) {
-      console.error(err);
-      alert('保存中にエラーが発生しました。');
+    } catch (err: any) {
+      console.error('handleSaveStudentDetail Supabase error:', err);
+      const errMsg = err?.message || err?.details || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      alert(`保存中にエラーが発生しました。\nエラー詳細: ${errMsg}`);
     }
   };
 

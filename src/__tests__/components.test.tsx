@@ -2190,7 +2190,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const saveBtnError = screen.getByText('変更を保存する');
     fireEvent.submit(saveBtnError.closest('form')!);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('保存中にエラーが発生しました。');
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('保存中にエラーが発生しました。'));
     });
     alertMock.mockClear();
     saveStudentSpy.mockRestore();
