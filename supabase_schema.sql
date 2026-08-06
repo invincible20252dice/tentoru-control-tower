@@ -319,3 +319,16 @@ CREATE TABLE IF NOT EXISTS student_settings (
 ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name_kana TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_image_url TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS target_schools JSONB DEFAULT '[]'::jsonb;
+
+-- 29. 講師選択肢マスターテーブル
+CREATE TABLE IF NOT EXISTS teacher_options (
+    name TEXT PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 30. カスタム適用範囲マスターテーブル
+CREATE TABLE IF NOT EXISTS custom_apply_scopes (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);

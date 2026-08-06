@@ -1867,17 +1867,23 @@ class DatabaseService {
   public async saveStudentScheduleConfig(config: StudentScheduleConfig): Promise<void> {
     if (!this.isMockMode && this.supabase) {
       try {
-        const { error } = await this.supabase
-          .from('student_settings')
-          .upsert({
-            student_id: config.student_id,
-            weekly_frequency: config.weekly_frequency,
-            weekly_duration: config.weekly_duration,
-            selected_days: config.selected_days,
-            default_slots: config.default_slots,
-            updated_at: new Date().toISOString(),
-          });
-        if (error) console.error('Supabase saveStudentScheduleConfig error:', error);
+        const payload = {
+          student_id: config.student_id,
+          weekly_frequency: config.weekly_frequency,
+          weekly_duration: config.weekly_duration,
+          selected_days: config.selected_days,
+          default_slots: config.default_slots,
+          updated_at: new Date().toISOString(),
+        };
+        const { error: err1 } = await this.supabase
+          .from('student_schedule_configs')
+          .upsert(payload);
+        if (err1) {
+          const { error: err2 } = await this.supabase
+            .from('student_settings')
+            .upsert(payload);
+          if (err2) console.error('Supabase saveStudentScheduleConfig error:', err1, err2);
+        }
       } catch (err) {
         console.error('saveStudentScheduleConfig exception:', err);
       }
