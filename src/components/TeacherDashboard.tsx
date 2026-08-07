@@ -571,10 +571,12 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
     try {
       const rawTargetSchools = (editForm as any).target_schools || [];
       const cleanTargetSchools = rawTargetSchools.filter((s: any) => s.school_name?.trim() || s.course_name?.trim());
-      const newSlots = parseInt((editForm as any).default_slots || editForm.period_count || 2) || 2;
+      const newSlots = parseInt(String(editForm.period_count || (editForm as any).default_slots || 2)) || 2;
       const updated = {
         ...selectedStudent,
         ...editForm,
+        weekly_sessions_count: (editForm as any).weekly_sessions_count || selectedStudent.weekly_sessions_count || '2回',
+        weekly_duration_minutes: (editForm as any).weekly_duration_minutes || selectedStudent.weekly_duration_minutes || '120分',
         default_slots: newSlots,
         period_count: newSlots,
         target_schools: cleanTargetSchools.length > 0 ? cleanTargetSchools : undefined,
@@ -583,6 +585,14 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
       setPeriodCount(saved.default_slots || saved.period_count || newSlots);
+      setEditForm({
+        ...saved,
+        weekly_sessions_count: saved.weekly_sessions_count || '2回',
+        weekly_duration_minutes: saved.weekly_duration_minutes || '120分',
+        default_slots: saved.default_slots || saved.period_count || newSlots,
+        period_count: saved.default_slots || saved.period_count || newSlots,
+        target_schools: (saved as any).target_schools || cleanTargetSchools
+      } as any);
       // 生徒リスト自体もリロードして更新を反映
       const listSt = db.getStudents();
       setStudents(listSt);
@@ -4654,8 +4664,11 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             <label htmlFor="edit-default-slots">標準コマ数</label>
                             <select 
                               id="edit-default-slots"
-                              value={editForm.period_count || 2} 
-                              onChange={e => setEditForm({ ...editForm, period_count: parseInt(e.target.value) || 2 })}
+                              value={editForm.period_count || (editForm as any).default_slots || 2} 
+                              onChange={e => {
+                                const val = parseInt(e.target.value) || 2;
+                                setEditForm({ ...editForm, period_count: val, default_slots: val } as any);
+                              }}
                               className={styles.select}
                             >
                               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
