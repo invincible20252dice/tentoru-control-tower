@@ -1088,7 +1088,7 @@ class DatabaseService {
     }
 
     if (!this.isMockMode && this.supabase) {
-      const { school_name, ...payloadToSave } = toSave as any;
+      const { school_name, school, units, tasks, ...payloadToSave } = toSave as any;
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
