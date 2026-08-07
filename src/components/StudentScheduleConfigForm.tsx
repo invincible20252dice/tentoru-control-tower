@@ -168,6 +168,7 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
       try {
         const student = db.getStudents().find(s => s.id === studentId);
         if (student) {
+          student.default_slots = data.default_slots;
           student.period_count = data.default_slots;
           await db.saveStudent(student);
         }

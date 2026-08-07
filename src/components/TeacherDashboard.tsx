@@ -304,7 +304,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
           start_unit_japanese: (freshSt as any).start_unit_japanese || null,
           weekly_sessions_count: (freshSt as any).weekly_sessions_count || '2回',
           weekly_duration_minutes: (freshSt as any).weekly_duration_minutes || '120分',
-          period_count: freshSt.period_count || 2
+          default_slots: (freshSt as any).default_slots || freshSt.period_count || 2,
+          period_count: (freshSt as any).default_slots || freshSt.period_count || 2
         });
 
         const allTasks = db.getLearningTasks();
@@ -318,7 +319,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         for (let i = 1; i <= 10; i++) {
           newPeriods[i] = { subject: '', unitId: '', customTheme: '' };
         }
-        let loadedPeriodCount = freshSt.period_count || 2;
+        let loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || 2;
         let foundCommonNote = '';
         
         today.forEach(t => {
@@ -570,14 +571,18 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
     try {
       const rawTargetSchools = (editForm as any).target_schools || [];
       const cleanTargetSchools = rawTargetSchools.filter((s: any) => s.school_name?.trim() || s.course_name?.trim());
+      const newSlots = parseInt((editForm as any).default_slots || editForm.period_count || 2) || 2;
       const updated = {
         ...selectedStudent,
         ...editForm,
+        default_slots: newSlots,
+        period_count: newSlots,
         target_schools: cleanTargetSchools.length > 0 ? cleanTargetSchools : undefined,
         target_school: cleanTargetSchools[0]?.school_name || (editForm.target_school || '')
       } as Student;
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
+      setPeriodCount(saved.default_slots || saved.period_count || newSlots);
       // 生徒リスト自体もリロードして更新を反映
       const listSt = db.getStudents();
       setStudents(listSt);
@@ -1088,9 +1093,10 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         }
       }
 
-      // 生徒情報の period_count も更新して保存
+      // 生徒情報の period_count / default_slots も更新して保存
       const updatedStudent = {
         ...student,
+        default_slots: periodCount,
         period_count: periodCount
       };
       await db.saveStudent(updatedStudent);
