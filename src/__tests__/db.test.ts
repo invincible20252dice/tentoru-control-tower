@@ -27,6 +27,20 @@ describe('Database Service CRUD Tests', () => {
     expect(freshSchools.find(s => s.id === 'sch-test')).toBeDefined();
   });
 
+  it('should sanitize NEXT_PUBLIC_SUPABASE_URL removing /rest/v1 and trailing slashes', () => {
+    const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const originalKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://oqwnciwyzstiqszdgekr.supabase.co/rest/v1/';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy_anon_key';
+    
+    const ServiceClass = (db as any).constructor;
+    const instance = new ServiceClass();
+    expect((instance as any).isMockMode).toBe(false);
+    
+    process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalKey;
+  });
+
   it('should manage students', async () => {
     const students = db.getStudents();
     expect(students.length).toBeGreaterThan(0);

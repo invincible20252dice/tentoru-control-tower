@@ -279,14 +279,19 @@ class DatabaseService {
   private isMockMode: boolean = true;
 
   constructor() {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+    const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
     if (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'mock' && supabaseAnonKey !== 'mock') {
       try {
+        // 二重パス (/rest/v1) や末尾のスラッシュを確実に自動除去して純粋なホストURLに変換
+        supabaseUrl = supabaseUrl
+          .replace(/\/rest\/v1\/?$/i, '')
+          .replace(/\/+$/, '');
+
         this.supabase = createClient(supabaseUrl, supabaseAnonKey);
         this.isMockMode = false;
-        console.log('DatabaseService initialized with Supabase');
+        console.log('DatabaseService initialized with Supabase:', supabaseUrl);
       } catch (e) {
         console.error('Failed to initialize Supabase, falling back to MockMode:', e);
         this.isMockMode = true;
