@@ -1091,7 +1091,16 @@ class DatabaseService {
       const { school_name, ...payloadToSave } = toSave as any;
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
-        console.error('Supabase saveStudent error:', error);
+        console.error('Supabase saveStudent upsert error:', error);
+        if (payloadToSave.id) {
+          const { data: updateData, error: updateError } = await this.supabase
+            .from('students')
+            .update(payloadToSave)
+            .eq('id', payloadToSave.id)
+            .select()
+            .single();
+          if (!updateError && updateData) return updateData;
+        }
         throw new Error(`Supabase Error [${error.code || 'UNKNOWN'}]: ${error.message || error.details || JSON.stringify(error)}`);
       }
       return data;
@@ -1867,6 +1876,13 @@ class DatabaseService {
   public async saveStudentScheduleConfig(config: StudentScheduleConfig): Promise<void> {
     if (!this.isMockMode && this.supabase) {
       try {
+        await this.supabase.from('students').update({
+          weekly_sessions_count: config.weekly_frequency,
+          weekly_duration_minutes: config.weekly_duration,
+          selected_days: config.selected_days,
+          default_slots: config.default_slots
+        }).eq('id', config.student_id);
+
         const payload = {
           student_id: config.student_id,
           weekly_frequency: config.weekly_frequency,
@@ -1879,10 +1895,9 @@ class DatabaseService {
           .from('student_schedule_configs')
           .upsert(payload);
         if (err1) {
-          const { error: err2 } = await this.supabase
+          await this.supabase
             .from('student_settings')
             .upsert(payload);
-          if (err2) console.error('Supabase saveStudentScheduleConfig error:', err1, err2);
         }
       } catch (err) {
         console.error('saveStudentScheduleConfig exception:', err);

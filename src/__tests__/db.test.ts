@@ -370,7 +370,7 @@ describe('Database Service CRUD Tests', () => {
     const createErrorPromise = () => {
       const p = Promise.resolve({ data: null, error: new Error('Database Error') });
       (p as any).single = vi.fn().mockResolvedValue({ data: null, error: new Error('Database Error') });
-      (p as any).eq = vi.fn().mockResolvedValue({ data: null, error: new Error('Database Error') });
+      (p as any).eq = vi.fn().mockImplementation(() => createErrorPromise());
       (p as any).select = vi.fn().mockImplementation(() => createErrorPromise());
       return p;
     };
@@ -378,6 +378,7 @@ describe('Database Service CRUD Tests', () => {
     (localDb as any).supabase = {
       from: vi.fn().mockReturnValue({
         upsert: vi.fn().mockImplementation(() => createErrorPromise()),
+        update: vi.fn().mockImplementation(() => createErrorPromise()),
         insert: vi.fn().mockImplementation(() => createErrorPromise()),
         delete: vi.fn().mockReturnValue({
           eq: vi.fn().mockResolvedValue({ error: new Error('Database Error') })
