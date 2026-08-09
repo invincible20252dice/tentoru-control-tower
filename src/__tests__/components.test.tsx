@@ -3816,4 +3816,57 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getAllByText(/司令塔ダッシュボード/i)[0]).toBeInTheDocument();
     unmountHighTD();
   });
+
+  it('should support day-of-week selection chips, weekly frequency limit checks, and 1-week schedule matrix navigation in TeacherDashboard', async () => {
+    const { container, unmount } = render(<TeacherDashboard />);
+    
+    // Select first student
+    await waitFor(() => {
+      expect(screen.getByText(/佐藤 拓海/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/佐藤 拓海/));
+
+    // Switch to 基本情報・属性設定 (生徒情報 tab)
+    fireEvent.click(screen.getByText('生徒情報'));
+
+    // Verify day-of-week chips are rendered
+    await waitFor(() => {
+      expect(screen.getByText('🗓️ 通塾曜日設定')).toBeInTheDocument();
+    });
+
+    const monChip = screen.getByTestId('day-chip-monday');
+    const wedChip = screen.getByTestId('day-chip-wednesday');
+    const friChip = screen.getByTestId('day-chip-friday');
+
+    // Toggle chips
+    fireEvent.click(wedChip); // Add wednesday
+    fireEvent.click(monChip); // Try adding when max 2 is reached (should alert limit)
+
+    // Change weekly frequency to 3回
+    const freqSelect = container.querySelector('#edit-weekly-frequency') as HTMLSelectElement;
+    fireEvent.change(freqSelect, { target: { value: '3回' } });
+    fireEvent.click(monChip); // Now adding monChip should succeed
+
+    // Save basic settings
+    const saveBtn = screen.getByText('変更を保存する');
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // Switch to 学習計画・コマ割り (Tab 1)
+    fireEvent.click(screen.getByText('学習計画・コマ割り'));
+
+    // Verify 1-week schedule overview matrix is rendered
+    await waitFor(() => {
+      expect(screen.getByText('📅 選択週（1週間）の学習予定・コマ割り状況')).toBeInTheDocument();
+    });
+
+    // Switch date from 1-week matrix
+    const selectButtons = screen.getAllByText('選択');
+    if (selectButtons.length > 0) {
+      fireEvent.click(selectButtons[0]);
+    }
+
+    unmount();
+  });
 });

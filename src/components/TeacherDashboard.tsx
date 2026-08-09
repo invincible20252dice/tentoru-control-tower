@@ -304,6 +304,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
           start_unit_japanese: (freshSt as any).start_unit_japanese || null,
           weekly_sessions_count: (freshSt as any).weekly_sessions_count || '2回',
           weekly_duration_minutes: (freshSt as any).weekly_duration_minutes || '120分',
+          selected_days: freshSt.selected_days || ['tuesday', 'friday'],
           default_slots: (freshSt as any).default_slots || freshSt.period_count || 2,
           period_count: (freshSt as any).default_slots || freshSt.period_count || 2
         });
@@ -319,6 +320,8 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         for (let i = 1; i <= 10; i++) {
           newPeriods[i] = { subject: '', unitId: '', customTheme: '' };
         }
+        const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date(scheduleDate).getDay()];
+        const isAttendanceDay = ((freshSt as any).selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
         let loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || 2;
         let foundCommonNote = '';
         
@@ -577,6 +580,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         ...editForm,
         weekly_sessions_count: (editForm as any).weekly_sessions_count || selectedStudent.weekly_sessions_count || '2回',
         weekly_duration_minutes: (editForm as any).weekly_duration_minutes || selectedStudent.weekly_duration_minutes || '120分',
+        selected_days: (editForm as any).selected_days || selectedStudent.selected_days || ['tuesday', 'friday'],
         default_slots: newSlots,
         period_count: newSlots,
         target_schools: cleanTargetSchools.length > 0 ? cleanTargetSchools : undefined,
@@ -589,6 +593,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
         ...saved,
         weekly_sessions_count: saved.weekly_sessions_count || '2回',
         weekly_duration_minutes: saved.weekly_duration_minutes || '120分',
+        selected_days: saved.selected_days || (editForm as any).selected_days || ['tuesday', 'friday'],
         default_slots: saved.default_slots || saved.period_count || newSlots,
         period_count: saved.default_slots || saved.period_count || newSlots,
         target_schools: (saved as any).target_schools || cleanTargetSchools
@@ -2277,6 +2282,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                       <HorizontalDatePicker 
                         selectedDate={scheduleDate} 
                         onChangeDate={setScheduleDate} 
+                        selectedDays={selectedStudent.selected_days || ['tuesday', 'friday']}
                       />
                       <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
@@ -2296,21 +2302,39 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                           const dayOfWeek = days[d.getDay()];
                           const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
                           const weekNum = Math.ceil((date + firstDay.getDay()) / 7);
+                          const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
+                          const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
+
                           return (
-                            <span 
-                              data-testid="japanese-date-badge"
-                              style={{ 
-                                padding: '4px 10px', 
-                                background: '#e0e7ff', 
-                                color: '#3730a3', 
-                                borderRadius: '6px', 
-                                fontWeight: 600, 
-                                fontSize: '0.82rem',
-                                border: '1px solid #c7d2fe'
-                              }}
-                            >
-                              📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span 
+                                data-testid="japanese-date-badge"
+                                style={{ 
+                                  padding: '4px 10px', 
+                                  background: isAttendance ? '#eff6ff' : '#f1f5f9', 
+                                  color: isAttendance ? '#1e40af' : '#475569', 
+                                  borderRadius: '6px', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.82rem',
+                                  border: isAttendance ? '1px solid #bfdbfe' : '1px solid #cbd5e1'
+                                }}
+                              >
+                                📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
+                              </span>
+                              <span
+                                style={{
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  backgroundColor: isAttendance ? '#dbeafe' : '#f8fafc',
+                                  color: isAttendance ? '#1d4ed8' : '#64748b',
+                                  border: isAttendance ? '1px solid #93c5fd' : '1px solid #e2e8f0'
+                                }}
+                              >
+                                {isAttendance ? `📌 通塾設定日 (標準${selectedStudent.default_slots || selectedStudent.period_count || 2}コマ)` : '☕ 休塾設定日（自習）'}
+                              </span>
+                            </div>
                           );
                         })()}
                       </div>
@@ -2610,6 +2634,147 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                       <button onClick={handleSaveTimetable} className={styles.btn} style={{ marginTop: '16px' }}>
                         時間割コマ割りを保存
                       </button>
+                    </div>
+                  </div>
+
+                  {/* 1週間の学習予定・コマ割り一覧 */}
+                  <div style={{ marginTop: '28px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1e293b' }}>
+                        📅 選択週（1週間）の学習予定・コマ割り状況
+                      </h4>
+                      <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                        各曜日をクリックしてその日のコマ割りを即座に編集できます
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '8px' }}>
+                      {(() => {
+                        const parts = (scheduleDate || '').split('-');
+                        const d = parts.length === 3 ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])) : new Date();
+                        const day = d.getDay();
+                        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+                        const monday = new Date(d.setDate(diff));
+
+                        const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
+                        const dayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+                        return Array.from({ length: 7 }, (_, i) => {
+                          const itemDate = new Date(monday);
+                          itemDate.setDate(monday.getDate() + i);
+                          const yr = itemDate.getFullYear();
+                          const mo = String(itemDate.getMonth() + 1).padStart(2, '0');
+                          const da = String(itemDate.getDate()).padStart(2, '0');
+                          const dStr = `${yr}-${mo}-${da}`;
+                          const dayKey = dayKeys[i];
+                          const dayOfWeek = dayNames[i];
+                          const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayKey);
+                          const isSelectedDate = dStr === scheduleDate;
+                          const dayTasks = studentTasks.filter(t => t.scheduled_date === dStr && t.period);
+                          const dayTests = db.getMiniTestResults().filter(r => r.student_id === selectedStudent.id && r.date === dStr);
+                          const dayHws = db.getHomeworkResults().filter(r => r.student_id === selectedStudent.id && r.date === dStr);
+
+                          return (
+                            <div
+                              key={dStr}
+                              onClick={() => setScheduleDate(dStr)}
+                              style={{
+                                backgroundColor: isSelectedDate ? '#eff6ff' : (isAttendance ? '#ffffff' : '#f8fafc'),
+                                border: isSelectedDate ? '2px solid #3b82f6' : (isAttendance ? '1px solid #bfdbfe' : '1px solid #e2e8f0'),
+                                borderRadius: '10px',
+                                padding: '10px 8px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                minHeight: '140px',
+                                boxShadow: isSelectedDate ? '0 4px 12px rgba(59, 130, 246, 0.15)' : 'none'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', borderBottom: '1px solid #f1f5f9', paddingBottom: '4px' }}>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: isSelectedDate ? '#1d4ed8' : '#1e293b' }}>
+                                  {itemDate.getMonth() + 1}/{itemDate.getDate()} ({dayOfWeek})
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: '0.6rem',
+                                    padding: '1px 4px',
+                                    borderRadius: '4px',
+                                    backgroundColor: isAttendance ? '#dbeafe' : '#f1f5f9',
+                                    color: isAttendance ? '#1d4ed8' : '#64748b',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  {isAttendance ? '通塾' : '休塾'}
+                                </span>
+                              </div>
+
+                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.7rem' }}>
+                                {dayTasks.length > 0 ? (
+                                  dayTasks
+                                    .sort((a, b) => (a.period || 0) - (b.period || 0))
+                                    .map(t => (
+                                      <div
+                                        key={t.id}
+                                        style={{
+                                          backgroundColor: '#f0fdf4',
+                                          border: '1px solid #bbf7d0',
+                                          borderRadius: '4px',
+                                          padding: '2px 4px',
+                                          color: '#166534',
+                                          fontSize: '0.68rem',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis'
+                                        }}
+                                        title={`${t.period}コマ: ${t.subject || '自由記述'} ${t.custom_unit_name || ''}`}
+                                      >
+                                        <strong>{t.period}ｺﾏ:</strong> {t.subject || '自由記述'}
+                                      </div>
+                                    ))
+                                ) : isAttendance ? (
+                                  <div style={{ color: '#3b82f6', fontSize: '0.65rem', fontStyle: 'italic', padding: '4px 0' }}>
+                                    標準{selectedStudent.default_slots || selectedStudent.period_count || 2}コマ予定
+                                  </div>
+                                ) : (
+                                  <div style={{ color: '#94a3b8', fontSize: '0.65rem', padding: '4px 0' }}>
+                                    予定なし
+                                  </div>
+                                )}
+
+                                {dayTests.length > 0 && (
+                                  <div style={{ fontSize: '0.63rem', color: '#7c3aed', background: '#f5f3ff', padding: '2px 4px', borderRadius: '4px', border: '1px solid #ddd6fe' }}>
+                                    📝 テスト{dayTests.length}件
+                                  </div>
+                                )}
+                                {dayHws.length > 0 && (
+                                  <div style={{ fontSize: '0.63rem', color: '#c2410c', background: '#fff7ed', padding: '2px 4px', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                                    🏠 宿題{dayHws.length}件
+                                  </div>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                style={{
+                                  marginTop: '6px',
+                                  width: '100%',
+                                  padding: '3px 0',
+                                  fontSize: '0.65rem',
+                                  backgroundColor: isSelectedDate ? '#3b82f6' : '#ffffff',
+                                  color: isSelectedDate ? '#ffffff' : '#3b82f6',
+                                  border: '1px solid #3b82f6',
+                                  borderRadius: '4px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                {isSelectedDate ? '編集中' : '選択'}
+                              </button>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -4634,7 +4799,15 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                             <select 
                               id="edit-weekly-frequency"
                               value={(editForm as any).weekly_sessions_count || '2回'} 
-                              onChange={e => setEditForm({ ...editForm, weekly_sessions_count: e.target.value } as any)}
+                              onChange={e => {
+                                const newFreq = e.target.value;
+                                const max = newFreq.includes('2') ? 2 : newFreq.includes('3') ? 3 : newFreq.includes('4') ? 4 : newFreq.includes('5') ? 5 : null;
+                                let curDays = ((editForm as any).selected_days || ['tuesday', 'friday']);
+                                if (max !== null && curDays.length > max) {
+                                  curDays = curDays.slice(0, max);
+                                }
+                                setEditForm({ ...editForm, weekly_sessions_count: newFreq, selected_days: curDays } as any);
+                              }}
                               className={styles.select}
                             >
                               <option value="2回">週2回</option>
@@ -4675,6 +4848,77 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
                                 <option key={num} value={num}>{num}コマ</option>
                               ))}
                             </select>
+                          </div>
+                        </div>
+
+                        {/* 通塾曜日設定 */}
+                        <div style={{ marginTop: '14px', backgroundColor: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block' }}>
+                              🗓️ 通塾曜日設定
+                            </label>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              {(() => {
+                                const freq = (editForm as any).weekly_sessions_count || '2回';
+                                const max = freq.includes('2') ? 2 : freq.includes('3') ? 3 : freq.includes('4') ? 4 : freq.includes('5') ? 5 : null;
+                                const curDays = ((editForm as any).selected_days || ['tuesday', 'friday']);
+                                return max !== null ? `選択中: ${curDays.length} / 最大${max}日` : `選択中: ${curDays.length}日 (無制限)`;
+                              })()}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {[
+                              { id: 'monday', label: '月' },
+                              { id: 'tuesday', label: '火' },
+                              { id: 'wednesday', label: '水' },
+                              { id: 'thursday', label: '木' },
+                              { id: 'friday', label: '金' },
+                              { id: 'saturday', label: '土' },
+                              { id: 'sunday', label: '日' }
+                            ].map(d => {
+                              const curDays = ((editForm as any).selected_days || ['tuesday', 'friday']);
+                              const isSelected = curDays.includes(d.id);
+                              return (
+                                <button
+                                  key={d.id}
+                                  type="button"
+                                  data-testid={`day-chip-${d.id}`}
+                                  onClick={() => {
+                                    const freq = (editForm as any).weekly_sessions_count || '2回';
+                                    const max = freq.includes('2') ? 2 : freq.includes('3') ? 3 : freq.includes('4') ? 4 : freq.includes('5') ? 5 : null;
+                                    if (isSelected) {
+                                      const filtered = curDays.filter((x: string) => x !== d.id);
+                                      setEditForm({ ...editForm, selected_days: filtered } as any);
+                                    } else {
+                                      if (max !== null && curDays.length >= max) {
+                                        alert(`週の通塾回数が「${freq}」のため、選択可能な曜日は最大${max}日です。他の曜日を解除してから選択してください。`);
+                                        return;
+                                      }
+                                      setEditForm({ ...editForm, selected_days: [...curDays, d.id] } as any);
+                                    }
+                                  }}
+                                  style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    borderRadius: '50%',
+                                    border: isSelected ? '2px solid #3b82f6' : '1px solid #cbd5e1',
+                                    backgroundColor: isSelected ? '#3b82f6' : '#ffffff',
+                                    color: isSelected ? '#ffffff' : '#334155',
+                                    fontWeight: 700,
+                                    fontSize: '0.88rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    boxShadow: isSelected ? '0 2px 6px rgba(59, 130, 246, 0.35)' : 'none',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                >
+                                  {d.label}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>

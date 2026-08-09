@@ -4,11 +4,13 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 interface HorizontalDatePickerProps {
   selectedDate: string; // 'YYYY-MM-DD'
   onChangeDate: (dateStr: string) => void;
+  selectedDays?: string[]; // e.g. ['tuesday', 'friday'] or ['月', '木']
 }
 
 export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
   selectedDate,
   onChangeDate,
+  selectedDays,
 }) => {
   // Safe date parsing helper
   const parseDate = (dStr: string) => {
@@ -46,18 +48,25 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
 
   // Generate 7 days (Monday to Sunday)
   const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
+  const dayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(mondayObj);
     d.setDate(mondayObj.getDate() + i);
     const dateStr = formatDateStr(d);
     const dayOfWeek = dayNames[i];
+    const dayKey = dayKeys[i];
     const formattedDay = String(d.getDate()).padStart(2, '0');
+    const isAttendanceDay = selectedDays && selectedDays.length > 0
+      ? selectedDays.includes(dayKey) || selectedDays.includes(dayOfWeek)
+      : false;
 
     return {
       dateObj: d,
       dateStr,
       dayOfWeek,
+      dayKey,
       formattedDay,
+      isAttendanceDay,
     };
   });
 
@@ -205,28 +214,61 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
               onClick={() => onChangeDate(item.dateStr)}
               style={{
                 width: '100%',
-                height: '62px',
+                minHeight: '66px',
                 borderRadius: '16px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '2px',
+                gap: '1px',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease-in-out',
-                backgroundColor: isActive ? '#0066cc' : '#ffffff',
-                border: isActive ? '1px solid #0066cc' : '1px solid #e2e8f0',
+                backgroundColor: isActive ? '#0066cc' : (item.isAttendanceDay ? '#f0f7ff' : '#ffffff'),
+                border: isActive
+                  ? '2px solid #0066cc'
+                  : (item.isAttendanceDay ? '1.5px solid #93c5fd' : '1px solid #e2e8f0'),
                 boxShadow: isActive
                   ? '0 4px 12px rgba(0, 102, 204, 0.35)'
                   : 'none',
-                padding: '4px 0',
+                padding: '6px 0',
               }}
             >
+              {item.isAttendanceDay ? (
+                <span
+                  style={{
+                    fontSize: '0.62rem',
+                    padding: '1px 5px',
+                    borderRadius: '6px',
+                    backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : '#dbeafe',
+                    color: isActive ? '#ffffff' : '#1d4ed8',
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  通塾
+                </span>
+              ) : (
+                selectedDays && selectedDays.length > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.6rem',
+                      padding: '1px 4px',
+                      borderRadius: '6px',
+                      backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : '#f8fafc',
+                      color: isActive ? '#cbd5e1' : '#94a3b8',
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    休塾
+                  </span>
+                )
+              )}
               <span
                 style={{
                   fontSize: '0.75rem',
-                  fontWeight: 600,
-                  color: isActive ? '#ffffff' : '#0066cc',
+                  fontWeight: 700,
+                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#1e40af' : '#475569'),
                 }}
               >
                 {item.dayOfWeek}
@@ -235,7 +277,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
                 style={{
                   fontSize: '0.95rem',
                   fontWeight: 800,
-                  color: isActive ? '#ffffff' : '#0066cc',
+                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#0066cc' : '#334155'),
                   lineHeight: 1.1,
                 }}
               >
