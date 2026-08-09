@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import styles from './TeacherDashboard.module.css';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 import { HorizontalDatePicker } from './HorizontalDatePicker';
+import { BranchManagement } from './BranchManagement';
+import { Building2 } from 'lucide-react';
 import { 
   db, 
   Student, 
@@ -23,7 +25,9 @@ import {
   TargetSchoolItem,
   GRADES,
   StudentInteraction,
-  getSchoolYear
+  getSchoolYear,
+  Branch,
+  UserRole
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -49,8 +53,11 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
   // State
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [userRole, setUserRole] = useState<UserRole>('admin');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail'>('student-list');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
   // 生徒詳細（生徒情報）画面用 State
@@ -239,6 +246,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
     const listUnits = db.getCurriculumUnits();
     const listTemplates = db.getMilestoneTemplates();
     const listCc = db.getCustomClasses();
+    const listBranches = db.getBranches();
 
     setStudents(listSt);
     setSchools(listSch);
@@ -248,6 +256,7 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
     setAllCurriculumUnits(listUnits);
     setMilestoneTemplates(listTemplates);
     setCustomClassesList(listCc);
+    setBranches(listBranches);
 
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
@@ -1803,19 +1812,99 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
   return (
     <div className={containerClass}>
       <div className={styles.header}>
-        <h1>
-          {/* Dashboard Icon */}
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="9" y1="3" x2="9" y2="21" />
-            <line x1="15" y1="9" x2="21" y2="9" />
-            <line x1="9" y1="15" x2="15" y2="15" />
-          </svg>
-          テントル 司令塔ダッシュボード (講師用)
-        </h1>
-        <button onClick={onBackToPortal} className={styles.backBtn}>
-          ポータルへ戻る
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1>
+            {/* Dashboard Icon */}
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+              <line x1="15" y1="9" x2="21" y2="9" />
+              <line x1="9" y1="15" x2="15" y2="15" />
+            </svg>
+            テントル 司令塔ダッシュボード (講師用)
+          </h1>
+
+          {/* Role badge / switcher */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px' }}>
+            <button
+              type="button"
+              data-testid="role-toggle-admin"
+              onClick={() => setUserRole('admin')}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: userRole === 'admin' ? '#4f46e5' : 'transparent',
+                color: '#ffffff',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              本部権限
+            </button>
+            <button
+              type="button"
+              data-testid="role-toggle-branch"
+              onClick={() => {
+                setUserRole('branch');
+                if (activeTab === 'branches') setActiveTab('student-list');
+              }}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: userRole === 'branch' ? '#0284c7' : 'transparent',
+                color: '#ffffff',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              校舎権限
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Branch Switcher for Admin */}
+          {userRole === 'admin' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>🏢 対象校舎:</span>
+              <select
+                id="admin-branch-select"
+                data-testid="admin-branch-switcher"
+                value={selectedBranchId}
+                onChange={e => setSelectedBranchId(e.target.value)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#1e293b',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">全校舎 (本部一括表示)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <span style={{ fontSize: '0.78rem', backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 700 }}>
+              🏢 恵比寿教室
+            </span>
+          )}
+
+          <button onClick={onBackToPortal} className={styles.backBtn}>
+            ポータルへ戻る
+          </button>
+        </div>
       </div>
 
       <div className={styles.mainLayout}>
@@ -1910,6 +1999,22 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
               AI指導報告書
             </button>
           </div>
+
+          {/* Headquarters Group (Admin Only) */}
+          {userRole === 'admin' && (
+            <div className={styles.menuGroup}>
+              <div className={styles.menuTitle}>本部統括管理</div>
+              <button
+                type="button"
+                data-testid="menu-branches"
+                className={`${styles.menuItem} ${activeTab === 'branches' ? styles.menuItemActive : ''}`}
+                onClick={() => setActiveTab('branches')}
+              >
+                <Building2 size={16} style={{ marginRight: '8px' }} />
+                校舎アカウント管理
+              </button>
+            </div>
+          )}
 
           {/* Selected Student Panel Preview */}
           {selectedStudent && (
@@ -2071,6 +2176,16 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
               <div className={styles.studentGrid}>
                 {students
                   .filter(st => {
+                    // Multitenant Branch filtering
+                    if (userRole === 'branch') {
+                      const isBranchStudent = st.branch_id === 'branch-1' || st.classroom === '恵比寿教室' || !st.branch_id;
+                      if (!isBranchStudent) return false;
+                    } else if (selectedBranchId !== 'all') {
+                      const targetBranch = branches.find(b => b.id === selectedBranchId);
+                      const isMatch = st.branch_id === selectedBranchId || (targetBranch && st.classroom === targetBranch.name);
+                      if (!isMatch) return false;
+                    }
+
                     if (filterSchoolId && st.school_id !== filterSchoolId) return false;
                     if (filterGrade && st.grade !== filterGrade) return false;
                     
@@ -2218,8 +2333,20 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
             </div>
           )}
 
+          {/* Branch Account Management (Admin Only) */}
+          {activeTab === 'branches' && (
+            <div className={styles.card}>
+              <BranchManagement
+                onSelectBranch={(branch) => {
+                  setSelectedBranchId(branch.id);
+                  setActiveTab('student-list');
+                }}
+              />
+            </div>
+          )}
+
           {/* Student Specific Tab Screens */}
-          {activeTab !== 'student-list' && activeTab !== 'create-student' && (
+          {activeTab !== 'student-list' && activeTab !== 'create-student' && activeTab !== 'branches' && (
             !selectedStudent ? (
               <div className={`${styles.card} ${styles.noStudentSelected}`}>
                 {/* Info Icon */}

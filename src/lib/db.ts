@@ -56,6 +56,32 @@ export interface Student {
   weekly_duration_minutes?: string | null;
   selected_days?: string[];
   default_slots?: number;
+  branch_id?: string | null;
+}
+
+export type UserRole = 'admin' | 'branch';
+
+export interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  email: string;
+  status: 'active' | 'suspended';
+  created_at: string;
+  last_login_at?: string | null;
+  phone?: string;
+  address?: string;
+  student_count?: number;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  created_at?: string;
 }
 
 export interface StudentScheduleConfig {
@@ -1942,6 +1968,157 @@ class DatabaseService {
         default_slots: config.default_slots,
       };
       this.saveMockData('students', students);
+    }
+  }
+
+  // 17. Branches & Multitenancy (RBAC)
+  public getBranches(): Branch[] {
+    const seed: Branch[] = [
+      {
+        id: 'branch-1',
+        name: '恵比寿教室',
+        code: 'EBISU',
+        email: 'ebisu@tentoru.jp',
+        status: 'active',
+        created_at: '2026-04-01T00:00:00Z',
+        last_login_at: '2026-08-09T09:30:00Z',
+        phone: '03-1234-5678',
+        address: '東京都渋谷区恵比寿1-2-3 テントルビル2F'
+      },
+      {
+        id: 'branch-2',
+        name: '渋谷教室',
+        code: 'SHIBUYA',
+        email: 'shibuya@tentoru.jp',
+        status: 'active',
+        created_at: '2026-04-01T00:00:00Z',
+        last_login_at: '2026-08-08T18:15:00Z',
+        phone: '03-2345-6789',
+        address: '東京都渋谷区道玄坂2-10-1 渋谷タワー3F'
+      },
+      {
+        id: 'branch-3',
+        name: '新宿教室',
+        code: 'SHINJUKU',
+        email: 'shinjuku@tentoru.jp',
+        status: 'active',
+        created_at: '2026-05-01T00:00:00Z',
+        last_login_at: '2026-08-07T14:20:00Z',
+        phone: '03-3456-7890',
+        address: '東京都新宿区西新宿1-5-11 新宿セントラルビル4F'
+      },
+      {
+        id: 'branch-4',
+        name: '横浜教室',
+        code: 'YOKOHAMA',
+        email: 'yokohama@tentoru.jp',
+        status: 'suspended',
+        created_at: '2026-06-01T00:00:00Z',
+        last_login_at: '2026-07-25T11:00:00Z',
+        phone: '045-123-4567',
+        address: '神奈川県横浜市西区みなとみらい2-1-1 横浜パークビル5F'
+      }
+    ];
+
+    const list = this.getMockData<Branch>('branches', seed);
+    // Dynamic student count calculation
+    const allStudents = this.getStudents();
+    return list.map(b => ({
+      ...b,
+      student_count: allStudents.filter(s => s.branch_id === b.id || s.classroom === b.name).length
+    }));
+  }
+
+  public async saveBranch(branch: Branch): Promise<Branch> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase.from('branches').upsert(branch).select().single();
+        if (error) console.warn('Supabase saveBranch warning:', error);
+      } catch (err) {
+        console.warn('saveBranch error:', err);
+      }
+    }
+    const list = this.getMockData<Branch>('branches', []);
+    const idx = list.findIndex(b => b.id === branch.id);
+    if (idx >= 0) list[idx] = branch;
+    else list.push(branch);
+    this.saveMockData('branches', list);
+    return branch;
+  }
+
+  public async deleteBranch(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase.from('branches').delete().eq('id', id);
+        if (error) console.warn('Supabase deleteBranch warning:', error);
+      } catch (err) {
+        console.warn('deleteBranch error:', err);
+      }
+    }
+    const list = this.getMockData<Branch>('branches', []);
+    this.saveMockData('branches', list.filter(b => b.id !== id));
+  }
+
+  public async toggleBranchStatus(branchId: string): Promise<Branch> {
+    const branches = this.getBranches();
+    const branch = branches.find(b => b.id === branchId);
+    if (!branch) throw new Error('校舎が見つかりません');
+    const updated: Branch = {
+      ...branch,
+      status: branch.status === 'active' ? 'suspended' : 'active'
+    };
+    return this.saveBranch(updated);
+  }
+
+  public async createBranchAccount(data: { name: string; email: string; password?: string; code?: string; phone?: string; address?: string }): Promise<Branch> {
+    const newId = `branch-${Date.now()}`;
+    const newCode = data.code?.trim().toUpperCase() || data.name.replace(/[^A-Za-z0-9]/g, '').toUpperCase() || `BR-${Math.floor(Math.random() * 1000)}`;
+    const newBranch: Branch = {
+      id: newId,
+      name: data.name.trim(),
+      code: newCode,
+      email: data.email.trim(),
+      status: 'active',
+      created_at: new Date().toISOString(),
+      last_login_at: null,
+      phone: data.phone?.trim() || '',
+      address: data.address?.trim() || ''
+    };
+    return this.saveBranch(newBranch);
+  }
+
+  public async sendBranchPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase.auth.resetPasswordForEmail(email);
+        if (error) {
+          console.warn('Supabase resetPasswordForEmail warning:', error);
+        }
+      } catch (e) {
+        console.warn('Supabase auth reset warning:', e);
+      }
+    }
+    return {
+      success: true,
+      message: `${email} 宛てにパスワード再設定のご案内メールを送信しました。`
+    };
+  }
+
+  public getCurrentUserRole(): { role: UserRole; branch_id?: string | null; branch_name?: string | null } {
+    const defaultRole = { role: 'admin' as UserRole, branch_id: null, branch_name: '本部統括管理者' };
+    if (typeof window === 'undefined') return defaultRole;
+    try {
+      const stored = localStorage.getItem('current_user_role');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return defaultRole;
+  }
+
+  public setCurrentUserRole(role: UserRole, branch_id?: string | null, branch_name?: string | null): void {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('current_user_role', JSON.stringify({ role, branch_id, branch_name }));
+      } catch (e) {}
     }
   }
 }

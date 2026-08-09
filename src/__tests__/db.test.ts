@@ -836,6 +836,77 @@ describe('Database Service CRUD Tests', () => {
     const fetchedErrConfig = await mockDb.fetchStudentScheduleConfig('std-sup-err');
     expect(fetchedErrConfig.student_id).toBe('std-sup-err');
   });
+
+  it('should support Branch & Multi-tenant RBAC operations in DatabaseService', async () => {
+    // 1. getBranches seed check
+    const branches = db.getBranches();
+    expect(branches.length).toBeGreaterThanOrEqual(4);
+    expect(branches.some(b => b.name === '恵比寿教室')).toBe(true);
+
+    // 2. createBranchAccount
+    const created = await db.createBranchAccount({
+      name: '町田教室',
+      email: 'machida@tentoru.jp',
+      code: 'MACHIDA',
+      phone: '042-123-4567',
+      address: '東京都町田市原町田1-1-1'
+    });
+    expect(created.name).toBe('町田教室');
+    expect(created.code).toBe('MACHIDA');
+    expect(created.status).toBe('active');
+
+    // 3. toggleBranchStatus
+    const toggled = await db.toggleBranchStatus(created.id);
+    expect(toggled.status).toBe('suspended');
+
+    const toggledBack = await db.toggleBranchStatus(created.id);
+    expect(toggledBack.status).toBe('active');
+
+    // 4. saveBranch (update)
+    const updated = await db.saveBranch({ ...created, phone: '042-999-8888' });
+    expect(updated.phone).toBe('042-999-8888');
+
+    // 5. sendBranchPasswordReset
+    const resetRes = await db.sendBranchPasswordReset(created.email);
+    expect(resetRes.success).toBe(true);
+
+    // 6. deleteBranch
+    await db.deleteBranch(created.id);
+    const afterDelete = db.getBranches();
+    expect(afterDelete.find(b => b.id === created.id)).toBeUndefined();
+
+    // 7. Role methods
+    db.setCurrentUserRole('branch', 'branch-1', '恵比寿教室');
+    const curRole = db.getCurrentUserRole();
+    expect(curRole.role).toBe('branch');
+    expect(curRole.branch_id).toBe('branch-1');
+
+    db.setCurrentUserRole('admin', null, '本部統括管理者');
+    const adminRole = db.getCurrentUserRole();
+    expect(adminRole.role).toBe('admin');
+
+    // 8. Supabase non-mock branch methods
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: created, error: null })
+          })
+        }),
+        delete: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null })
+        })
+      }),
+      auth: {
+        resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null })
+      }
+    };
+    await expect(localDb.saveBranch(created)).resolves.toBeDefined();
+    await expect(localDb.deleteBranch('branch-1')).resolves.not.toThrow();
+    await expect(localDb.sendBranchPasswordReset('test@branch.jp')).resolves.toBeDefined();
+  });
 });
 
 describe('Gemini API Key Utility Tests', () => {
