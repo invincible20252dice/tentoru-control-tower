@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { db, UserSession, Branch } from '../lib/db';
+import { db, UserSession } from '../lib/db';
 import { 
   Building2, 
   Lock, 
@@ -9,21 +9,16 @@ import {
   Eye, 
   EyeOff, 
   LogIn, 
-  GraduationCap, 
-  ShieldCheck, 
-  AlertCircle,
-  Sparkles
+  AlertCircle 
 } from 'lucide-react';
 
 interface LoginFormProps {
   onLoginSuccess: (session: UserSession) => void;
-  onStudentEntry: () => void;
   theme?: 'light' | 'dark';
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({
   onLoginSuccess,
-  onStudentEntry,
   theme = 'light'
 }) => {
   const [email, setEmail] = useState('');
@@ -51,27 +46,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({
     }
   };
 
-  // Quick Demo Login Handler
-  const handleQuickLogin = async (demoEmail: string, demoPass: string = 'Tentoru2026!') => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setErrorMsg(null);
-    setLoading(true);
-
-    try {
-      const res = await db.signInWithPassword(demoEmail, demoPass);
-      if (res.success && res.session) {
-        onLoginSuccess(res.session);
-      } else {
-        setErrorMsg(res.error || 'ログインに失敗しました。');
-      }
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'ログインエラー');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div
       style={{
@@ -81,19 +55,19 @@ export const LoginForm: React.FC<LoginFormProps> = ({
         justifyContent: 'center',
         backgroundColor: theme === 'dark' ? '#0f172a' : '#f8fafc',
         padding: '24px 16px',
-        backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.12) 0px, transparent 50%)',
+        backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.10) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.10) 0px, transparent 50%)',
         backgroundAttachment: 'fixed'
       }}
     >
       <div
         style={{
           width: '100%',
-          maxWidth: '460px',
+          maxWidth: '420px',
           backgroundColor: theme === 'dark' ? '#1e293b' : '#ffffff',
           borderRadius: '20px',
-          boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+          boxShadow: '0 20px 45px -10px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(226, 232, 240, 0.8)',
           overflow: 'hidden',
-          padding: '36px 32px'
+          padding: '36px 28px'
         }}
       >
         {/* Brand Header */}
@@ -103,41 +77,41 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '56px',
-              height: '56px',
-              borderRadius: '16px',
+              width: '52px',
+              height: '52px',
+              borderRadius: '14px',
               background: 'linear-gradient(135deg, #4f46e5, #3b82f6)',
               color: '#ffffff',
-              marginBottom: '14px',
-              boxShadow: '0 8px 16px rgba(79, 70, 229, 0.3)'
+              marginBottom: '12px',
+              boxShadow: '0 6px 16px rgba(79, 70, 229, 0.28)'
             }}
           >
-            <Building2 size={30} />
+            <Building2 size={26} />
           </div>
 
           <h1
             style={{
-              fontSize: '1.75rem',
+              fontSize: '1.65rem',
               fontWeight: 900,
               letterSpacing: '0.04em',
               background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              margin: '0 0 6px 0'
+              margin: '0 0 4px 0'
             }}
           >
             TENTORU
           </h1>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#64748b', marginBottom: '6px' }}>
             個別最適化・学習管理 司令塔システム
           </div>
           <div
             style={{
               display: 'inline-block',
-              padding: '3px 12px',
+              padding: '2px 10px',
               backgroundColor: '#e0e7ff',
               color: '#4338ca',
-              fontSize: '0.75rem',
+              fontSize: '0.72rem',
               fontWeight: 700,
               borderRadius: '20px'
             }}
@@ -154,7 +128,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               display: 'flex',
               alignItems: 'flex-start',
               gap: '8px',
-              padding: '12px 14px',
+              padding: '11px 13px',
               backgroundColor: '#fef2f2',
               border: '1px solid #fecaca',
               borderRadius: '10px',
@@ -164,14 +138,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               lineHeight: 1.4
             }}
           >
-            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <AlertCircle size={17} style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>{errorMsg}</div>
           </div>
         )}
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Email */}
+          {/* Email Input */}
           <div>
             <label
               htmlFor="login-email"
@@ -204,7 +178,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
                 type="email"
                 required
                 data-testid="login-email-input"
-                placeholder="ebisu@tentoru.jp または admin@tentoru.jp"
+                placeholder="example@tentoru.jp"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 style={{
@@ -223,7 +197,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
             </div>
           </div>
 
-          {/* Password */}
+          {/* Password Input */}
           <div>
             <label
               htmlFor="login-password"
@@ -298,7 +272,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
             disabled={loading}
             data-testid="login-submit-btn"
             style={{
-              marginTop: '8px',
+              marginTop: '10px',
               padding: '12px 20px',
               borderRadius: '10px',
               border: 'none',
@@ -320,110 +294,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({
             {loading ? '認証中...' : 'ログイン'}
           </button>
         </form>
-
-        {/* Quick Demo Login Preset Section */}
-        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px dashed #e2e8f0' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              color: '#64748b',
-              marginBottom: '10px'
-            }}
-          >
-            <Sparkles size={14} color="#8b5cf6" />
-            デモ用 クイックログイン
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-            <button
-              type="button"
-              data-testid="quick-login-admin"
-              onClick={() => handleQuickLogin('admin@tentoru.jp')}
-              style={{
-                padding: '7px 4px',
-                borderRadius: '8px',
-                border: '1px solid #c7d2fe',
-                backgroundColor: '#eef2ff',
-                color: '#3730a3',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                textAlign: 'center'
-              }}
-            >
-              👑 本部管理者
-            </button>
-
-            <button
-              type="button"
-              data-testid="quick-login-ebisu"
-              onClick={() => handleQuickLogin('ebisu@tentoru.jp')}
-              style={{
-                padding: '7px 4px',
-                borderRadius: '8px',
-                border: '1px solid #bfdbfe',
-                backgroundColor: '#eff6ff',
-                color: '#1e40af',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                textAlign: 'center'
-              }}
-            >
-              🏢 恵比寿教室
-            </button>
-
-            <button
-              type="button"
-              data-testid="quick-login-shibuya"
-              onClick={() => handleQuickLogin('shibuya@tentoru.jp')}
-              style={{
-                padding: '7px 4px',
-                borderRadius: '8px',
-                border: '1px solid #e2e8f0',
-                backgroundColor: '#f8fafc',
-                color: '#334155',
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                textAlign: 'center'
-              }}
-            >
-              🏢 渋谷教室
-            </button>
-          </div>
-        </div>
-
-        {/* Student Entry Option */}
-        <div style={{ marginTop: '24px', textAlign: 'center' }}>
-          <button
-            type="button"
-            data-testid="student-entry-btn"
-            onClick={onStudentEntry}
-            style={{
-              width: '100%',
-              padding: '10px 16px',
-              borderRadius: '10px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              color: '#0f766e',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px'
-            }}
-          >
-            <GraduationCap size={18} />
-            生徒用学習画面はこちら（生徒選択へ）
-          </button>
-        </div>
       </div>
     </div>
   );

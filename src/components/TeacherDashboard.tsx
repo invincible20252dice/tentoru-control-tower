@@ -46,13 +46,14 @@ import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../li
 interface TeacherDashboardProps {
   onBackToPortal: () => void;
   onLogout?: () => void;
+  onViewStudentScreen?: (student: Student) => void;
   theme?: 'light' | 'dark';
   teacherType?: 'elementary' | 'junior_high' | 'high_school';
   initialRole?: UserRole;
   initialBranchId?: string;
 }
 
-export default function TeacherDashboard({ onBackToPortal, onLogout, theme = 'light', teacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
+export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, theme = 'light', teacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
   // State
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -2396,10 +2397,30 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, theme = 'li
                         <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
                         <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
                       </div>
-                      <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {selectedStudent.status === 'fast' && <span className={`${styles.badge} ${styles.statusFast}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>爆速中！(先取り前倒し中) ⚡</span>}
                         {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
                         {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
+
+                        {onViewStudentScreen && (
+                          <button
+                            type="button"
+                            data-testid="banner-view-student-screen-btn"
+                            onClick={() => onViewStudentScreen(selectedStudent)}
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: '#f8fafc',
+                              color: '#0f766e',
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            👨‍🎓 生徒画面を開く
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

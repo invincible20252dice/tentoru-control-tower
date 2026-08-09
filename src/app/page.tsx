@@ -70,11 +70,7 @@ export default function Home() {
   // Back to portal / login
   const handleBackToPortal = () => {
     if (session) {
-      if (session.user.role === 'branch') {
-        setCurrentView('teacher');
-      } else {
-        setCurrentView('portal');
-      }
+      setCurrentView('portal');
     } else {
       setCurrentView('login');
     }
@@ -99,82 +95,22 @@ export default function Home() {
     return (
       <LoginForm
         onLoginSuccess={handleLoginSuccess}
-        onStudentEntry={() => setCurrentView('student-select')}
         theme={theme}
       />
     );
   }
 
-  // 2. Student Selection Direct Mode (Accessible from login or portal)
-  if (currentView === 'student-select') {
-    return (
-      <div className={containerClass}>
-        <div style={{ position: 'absolute', top: '20px', left: '20px' }}>
-          <button
-            onClick={() => setCurrentView(session ? (session.user.role === 'branch' ? 'teacher' : 'portal') : 'login')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              color: '#475569',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-              cursor: 'pointer'
-            }}
-          >
-            <ArrowLeft size={16} />
-            {session ? 'ポータルへ戻る' : 'ログイン画面へ戻る'}
-          </button>
-        </div>
-
-        <main className={styles.card} style={{ maxWidth: '480px' }}>
-          <div className={styles.logo}>TENTORU</div>
-          <div className={styles.subtitle}>生徒用学習画面（すごろくマップ・Todo）</div>
-
-          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-              受講する生徒を選択してください。
-            </div>
-
-            <div className={styles.studentSelectArea}>
-              <select 
-                value={selectedStudentId} 
-                onChange={e => setSelectedStudentId(e.target.value)}
-                className={styles.select}
-                data-testid="student-select-dropdown"
-              >
-                <option value="">-- 生徒を選択 --</option>
-                {studentsList.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
-                ))}
-              </select>
-
-              <button 
-                onClick={handleStudentLogin}
-                className={styles.select}
-                data-testid="enter-student-btn"
-                style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center', padding: '12px' }}
-              >
-                生徒画面へ入る ➔
-              </button>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // 3. Teacher / Branch Dashboard
+  // 2. Teacher / Branch Dashboard (Default after Login)
   if (currentView === 'teacher') {
     return (
       <div className={theme === 'dark' ? 'dark-mode' : ''} style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
         <TeacherDashboard 
           onBackToPortal={handleBackToPortal} 
           onLogout={handleLogout}
+          onViewStudentScreen={(st) => {
+            setSelectedStudentId(st.id);
+            setCurrentView('student');
+          }}
           theme={theme} 
           teacherType={teacherType}
           initialRole={session?.user?.role || 'admin'}
@@ -184,7 +120,7 @@ export default function Home() {
     );
   }
 
-  // 4. Student Dashboard
+  // 3. Student Dashboard
   if (currentView === 'student' && selectedStudent) {
     return (
       <div className={theme === 'dark' ? 'dark-mode' : ''} style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
