@@ -764,6 +764,16 @@ describe('UI Components Render & Interaction Tests', () => {
 
   // 4. Portal Interactions (page.tsx)
   it('should support portal operations and routing simulation', async () => {
+    db.saveSession({
+      user: {
+        id: 'admin-1',
+        email: 'admin@tentoru.jp',
+        role: 'admin',
+        name: '本部統括管理者'
+      },
+      logged_in_at: new Date().toISOString()
+    });
+
     render(<Portal />);
 
     expect(screen.getByText('TENTORU')).toBeInTheDocument();

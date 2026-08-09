@@ -186,6 +186,18 @@ describe('Comprehensive Test Suite for High Coverage', () => {
   // 5. Home Portal Page Tests
   // -------------------------------------------------------------
   describe('Home Page Portal', () => {
+    beforeEach(() => {
+      db.saveSession({
+        user: {
+          id: 'admin-1',
+          email: 'admin@tentoru.jp',
+          role: 'admin',
+          name: '本部統括管理者'
+        },
+        logged_in_at: new Date().toISOString()
+      });
+    });
+
     it('supports full portal interactions, teacher type selection, theme toggle, and student login', () => {
       render(<Home />);
 

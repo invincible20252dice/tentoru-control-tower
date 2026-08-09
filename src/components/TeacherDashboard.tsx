@@ -45,17 +45,20 @@ import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../li
 
 interface TeacherDashboardProps {
   onBackToPortal: () => void;
+  onLogout?: () => void;
   theme?: 'light' | 'dark';
   teacherType?: 'elementary' | 'junior_high' | 'high_school';
+  initialRole?: UserRole;
+  initialBranchId?: string;
 }
 
-export default function TeacherDashboard({ onBackToPortal, theme = 'light', teacherType }: TeacherDashboardProps) {
+export default function TeacherDashboard({ onBackToPortal, onLogout, theme = 'light', teacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
   // State
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [userRole, setUserRole] = useState<UserRole>('admin');
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
+  const [userRole, setUserRole] = useState<UserRole>(initialRole || 'admin');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(initialBranchId || 'all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
@@ -1904,6 +1907,25 @@ export default function TeacherDashboard({ onBackToPortal, theme = 'light', teac
           <button onClick={onBackToPortal} className={styles.backBtn}>
             ポータルへ戻る
           </button>
+
+          {onLogout && (
+            <button 
+              onClick={onLogout} 
+              data-testid="header-logout-btn"
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                color: '#ffffff',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              ログアウト
+            </button>
+          )}
         </div>
       </div>
 
