@@ -23,11 +23,7 @@ export default function Home() {
     const curSession = db.getSession();
     if (curSession) {
       setSession(curSession);
-      if (curSession.user.role === 'branch') {
-        setCurrentView('teacher');
-      } else {
-        setCurrentView('portal');
-      }
+      setCurrentView('teacher');
     } else {
       setCurrentView('login');
     }
@@ -48,11 +44,7 @@ export default function Home() {
 
   const handleLoginSuccess = (newSession: UserSession) => {
     setSession(newSession);
-    if (newSession.user.role === 'branch') {
-      setCurrentView('teacher');
-    } else {
-      setCurrentView('portal');
-    }
+    setCurrentView('teacher');
   };
 
   const handleLogout = async () => {

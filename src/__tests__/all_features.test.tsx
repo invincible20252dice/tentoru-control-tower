@@ -201,6 +201,12 @@ describe('Comprehensive Test Suite for High Coverage', () => {
     it('supports full portal interactions, teacher type selection, theme toggle, and student login', () => {
       render(<Home />);
 
+      // Starts directly on TeacherDashboard
+      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+
+      // Navigate to portal
+      fireEvent.click(screen.getByText('ポータルへ戻る'));
+
       // Theme toggle button
       const themeBtn = screen.getByText('ダークモードにする');
       fireEvent.click(themeBtn);
@@ -248,6 +254,9 @@ describe('Comprehensive Test Suite for High Coverage', () => {
     it('alerts if student login is clicked without selecting student', () => {
       const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
       render(<Home />);
+
+      // Starts on dashboard, click back to portal
+      fireEvent.click(screen.getByText('ポータルへ戻る'));
 
       const studentLoginBtn = screen.getByText('生徒画面へ入る ➔');
       fireEvent.click(studentLoginBtn);

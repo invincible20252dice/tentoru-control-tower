@@ -30,7 +30,7 @@ describe('Auth Guard & Login Screen Initial View Tests', () => {
     expect(screen.getByTestId('student-entry-btn')).toBeInTheDocument();
   });
 
-  it('should authenticate successfully with headquarters admin and route to portal', async () => {
+  it('should authenticate successfully with headquarters admin and route directly to management dashboard', async () => {
     render(<Home />);
 
     // Click quick login for admin
@@ -39,14 +39,15 @@ describe('Auth Guard & Login Screen Initial View Tests', () => {
       fireEvent.click(adminBtn);
     });
 
-    // Should now be on portal / admin screen with logout button
+    // Should now be on management dashboard directly with header logout button and branch switcher
     await waitFor(() => {
-      expect(screen.getByTestId('portal-logout-btn')).toBeInTheDocument();
-      expect(screen.getByText('講師・管理者')).toBeInTheDocument();
+      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+      expect(screen.getByTestId('header-logout-btn')).toBeInTheDocument();
+      expect(screen.getByTestId('admin-branch-switcher')).toBeInTheDocument();
     });
 
     // Click logout
-    const logoutBtn = screen.getByTestId('portal-logout-btn');
+    const logoutBtn = screen.getByTestId('header-logout-btn');
     await act(async () => {
       fireEvent.click(logoutBtn);
     });

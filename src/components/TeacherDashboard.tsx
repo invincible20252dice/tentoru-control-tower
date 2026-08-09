@@ -1900,7 +1900,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, theme = 'li
             </div>
           ) : (
             <span style={{ fontSize: '0.78rem', backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 700 }}>
-              🏢 恵比寿教室
+              🏢 {branches.find(b => b.id === selectedBranchId)?.name || '恵比寿教室'}
             </span>
           )}
 

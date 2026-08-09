@@ -776,6 +776,9 @@ describe('UI Components Render & Interaction Tests', () => {
 
     render(<Portal />);
 
+    // Starts on TeacherDashboard directly, navigate to portal
+    fireEvent.click(screen.getByText('ポータルへ戻る'));
+
     expect(screen.getByText('TENTORU')).toBeInTheDocument();
 
     // 1. Theme toggle to Dark
