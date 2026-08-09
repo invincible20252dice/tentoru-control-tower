@@ -1092,8 +1092,11 @@ class DatabaseService {
       toSave.registered_year = curYear;
     }
 
+    let savedData: any = null;
+
     if (!this.isMockMode && this.supabase) {
       const { school_name, school, units, tasks, ...payloadToSave } = toSave as any;
+      console.log('[DEBUG] Save Payload:', payloadToSave);
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
@@ -1104,22 +1107,32 @@ class DatabaseService {
             .eq('id', payloadToSave.id)
             .select()
             .single();
-          if (!updateError && updateData) return updateData;
+          if (!updateError && updateData) {
+            savedData = updateData;
+          }
         }
-        throw new Error(`Supabase Error [${error.code || 'UNKNOWN'}]: ${error.message || error.details || JSON.stringify(error)}`);
+        if (!savedData) {
+          throw new Error(`Supabase Error [${error.code || 'UNKNOWN'}]: ${error.message || error.details || JSON.stringify(error)}`);
+        }
+      } else {
+        savedData = data;
       }
-      return data;
-    } else {
-      const rawList = this.getMockData<Student>('students', []);
-      const idx = rawList.findIndex(s => s.id === toSave.id);
-      if (idx >= 0) rawList[idx] = toSave;
-      else rawList.push(toSave);
-      this.saveMockData('students', rawList);
-      return {
-        ...toSave,
-        grade: calculateCurrentGrade(toSave.registered_grade!, toSave.registered_year!, curYear)
-      };
     }
+
+    const finalStudent: Student = {
+      ...toSave,
+      ...(savedData || {}),
+      grade: calculateCurrentGrade((savedData?.registered_grade || toSave.registered_grade!), (savedData?.registered_year || toSave.registered_year!), curYear)
+    };
+
+    // Always update local cache so synchronous getStudents() immediately reflects the updated student!
+    const rawList = this.getMockData<Student>('students', []);
+    const idx = rawList.findIndex(s => s.id === finalStudent.id);
+    if (idx >= 0) rawList[idx] = finalStudent;
+    else rawList.push(finalStudent);
+    this.saveMockData('students', rawList);
+
+    return finalStudent;
   }
 
   // 3. Curriculum CRUD
