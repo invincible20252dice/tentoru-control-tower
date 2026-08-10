@@ -2042,10 +2042,42 @@ class DatabaseService {
     }));
   }
 
+  private notifyBranchesUpdated(branches: Branch[]): void {
+    if (this.isBrowser()) {
+      try {
+        window.dispatchEvent(new CustomEvent('tentoru_branches_updated', { detail: { branches } }));
+      } catch (e) {}
+    }
+  }
+
+  public async fetchBranches(): Promise<Branch[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('branches').select('*').order('created_at', { ascending: true });
+        if (!error && data && data.length > 0) {
+          const allStudents = this.getStudents();
+          const branchesWithCount: Branch[] = data.map((b: any) => ({
+            ...b,
+            student_count: allStudents.filter(s => s.branch_id === b.id || s.classroom === b.name).length
+          }));
+          this.saveMockData('branches', branchesWithCount);
+          this.notifyBranchesUpdated(branchesWithCount);
+          return branchesWithCount;
+        }
+      } catch (err) {
+        console.warn('fetchBranches supabase error:', err);
+      }
+    }
+    const current = this.getBranches();
+    this.notifyBranchesUpdated(current);
+    return current;
+  }
+
   public async saveBranch(branch: Branch): Promise<Branch> {
     if (!this.isMockMode && this.supabase) {
       try {
-        const { error } = await this.supabase.from('branches').upsert(branch).select().single();
+        const { student_count, ...branchData } = branch as any;
+        const { error } = await this.supabase.from('branches').upsert(branchData).select().single();
         if (error) console.warn('Supabase saveBranch warning:', error);
       } catch (err) {
         console.warn('saveBranch error:', err);
@@ -2056,6 +2088,8 @@ class DatabaseService {
     if (idx >= 0) list[idx] = branch;
     else list.push(branch);
     this.saveMockData('branches', list);
+    const updatedBranches = this.getBranches();
+    this.notifyBranchesUpdated(updatedBranches);
     return branch;
   }
 
@@ -2070,6 +2104,8 @@ class DatabaseService {
     }
     const list = this.getMockData<Branch>('branches', []);
     this.saveMockData('branches', list.filter(b => b.id !== id));
+    const updatedBranches = this.getBranches();
+    this.notifyBranchesUpdated(updatedBranches);
   }
 
   public async toggleBranchStatus(branchId: string): Promise<Branch> {

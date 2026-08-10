@@ -57,6 +57,21 @@ export async function POST(req: NextRequest) {
       address
     });
 
+    if (supabaseUrl && serviceRoleKey) {
+      try {
+        const adminSupabase = createClient(supabaseUrl, serviceRoleKey, {
+          auth: { autoRefreshToken: false, persistSession: false }
+        });
+        const { student_count, ...branchRecord } = newBranch as any;
+        const { error: branchInsertError } = await adminSupabase.from('branches').upsert(branchRecord);
+        if (branchInsertError) {
+          console.warn('adminSupabase from branches upsert warning:', branchInsertError);
+        }
+      } catch (err) {
+        console.warn('Direct admin supabase upsert error:', err);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       branch: newBranch,

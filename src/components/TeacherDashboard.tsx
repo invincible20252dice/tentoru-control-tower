@@ -470,6 +470,21 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     setSelectedTemplateId('');
   }, [selectedSubject, selectedLevel]);
 
+  // Real-time branch synchronization for header dropdown and management
+  useEffect(() => {
+    const handleBranchesUpdate = (e: any) => {
+      if (e.detail?.branches) {
+        setBranches(e.detail.branches);
+      } else {
+        setBranches(db.getBranches());
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('tentoru_branches_updated', handleBranchesUpdate);
+      return () => window.removeEventListener('tentoru_branches_updated', handleBranchesUpdate);
+    }
+  }, []);
+
   // 1. 1クリックアカウント発行
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2363,6 +2378,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 onSelectBranch={(branch) => {
                   setSelectedBranchId(branch.id);
                   setActiveTab('student-list');
+                }}
+                onBranchesUpdated={(updatedBranches) => {
+                  setBranches(updatedBranches);
                 }}
               />
             </div>

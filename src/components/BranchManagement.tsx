@@ -25,11 +25,13 @@ import {
 
 interface BranchManagementProps {
   onSelectBranch?: (branch: Branch) => void;
+  onBranchesUpdated?: (branches: Branch[]) => void;
   onBack?: () => void;
 }
 
 export const BranchManagement: React.FC<BranchManagementProps> = ({
   onSelectBranch,
+  onBranchesUpdated,
   onBack,
 }) => {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -49,13 +51,25 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
   const [showPassword, setShowPassword] = useState(false);
 
   // Load branches
-  const loadBranches = () => {
-    const list = db.getBranches();
+  const loadBranches = async () => {
+    const list = await db.fetchBranches();
     setBranches(list);
+    onBranchesUpdated?.(list);
   };
 
   useEffect(() => {
     loadBranches();
+
+    const handleBranchesUpdate = (e: any) => {
+      if (e.detail?.branches) {
+        setBranches(e.detail.branches);
+        onBranchesUpdated?.(e.detail.branches);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('tentoru_branches_updated', handleBranchesUpdate);
+      return () => window.removeEventListener('tentoru_branches_updated', handleBranchesUpdate);
+    }
   }, []);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -102,6 +116,11 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
         throw new Error(errData.error || 'アカウント発行に失敗しました');
       }
 
+      const resData = await res.json();
+      if (resData?.branch) {
+        await db.saveBranch(resData.branch);
+      }
+
       showToast(`校舎アカウント「${formName}」を発行しました。`, 'success');
       setIsCreateModalOpen(false);
       // Reset form
@@ -111,11 +130,11 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
       setFormPassword('Tentoru2026!');
       setFormPhone('');
       setFormAddress('');
-      loadBranches();
+      await loadBranches();
     } catch (err: any) {
       console.warn('API error falling back to direct db save:', err);
       try {
-        await db.createBranchAccount({
+        const createdBranch = await db.createBranchAccount({
           name: formName,
           code: formCode,
           email: formEmail,
@@ -131,7 +150,7 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
         setFormPassword('Tentoru2026!');
         setFormPhone('');
         setFormAddress('');
-        loadBranches();
+        await loadBranches();
       } catch (innerErr: any) {
         showToast(`エラー: ${innerErr?.message || 'アカウント作成に失敗しました'}`, 'error');
       }

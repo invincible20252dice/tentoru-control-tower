@@ -19,6 +19,11 @@ describe('Branch Management & Multi-tenant RBAC Tests', () => {
     // Check title and stats
     expect(screen.getByText('本部専用 校舎アカウント管理')).toBeInTheDocument();
     expect(screen.getByText('登録校舎総数')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('恵比寿教室')).toBeInTheDocument();
+    });
+
     expect(screen.getAllByText(/稼働中/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/一時停止中/).length).toBeGreaterThanOrEqual(1);
 
@@ -60,6 +65,10 @@ describe('Branch Management & Multi-tenant RBAC Tests', () => {
 
     render(<BranchManagement />);
 
+    await waitFor(() => {
+      expect(screen.getByText('恵比寿教室')).toBeInTheDocument();
+    });
+
     // Open create modal
     const openBtn = screen.getByTestId('open-create-branch-modal');
     fireEvent.click(openBtn);
@@ -95,8 +104,10 @@ describe('Branch Management & Multi-tenant RBAC Tests', () => {
     render(<BranchManagement onSelectBranch={onSelectBranchMock} />);
 
     // Find first branch row
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-row-branch-1')).toBeInTheDocument();
+    });
     const ebisuRow = screen.getByTestId('branch-row-branch-1');
-    expect(ebisuRow).toBeInTheDocument();
 
     // Click 校舎表示
     const selectBtn = ebisuRow.querySelector('button[title="この校舎のダッシュボードに切り替え"]')!;
@@ -151,5 +162,65 @@ describe('Branch Management & Multi-tenant RBAC Tests', () => {
     const adminRoleBtn = screen.getByTestId('role-toggle-admin');
     fireEvent.click(adminRoleBtn);
     expect(screen.getByTestId('menu-branches')).toBeInTheDocument();
+  });
+
+  it('should immediately update branch list table and header dropdown options upon creating a new branch account', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        branch: {
+          id: 'branch-nakameguro',
+          name: '中目黒教室',
+          code: 'NAKAMEGURO',
+          email: 'nakameguro@tentoru.jp',
+          status: 'active',
+          created_at: new Date().toISOString()
+        }
+      })
+    });
+
+    render(<TeacherDashboard />);
+
+    // 1. Initial header dropdown check
+    const branchSelect = screen.getByTestId('admin-branch-switcher') as HTMLSelectElement;
+    expect(screen.getByText('全校舎 (本部一括表示)')).toBeInTheDocument();
+    expect(screen.queryByText('中目黒教室')).not.toBeInTheDocument();
+
+    // 2. Open Branch Management tab
+    fireEvent.click(screen.getByTestId('menu-branches'));
+    expect(screen.getByText('本部専用 校舎アカウント管理')).toBeInTheDocument();
+
+    // 3. Open Create Modal
+    fireEvent.click(screen.getByTestId('open-create-branch-modal'));
+
+    // 4. Fill form
+    const nameInput = screen.getByPlaceholderText('例: 横浜教室');
+    const codeInput = screen.getByPlaceholderText('例: YOKOHAMA');
+    const emailInput = screen.getByPlaceholderText('例: yokohama@tentoru.jp');
+
+    fireEvent.change(nameInput, { target: { value: '中目黒教室' } });
+    fireEvent.change(codeInput, { target: { value: 'NAKAMEGURO' } });
+    fireEvent.change(emailInput, { target: { value: 'nakameguro@tentoru.jp' } });
+
+    // 5. Submit
+    const submitBtn = screen.getByText('アカウントを発行する');
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    // 6. Check Table and Dropdown immediate reflection
+    await waitFor(() => {
+      expect(screen.getByText(/校舎アカウント「中目黒教室」を発行しました/)).toBeInTheDocument();
+    });
+
+    // Table and Header dropdown both contain newly created branch
+    expect(screen.getAllByText('中目黒教室').length).toBeGreaterThanOrEqual(1);
+
+    // Header dropdown contains newly created branch
+    await waitFor(() => {
+      const options = Array.from(branchSelect.options).map(opt => opt.text);
+      expect(options).toContain('中目黒教室');
+    });
   });
 });
