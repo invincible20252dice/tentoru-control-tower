@@ -41,6 +41,7 @@ export interface Student {
   target_schools?: TargetSchoolItem[];
   classroom?: string;
   teacher_in_charge?: string;
+  assigned_teachers?: string[];
   registered_grade?: string;
   registered_year?: number;
   school_name?: string;
@@ -804,8 +805,13 @@ class DatabaseService {
     return rawList.map(s => {
       const regYear = s.registered_year ?? getSchoolYear(s.created_at);
       const regGrade = s.registered_grade ?? s.grade;
+      const assignedTeachers = s.assigned_teachers && Array.isArray(s.assigned_teachers) && s.assigned_teachers.length > 0
+        ? s.assigned_teachers
+        : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']);
       return {
         ...s,
+        assigned_teachers: assignedTeachers,
+        teacher_in_charge: assignedTeachers[0] || s.teacher_in_charge || '',
         registered_year: regYear,
         registered_grade: regGrade,
         grade: calculateCurrentGrade(regGrade, regYear, curYear)
@@ -857,8 +863,6 @@ class DatabaseService {
       { id: 'task-6-1', student_id: 'std-1', unit_id: 'unit-202-1', scheduled_date: '2026-06-19', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-2', student_id: 'std-1', unit_id: 'unit-202-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-3', student_id: 'std-1', unit_id: 'unit-202-3', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
-
-      // 鈴木結衣 (小5) 用のタスク
       { id: 'task-7-1', student_id: 'std-2', unit_id: 'unit-301-1', scheduled_date: '2026-06-19', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '九九カード', created_at: new Date().toISOString() },
       { id: 'task-7-2', student_id: 'std-2', unit_id: 'unit-301-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-8-1', student_id: 'std-2', unit_id: 'unit-302-1', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
@@ -952,16 +956,13 @@ class DatabaseService {
 
   public getExamThresholdsMaster(): ExamThresholdMaster[] {
     const seed: ExamThresholdMaster[] = [
-      // schcode-A
       { id: 'eth-1', school_code: 'schcode-A', min_score: 350, max_score: 500, probability: 80 },
       { id: 'eth-2', school_code: 'schcode-A', min_score: 300, max_score: 349, probability: 60 },
       { id: 'eth-3', school_code: 'schcode-A', min_score: 250, max_score: 299, probability: 40 },
       { id: 'eth-4', school_code: 'schcode-A', min_score: 0, max_score: 249, probability: 20 },
-      // schcode-B
       { id: 'eth-5', school_code: 'schcode-B', min_score: 280, max_score: 500, probability: 80 },
       { id: 'eth-6', school_code: 'schcode-B', min_score: 220, max_score: 279, probability: 60 },
       { id: 'eth-7', school_code: 'schcode-B', min_score: 0, max_score: 219, probability: 30 },
-      // schcode-C
       { id: 'eth-8', school_code: 'schcode-C', min_score: 200, max_score: 500, probability: 80 },
       { id: 'eth-9', school_code: 'schcode-C', min_score: 0, max_score: 199, probability: 40 }
     ];
@@ -1114,8 +1115,14 @@ class DatabaseService {
   // 2. Students CRUD
   public async saveStudent(student: Student): Promise<Student> {
     const curYear = getSchoolYear();
+    const assignedTeachers = student.assigned_teachers && Array.isArray(student.assigned_teachers) && student.assigned_teachers.length > 0
+      ? student.assigned_teachers
+      : (student.teacher_in_charge ? [student.teacher_in_charge] : []);
+
     const toSave: Student = {
       ...student,
+      assigned_teachers: assignedTeachers,
+      teacher_in_charge: assignedTeachers[0] || student.teacher_in_charge || '',
       registered_year: student.registered_year ?? getSchoolYear(student.created_at || new Date().toISOString()),
       registered_grade: student.registered_grade ?? student.grade
     };
@@ -1139,7 +1146,19 @@ class DatabaseService {
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
-        if (payloadToSave.id) {
+        // If column assigned_teachers is not present on Supabase, fallback by saving payload without assigned_teachers
+        if (error.message?.includes('assigned_teachers') || error.code === 'PGRST204' || error.message?.includes('column')) {
+          const { assigned_teachers, ...fallbackPayload } = payloadToSave;
+          const { data: fbData, error: fbError } = await this.supabase
+            .from('students')
+            .upsert(fallbackPayload)
+            .select()
+            .single();
+          if (!fbError && fbData) {
+            savedData = fbData;
+          }
+        }
+        if (!savedData && payloadToSave.id) {
           const { data: updateData, error: updateError } = await this.supabase
             .from('students')
             .update(payloadToSave)
@@ -1161,6 +1180,7 @@ class DatabaseService {
     const finalStudent: Student = {
       ...toSave,
       ...(savedData || {}),
+      assigned_teachers: toSave.assigned_teachers,
       grade: calculateCurrentGrade((savedData?.registered_grade || toSave.registered_grade!), (savedData?.registered_year || toSave.registered_year!), curYear)
     };
 

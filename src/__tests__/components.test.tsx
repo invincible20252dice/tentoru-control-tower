@@ -1945,8 +1945,9 @@ describe('UI Components Render & Interaction Tests', () => {
     const birthdayInput = screen.getByLabelText('生年月日');
     fireEvent.change(birthdayInput, { target: { value: '2013-05-15' } });
 
-    const teacherSelect = screen.getByDisplayValue('福田 尚弘');
-    fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
+    const teacherMasterSelect = screen.getByTestId('teacher-master-select');
+    fireEvent.change(teacherMasterSelect, { target: { value: '佐藤 舞' } });
+    fireEvent.click(screen.getByTestId('add-teacher-btn'));
 
     const clubInput = screen.getByPlaceholderText('例: サッカー部');
     fireEvent.change(clubInput, { target: { value: 'テニス部' } });
@@ -3880,6 +3881,78 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(selectButtons[0]);
     }
 
+    unmount();
+  });
+
+  it('should support dynamic multi-teacher tag assignment, removal, and persistent save in student basic info', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const { container, unmount } = render(<TeacherDashboard />);
+
+    // Select student
+    await waitFor(() => {
+      expect(screen.getByText(/佐藤 拓海/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/佐藤 拓海/));
+
+    // Switch to 生徒情報 -> 基本情報・属性設定
+    fireEvent.click(screen.getByText('生徒情報'));
+
+    // Check teacher tags area is rendered
+    await waitFor(() => {
+      expect(screen.getByText('👨‍🏫 担当講師（複数設定可能）')).toBeInTheDocument();
+    });
+
+    const teacherContainer = screen.getByTestId('assigned-teachers-container');
+    expect(teacherContainer).toBeInTheDocument();
+
+    // Initial teacher badge: 福田 尚弘
+    expect(screen.getByTestId('teacher-tag-福田 尚弘')).toBeInTheDocument();
+
+    // 1. Add teacher from master select: 佐藤 舞
+    const teacherSelect = screen.getByTestId('teacher-master-select');
+    fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
+
+    const addTeacherBtn = screen.getByTestId('add-teacher-btn');
+    fireEvent.click(addTeacherBtn);
+
+    // Both badges present
+    expect(screen.getByTestId('teacher-tag-福田 尚弘')).toBeInTheDocument();
+    expect(screen.getByTestId('teacher-tag-佐藤 舞')).toBeInTheDocument();
+
+    // 2. Add custom teacher: 鈴木 健太
+    const teacherInput = screen.getByTestId('teacher-custom-input');
+    fireEvent.change(teacherInput, { target: { value: '鈴木 健太' } });
+    fireEvent.click(addTeacherBtn);
+
+    expect(screen.getByTestId('teacher-tag-鈴木 健太')).toBeInTheDocument();
+
+    // 3. Try duplicate
+    fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
+    fireEvent.click(addTeacherBtn);
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('既に担当に追加されています'));
+
+    // 4. Remove teacher: 福田 尚弘
+    const removeBtn = screen.getByTestId('remove-teacher-福田 尚弘');
+    fireEvent.click(removeBtn);
+
+    expect(screen.queryByTestId('teacher-tag-福田 尚弘')).not.toBeInTheDocument();
+    expect(screen.getByTestId('teacher-tag-佐藤 舞')).toBeInTheDocument();
+    expect(screen.getByTestId('teacher-tag-鈴木 健太')).toBeInTheDocument();
+
+    // 5. Save changes
+    const saveBtn = screen.getByText('変更を保存する');
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('生徒情報を保存しました。');
+
+    // Verify in db
+    const updatedStudent = db.getStudents().find(s => s.id === 'std-1');
+    expect(updatedStudent?.assigned_teachers).toEqual(['佐藤 舞', '鈴木 健太']);
+    expect(updatedStudent?.teacher_in_charge).toBe('佐藤 舞');
+
+    alertSpy.mockRestore();
     unmount();
   });
 });
