@@ -74,6 +74,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [selectedPersonalityFromMaster, setSelectedPersonalityFromMaster] = useState('');
   const [newTeacherInput, setNewTeacherInput] = useState('');
   const [selectedTeacherFromMaster, setSelectedTeacherFromMaster] = useState('');
+  const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
 
@@ -283,6 +284,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         setInteractions(listInteractions);
         const listPersonalities = db.getPersonalityOptions();
         setPersonalityOptions(listPersonalities);
+        const listTeachers = db.getTeacherOptions();
+        setTeacherOptions(listTeachers);
 
         let initialTargetSchools: TargetSchoolItem[] = [];
         if (freshSt.target_schools && Array.isArray(freshSt.target_schools) && freshSt.target_schools.length > 0) {
@@ -305,7 +308,6 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           parent_name_kana: freshSt.parent_name_kana || '',
           parent_image_url: freshSt.parent_image_url || '',
           contact_phone: freshSt.contact_phone || '',
-          contact_time: freshSt.contact_time || '',
           image_url: freshSt.image_url || '',
           personalities: freshSt.personalities || [],
           target_school: freshSt.target_school || (initialTargetSchools[0]?.school_name || ''),
@@ -651,14 +653,24 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     }
   };
 
-  // 担当講師の追加
-  const handleAddTeacher = () => {
+  // 担当講師の追加（自由入力時は講師マスタにも自動追加）
+  const handleAddTeacher = async () => {
     const nameToAdd = newTeacherInput.trim() || selectedTeacherFromMaster;
     if (!nameToAdd) return;
     const current = (editForm as any).assigned_teachers || [];
     if (current.includes(nameToAdd)) {
       alert(`講師「${nameToAdd}」は既に担当に追加されています。`);
       return;
+    }
+    // 自由記述で入力された新規講師の場合、講師マスタ（teacher_options）にも自動追加・同期する
+    if (newTeacherInput.trim()) {
+      try {
+        await db.addTeacherOption(newTeacherInput.trim());
+        const listTeachers = db.getTeacherOptions();
+        setTeacherOptions(listTeachers);
+      } catch (err) {
+        console.error('addTeacherOption error:', err);
+      }
     }
     const updated = [...current, nameToAdd];
     setEditForm({
@@ -670,7 +682,27 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     setSelectedTeacherFromMaster('');
   };
 
-  // 担当講師の解除（削除）
+  // 講師マスタからの削除（退職・離職対応）
+  const handleDeleteTeacherOption = async () => {
+    if (!selectedTeacherFromMaster) {
+      alert('削除する講師をドロップダウンから選択してください。');
+      return;
+    }
+    if (confirm(`講師「${selectedTeacherFromMaster}」をマスタから完全に削除しますか？\n（既存の生徒データには影響しません）`)) {
+      try {
+        await db.deleteTeacherOption(selectedTeacherFromMaster);
+        const listTeachers = db.getTeacherOptions();
+        setTeacherOptions(listTeachers);
+        setSelectedTeacherFromMaster('');
+        alert(`講師「${selectedTeacherFromMaster}」をマスタから削除しました。`);
+      } catch (err: any) {
+        console.error('deleteTeacherOption error:', err);
+        alert(`削除中にエラーが発生しました: ${err?.message || err}`);
+      }
+    }
+  };
+
+  // 担当講師の解除（個別生徒の担当から解除）
   const handleRemoveTeacher = (teacherName: string) => {
     const current = ((editForm as any).assigned_teachers || []) as string[];
     const updated = current.filter((t: string) => t !== teacherName);
@@ -4848,24 +4880,51 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                         {/* 担当講師の追加コントロール */}
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                          <div style={{ flex: 1, minWidth: '180px' }}>
+                          <div style={{ flex: 1.2, minWidth: '220px' }}>
                             <label htmlFor="teacher-master-select" style={{ fontSize: '0.72rem', color: '#64748b', display: 'block', marginBottom: '3px' }}>講師リストから選択</label>
-                            <select
-                              id="teacher-master-select"
-                              data-testid="teacher-master-select"
-                              value={selectedTeacherFromMaster}
-                              onChange={e => {
-                                setSelectedTeacherFromMaster(e.target.value);
-                                setNewTeacherInput('');
-                              }}
-                              className={styles.select}
-                              style={{ padding: '6px 10px', fontSize: '0.82rem' }}
-                            >
-                              <option value="">-- 講師を選択 --</option>
-                              {['福田 尚弘', '鈴木 健太郎', '佐藤 舞', '高橋 優希', '田中 翔太', '渡辺 葵'].map(name => (
-                                <option key={name} value={name}>{name}</option>
-                              ))}
-                            </select>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <select
+                                id="teacher-master-select"
+                                data-testid="teacher-master-select"
+                                value={selectedTeacherFromMaster}
+                                onChange={e => {
+                                  setSelectedTeacherFromMaster(e.target.value);
+                                  setNewTeacherInput('');
+                                }}
+                                className={styles.select}
+                                style={{ padding: '6px 10px', fontSize: '0.82rem', flex: 1 }}
+                              >
+                                <option value="">-- 講師を選択 --</option>
+                                {teacherOptions.map(name => (
+                                  <option key={name} value={name}>{name}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                data-testid="delete-teacher-master-btn"
+                                disabled={!selectedTeacherFromMaster}
+                                onClick={handleDeleteTeacherOption}
+                                title={selectedTeacherFromMaster ? `講師「${selectedTeacherFromMaster}」をマスタから削除` : '削除する講師を選択してください'}
+                                style={{
+                                  padding: '6px 10px',
+                                  fontSize: '0.78rem',
+                                  backgroundColor: selectedTeacherFromMaster ? '#fee2e2' : '#f1f5f9',
+                                  color: selectedTeacherFromMaster ? '#dc2626' : '#94a3b8',
+                                  border: selectedTeacherFromMaster ? '1px solid #fecaca' : '1px solid #e2e8f0',
+                                  borderRadius: '6px',
+                                  cursor: selectedTeacherFromMaster ? 'pointer' : 'not-allowed',
+                                  height: '34px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                🗑️ 削除
+                              </button>
+                            </div>
                           </div>
                           <div style={{ flex: 1, minWidth: '180px' }}>
                             <label htmlFor="teacher-custom-input" style={{ fontSize: '0.72rem', color: '#64748b', display: 'block', marginBottom: '3px' }}>自由入力（新規講師）</label>
@@ -4899,7 +4958,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                               height: '34px',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px'
+                              gap: '4px',
+                              whiteSpace: 'nowrap'
                             }}
                           >
                             ＋ 担当追加
@@ -4907,7 +4967,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         </div>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
                           <label>部活（自由記述）</label>
                           <input 
@@ -4926,16 +4986,6 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                             onChange={e => setEditForm({ ...editForm, hobbies: e.target.value })}
                             className={styles.input}
                             placeholder="例: 将棋・動画編集"
-                          />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label>連絡可能時間帯</label>
-                          <input 
-                            type="text" 
-                            value={editForm.contact_time || ''} 
-                            onChange={e => setEditForm({ ...editForm, contact_time: e.target.value })}
-                            className={styles.input}
-                            placeholder="例: 18:00 - 21:00"
                           />
                         </div>
                       </div>

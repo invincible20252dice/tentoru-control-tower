@@ -1865,35 +1865,63 @@ class DatabaseService {
     const seed = [
       '福田 尚弘',
       '鈴木 健太郎',
-      '佐藤 舞'
+      '佐藤 舞',
+      '高橋 優希',
+      '田中 翔太',
+      '渡辺 葵'
     ];
     return this.getMockData<string>('teacher_options', seed);
   }
 
+  public async fetchTeacherOptions(): Promise<string[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('teacher_options').select('name');
+        if (!error && data && data.length > 0) {
+          const names = data.map((d: any) => d.name).filter(Boolean);
+          this.saveMockData('teacher_options', names);
+          return names;
+        }
+      } catch (e) {
+        console.warn('fetchTeacherOptions warning:', e);
+      }
+    }
+    return this.getTeacherOptions();
+  }
+
   public async addTeacherOption(name: string): Promise<string> {
     if (!this.isMockMode && this.supabase) {
-      const { error } = await this.supabase.from('teacher_options').insert({ name });
-      if (error && error.code !== '23505') throw error;
-      return name;
-    } else {
-      const list = this.getTeacherOptions();
-      if (!list.includes(name)) {
-        list.push(name);
-        this.saveMockData('teacher_options', list);
+      try {
+        const { error } = await this.supabase.from('teacher_options').insert({ name });
+        if (error && error.code !== '23505') console.warn('Supabase addTeacherOption warning:', error);
+      } catch (err) {
+        console.warn('addTeacherOption error:', err);
       }
-      return name;
     }
+    const list = this.getTeacherOptions();
+    if (!list.includes(name)) {
+      list.push(name);
+      this.saveMockData('teacher_options', list);
+    }
+    return name;
   }
 
   public async removeTeacherOption(name: string): Promise<void> {
     if (!this.isMockMode && this.supabase) {
-      const { error } = await this.supabase.from('teacher_options').delete().eq('name', name);
-      if (error) throw error;
-    } else {
-      let list = this.getTeacherOptions();
-      list = list.filter(item => item !== name);
-      this.saveMockData('teacher_options', list);
+      try {
+        const { error } = await this.supabase.from('teacher_options').delete().eq('name', name);
+        if (error) console.warn('Supabase removeTeacherOption warning:', error);
+      } catch (err) {
+        console.warn('removeTeacherOption error:', err);
+      }
     }
+    let list = this.getTeacherOptions();
+    list = list.filter(item => item !== name);
+    this.saveMockData('teacher_options', list);
+  }
+
+  public async deleteTeacherOption(name: string): Promise<void> {
+    return this.removeTeacherOption(name);
   }
 
   public async updateTeacherOption(oldName: string, newName: string): Promise<string> {

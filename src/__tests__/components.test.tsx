@@ -1995,9 +1995,9 @@ describe('UI Components Render & Interaction Tests', () => {
     });
     alertMock.mockClear();
 
-    // 連絡可能時間帯 (contact_time) を変更する (3007行目のカバー)
-    const contactTimeInput = screen.getByPlaceholderText('例: 18:00 - 21:00');
-    fireEvent.change(contactTimeInput, { target: { value: '19:00 - 21:00' } });
+    // 趣味 (hobbies) を変更する
+    const hobbiesInput2 = screen.getByPlaceholderText('例: 将棋・動画編集');
+    fireEvent.change(hobbiesInput2, { target: { value: 'サッカー・音楽鑑賞' } });
 
     // 学年はすでに '中1' で、期待される学年と同じになっているため、今度は学年変更なしでの保存 (db.ts 703 行目の false ブランチのカバー)
     const saveBtn2 = screen.getByText('変更を保存する');
@@ -3884,8 +3884,9 @@ describe('UI Components Render & Interaction Tests', () => {
     unmount();
   });
 
-  it('should support dynamic multi-teacher tag assignment, removal, and persistent save in student basic info', async () => {
+  it('should support dynamic multi-teacher tag assignment, removal, master sync, and master deletion', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true);
     const { container, unmount } = render(<TeacherDashboard />);
 
     // Select student
@@ -3913,25 +3914,33 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
 
     const addTeacherBtn = screen.getByTestId('add-teacher-btn');
-    fireEvent.click(addTeacherBtn);
+    await act(async () => {
+      fireEvent.click(addTeacherBtn);
+    });
 
     // Both badges present
     expect(screen.getByTestId('teacher-tag-福田 尚弘')).toBeInTheDocument();
     expect(screen.getByTestId('teacher-tag-佐藤 舞')).toBeInTheDocument();
 
-    // 2. Add custom teacher: 鈴木 健太
+    // 2. Add custom teacher: 鈴木 健太 (should auto-sync to teacher master)
     const teacherInput = screen.getByTestId('teacher-custom-input');
     fireEvent.change(teacherInput, { target: { value: '鈴木 健太' } });
-    fireEvent.click(addTeacherBtn);
+    await act(async () => {
+      fireEvent.click(addTeacherBtn);
+    });
 
     expect(screen.getByTestId('teacher-tag-鈴木 健太')).toBeInTheDocument();
+    // Check teacher master options in db
+    expect(db.getTeacherOptions()).toContain('鈴木 健太');
 
     // 3. Try duplicate
     fireEvent.change(teacherSelect, { target: { value: '佐藤 舞' } });
-    fireEvent.click(addTeacherBtn);
+    await act(async () => {
+      fireEvent.click(addTeacherBtn);
+    });
     expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('既に担当に追加されています'));
 
-    // 4. Remove teacher: 福田 尚弘
+    // 4. Remove teacher from student: 福田 尚弘
     const removeBtn = screen.getByTestId('remove-teacher-福田 尚弘');
     fireEvent.click(removeBtn);
 
@@ -3939,7 +3948,17 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByTestId('teacher-tag-佐藤 舞')).toBeInTheDocument();
     expect(screen.getByTestId('teacher-tag-鈴木 健太')).toBeInTheDocument();
 
-    // 5. Save changes
+    // 5. Delete a teacher from Teacher Master (e.g. 渡辺 葵)
+    fireEvent.change(teacherSelect, { target: { value: '渡辺 葵' } });
+    const deleteMasterBtn = screen.getByTestId('delete-teacher-master-btn');
+    await act(async () => {
+      fireEvent.click(deleteMasterBtn);
+    });
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('渡辺 葵'));
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('削除しました'));
+    expect(db.getTeacherOptions()).not.toContain('渡辺 葵');
+
+    // 6. Save student changes
     const saveBtn = screen.getByText('変更を保存する');
     await act(async () => {
       fireEvent.click(saveBtn);
@@ -3953,6 +3972,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(updatedStudent?.teacher_in_charge).toBe('佐藤 舞');
 
     alertSpy.mockRestore();
+    confirmSpy.mockRestore();
     unmount();
   });
 });
