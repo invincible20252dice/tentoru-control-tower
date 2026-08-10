@@ -15,7 +15,15 @@ export default function Home() {
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showTeacherTypeSelector, setShowTeacherTypeSelector] = useState(false);
-  const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>('junior_high');
+  const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('tentoru_teacher_type');
+      if (saved === 'elementary' || saved === 'junior_high' || saved === 'high_school') {
+        return saved;
+      }
+    }
+    return 'junior_high';
+  });
   const [isInitializing, setIsInitializing] = useState(true);
 
   // Initialize session and student list
@@ -227,21 +235,33 @@ export default function Home() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
                   <button 
-                    onClick={() => { setTeacherType('elementary'); setCurrentView('teacher'); }} 
+                    onClick={() => { 
+                      setTeacherType('elementary'); 
+                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'elementary');
+                      setCurrentView('teacher'); 
+                    }} 
                     style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-elementary"
                   >
                     小学生
                   </button>
                   <button 
-                    onClick={() => { setTeacherType('junior_high'); setCurrentView('teacher'); }} 
+                    onClick={() => { 
+                      setTeacherType('junior_high'); 
+                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'junior_high');
+                      setCurrentView('teacher'); 
+                    }} 
                     style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-junior-high"
                   >
                     中学生
                   </button>
                   <button 
-                    onClick={() => { setTeacherType('high_school'); setCurrentView('teacher'); }} 
+                    onClick={() => { 
+                      setTeacherType('high_school'); 
+                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'high_school');
+                      setCurrentView('teacher'); 
+                    }} 
                     style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-high-school"
                   >

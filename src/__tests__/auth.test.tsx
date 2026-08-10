@@ -46,7 +46,7 @@ describe('Clean Login Screen & Direct Dashboard Navigation Tests', () => {
 
     // Should now be on management dashboard directly with header logout button and branch switcher
     await waitFor(() => {
-      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+      expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
       expect(screen.getByTestId('header-logout-btn')).toBeInTheDocument();
       expect(screen.getByTestId('admin-branch-switcher')).toBeInTheDocument();
     });
@@ -81,7 +81,7 @@ describe('Clean Login Screen & Direct Dashboard Navigation Tests', () => {
 
     // Should route directly to TeacherDashboard
     await waitFor(() => {
-      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+      expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
       expect(screen.getByTestId('header-logout-btn')).toBeInTheDocument();
     });
 
@@ -113,7 +113,7 @@ describe('Clean Login Screen & Direct Dashboard Navigation Tests', () => {
 
     // Starts on TeacherDashboard
     await waitFor(() => {
-      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+      expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
     });
 
     // Select a student from list

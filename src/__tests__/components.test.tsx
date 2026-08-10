@@ -88,6 +88,9 @@ describe('UI Components Render & Interaction Tests', () => {
     alertMock = vi.fn();
     window.alert = alertMock;
     (global as any).alert = alertMock;
+    if (typeof window !== 'undefined') {
+      window.localStorage.clear();
+    }
     db.clearMockData();
     // Seed initial demo data inside Mock LocalStorage
     db.getSchools();
@@ -357,7 +360,7 @@ describe('UI Components Render & Interaction Tests', () => {
       />
     );
 
-    expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+    expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
 
     // 1. Create a student account
     // Switch to create student tab
@@ -790,7 +793,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const teacherLoginCard = screen.getByText('講師・管理者');
     fireEvent.click(teacherLoginCard);
     fireEvent.click(screen.getByText('中学生'));
-    expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+    expect(screen.getByText('【中学生】テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
 
     // Back to portal
     const backBtn = screen.getByText('ポータルへ戻る');
@@ -818,7 +821,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const teacherLoginCardLight = screen.getByText('講師・管理者');
     fireEvent.click(teacherLoginCardLight);
     fireEvent.click(screen.getByText('中学生'));
-    expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+    expect(screen.getByText('【中学生】テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
     
     // Back to portal
     const backBtnLight = screen.getByText('ポータルへ戻る');
@@ -1403,18 +1406,24 @@ describe('UI Components Render & Interaction Tests', () => {
 
     const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
 
-    // 1. 初期表示で生徒一覧とフィルターが表示されることを確認
+    // 1. 初期表示で生徒一覧が表示されることを確認
     expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
     expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
 
-    // 2. 学校フィルターの適用
-    const schoolSelect = screen.getByLabelText('中学校・小学校');
-    fireEvent.change(schoolSelect, { target: { value: 'sch-1' } });
+    // 2. 学校名検索フィルターの適用
+    const schoolSelect = screen.getByLabelText('学校名検索');
+    fireEvent.change(schoolSelect, { target: { value: '天登第一中学校' } });
     expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
     expect(screen.queryByText('鈴木 花子 (小5)')).not.toBeInTheDocument();
 
+    fireEvent.change(schoolSelect, { target: { value: 'テントル小学校' } });
+    expect(screen.queryByText('田中 太郎 (中3)')).not.toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
+
     // 元に戻す
     fireEvent.change(schoolSelect, { target: { value: '' } });
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
 
     // 3. 学年フィルターの適用
     const gradeSelect = screen.getByLabelText('学年');
@@ -1425,27 +1434,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 元に戻す
     fireEvent.change(gradeSelect, { target: { value: '' } });
 
-    // 4. 区分トグルフィルターの適用
-    const juniorBtn = screen.getByRole('button', { name: '中学生' });
-    const elementaryBtn = screen.getByRole('button', { name: '小学生' });
-    const allBtn = screen.getByRole('button', { name: 'すべて' });
-
-    // 中学生トグル
-    fireEvent.click(juniorBtn);
-    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
-    expect(screen.queryByText('鈴木 花子 (小5)')).not.toBeInTheDocument();
-
-    // 小学生トグル
-    fireEvent.click(elementaryBtn);
-    expect(screen.queryByText('田中 太郎 (中3)')).not.toBeInTheDocument();
-    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
-
-    // すべてトグル
-    fireEvent.click(allBtn);
-    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
-    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
-
-    // 5. 名前部分一致キーワードフィルターの適用
+    // 4. 名前部分一致キーワードフィルターの適用
     const nameInput = screen.getByPlaceholderText('名前を入力...');
     fireEvent.change(nameInput, { target: { value: '田中' } });
     expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
@@ -1453,8 +1442,10 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // 検索窓クリア
     fireEvent.change(nameInput, { target: { value: '' } });
+    expect(screen.getByText('田中 太郎 (中3)')).toBeInTheDocument();
+    expect(screen.getByText('鈴木 花子 (小5)')).toBeInTheDocument();
 
-    // 6. 生徒の選択と自動遷移
+    // 5. 生徒の選択と自動遷移
     const card = screen.getByText('田中 太郎 (中3)');
     fireEvent.click(card);
     // スケジュール画面に遷移し、田中太郎が選択されていること
@@ -3974,5 +3965,34 @@ describe('UI Components Render & Interaction Tests', () => {
     alertSpy.mockRestore();
     confirmSpy.mockRestore();
     unmount();
+  });
+
+  it('should dynamically update dashboard header title and filter student list based on portal grade category and school name search', async () => {
+    // 1. Elementary mode
+    const { unmount: unmountElem } = render(<TeacherDashboard teacherType="elementary" onBackToPortal={() => {}} />);
+    expect(screen.getByText('【小学生】テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-school-name')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-grade')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-name')).toBeInTheDocument();
+    expect(screen.queryByText('区分トグル')).not.toBeInTheDocument();
+    unmountElem();
+
+    // 2. High School mode
+    const { unmount: unmountHigh } = render(<TeacherDashboard teacherType="high_school" onBackToPortal={() => {}} />);
+    expect(screen.getByText('【高校生】テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+    unmountHigh();
+
+    // 3. Junior High mode & school search
+    const { unmount: unmountJhs } = render(<TeacherDashboard teacherType="junior_high" onBackToPortal={() => {}} />);
+    expect(screen.getByText('【中学生】テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+
+    const schoolSelect = screen.getByTestId('filter-school-name');
+    fireEvent.change(schoolSelect, { target: { value: '天登第一中学校' } });
+    expect(screen.getByText(/佐藤 拓海/)).toBeInTheDocument();
+
+    fireEvent.change(schoolSelect, { target: { value: 'テントル小学校' } });
+    expect(screen.queryByText(/佐藤 拓海/)).not.toBeInTheDocument();
+
+    unmountJhs();
   });
 });

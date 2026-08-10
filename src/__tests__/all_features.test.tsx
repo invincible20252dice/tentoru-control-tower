@@ -202,7 +202,7 @@ describe('Comprehensive Test Suite for High Coverage', () => {
       render(<Home />);
 
       // Starts directly on TeacherDashboard
-      expect(screen.getByText('テントル 司令塔ダッシュボード (講師用)')).toBeInTheDocument();
+      expect(screen.getByText(/テントル 司令塔ダッシュボード \(講師用\)/)).toBeInTheDocument();
 
       // Navigate to portal
       fireEvent.click(screen.getByText('ポータルへ戻る'));

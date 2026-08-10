@@ -53,11 +53,30 @@ interface TeacherDashboardProps {
   initialBranchId?: string;
 }
 
-export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, theme = 'light', teacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
+export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, theme = 'light', teacherType: propTeacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
   // State
-  const [students, setStudents] = useState<Student[]>([]);
-  const [schools, setSchools] = useState<School[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [currentTeacherType, setCurrentTeacherType] = useState<'elementary' | 'junior_high' | 'high_school' | 'all'>(() => {
+    if (propTeacherType) return propTeacherType;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('tentoru_teacher_type');
+      if (saved === 'elementary' || saved === 'junior_high' || saved === 'high_school') {
+        return saved;
+      }
+    }
+    return 'all';
+  });
+
+  useEffect(() => {
+    if (propTeacherType) {
+      setCurrentTeacherType(propTeacherType);
+    }
+  }, [propTeacherType]);
+
+  const gradeCategoryLabel = currentTeacherType === 'elementary' ? '【小学生】' : currentTeacherType === 'high_school' ? '【高校生】' : currentTeacherType === 'junior_high' ? '【中学生】' : '【中学生】';
+
+  const [students, setStudents] = useState<Student[]>(() => db.getStudents());
+  const [schools, setSchools] = useState<School[]>(() => db.getSchools());
+  const [branches, setBranches] = useState<Branch[]>(() => db.getBranches());
   const [userRole, setUserRole] = useState<UserRole>(initialRole || 'admin');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(initialBranchId || 'all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -92,36 +111,32 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   // 検索フィルター用のState
-  const [filterSchoolId, setFilterSchoolId] = useState<string>('');
+  const [filterSchoolName, setFilterSchoolName] = useState<string>('');
   const [filterGrade, setFilterGrade] = useState<string>('');
-  const [filterCategory, setFilterCategory] = useState<'all' | 'junior_high' | 'elementary' | 'high_school'>(() => {
-    if (teacherType === 'elementary') return 'elementary';
-    if (teacherType === 'junior_high') return 'junior_high';
-    if (teacherType === 'high_school') return 'high_school';
-    return 'all';
-  });
   const [filterName, setFilterName] = useState<string>('');
+
+  const allSchoolNames = Array.from(new Set([
+    ...schools.map(s => s.name),
+    ...students.map(st => schools.find(s => s.id === st.school_id)?.name || '').filter(Boolean)
+  ])).filter(Boolean).sort();
 
   // Account Issuance State
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentGrade, setNewStudentGrade] = useState(() => {
-    if (teacherType === 'elementary') return '小1';
-    if (teacherType === 'high_school') return '高1';
+    if (currentTeacherType === 'elementary') return '小1';
+    if (currentTeacherType === 'high_school') return '高1';
     return '中1';
   });
 
   useEffect(() => {
-    if (teacherType === 'elementary') {
-      setFilterCategory('elementary');
+    if (currentTeacherType === 'elementary') {
       setNewStudentGrade('小1');
-    } else if (teacherType === 'junior_high') {
-      setFilterCategory('junior_high');
+    } else if (currentTeacherType === 'junior_high') {
       setNewStudentGrade('中1');
-    } else if (teacherType === 'high_school') {
-      setFilterCategory('high_school');
+    } else if (currentTeacherType === 'high_school') {
       setNewStudentGrade('高1');
     }
-  }, [teacherType]);
+  }, [currentTeacherType]);
   const [newStudentSchoolId, setNewStudentSchoolId] = useState('');
   const [newCustomSchoolName, setNewCustomSchoolName] = useState('');
   const [newUnitName, setNewUnitName] = useState('');
@@ -1915,7 +1930,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
               <line x1="15" y1="9" x2="21" y2="9" />
               <line x1="9" y1="15" x2="15" y2="15" />
             </svg>
-            テントル 司令塔ダッシュボード (講師用)
+            {gradeCategoryLabel}テントル 司令塔ダッシュボード (講師用)
           </h1>
 
           {/* Role badge / switcher */}
@@ -2199,16 +2214,17 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
               <div className={styles.filterArea}>
                 <div className={styles.filterGrid}>
                   <div className={styles.formGroup} style={{ marginBottom: 0 }}>
-                    <label htmlFor="filter-school" style={{ fontSize: '0.75rem', fontWeight: 600 }}>中学校・小学校</label>
+                    <label htmlFor="filter-school-name" style={{ fontSize: '0.75rem', fontWeight: 600 }}>学校名検索</label>
                     <select
-                      id="filter-school"
-                      value={filterSchoolId}
-                      onChange={e => setFilterSchoolId(e.target.value)}
+                      id="filter-school-name"
+                      data-testid="filter-school-name"
+                      value={filterSchoolName}
+                      onChange={e => setFilterSchoolName(e.target.value)}
                       className={styles.select}
                     >
-                      <option value="">すべて</option>
-                      {schools.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
+                      <option value="">すべての学校</option>
+                      {allSchoolNames.map(name => (
+                        <option key={name} value={name}>{name}</option>
                       ))}
                     </select>
                   </div>
@@ -2217,64 +2233,57 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                     <label htmlFor="filter-grade" style={{ fontSize: '0.75rem', fontWeight: 600 }}>学年</label>
                     <select
                       id="filter-grade"
+                      data-testid="filter-grade"
                       value={filterGrade}
                       onChange={e => setFilterGrade(e.target.value)}
                       className={styles.select}
                     >
-                      <option value="">すべて</option>
-                      <option value="小1">小学1年生</option>
-                      <option value="小2">小学2年生</option>
-                      <option value="小3">小学3年生</option>
-                      <option value="小4">小学4年生</option>
-                      <option value="小5">小学5年生</option>
-                      <option value="小6">小学6年生</option>
-                      <option value="中1">中学1年生</option>
-                      <option value="中2">中学2年生</option>
-                      <option value="中3">中学3年生</option>
-                      <option value="高1">高校1年生</option>
-                      <option value="高2">高校2年生</option>
-                      <option value="高3">高校3年生</option>
+                      <option value="">すべての学年</option>
+                      {currentTeacherType === 'elementary' ? (
+                        <>
+                          <option value="小1">小学1年生</option>
+                          <option value="小2">小学2年生</option>
+                          <option value="小3">小学3年生</option>
+                          <option value="小4">小学4年生</option>
+                          <option value="小5">小学5年生</option>
+                          <option value="小6">小学6年生</option>
+                        </>
+                      ) : currentTeacherType === 'high_school' ? (
+                        <>
+                          <option value="高1">高校1年生</option>
+                          <option value="高2">高校2年生</option>
+                          <option value="高3">高校3年生</option>
+                        </>
+                      ) : currentTeacherType === 'junior_high' ? (
+                        <>
+                          <option value="中1">中学1年生</option>
+                          <option value="中2">中学2年生</option>
+                          <option value="中3">中学3年生</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="小1">小学1年生</option>
+                          <option value="小2">小学2年生</option>
+                          <option value="小3">小学3年生</option>
+                          <option value="小4">小学4年生</option>
+                          <option value="小5">小学5年生</option>
+                          <option value="小6">小学6年生</option>
+                          <option value="中1">中学1年生</option>
+                          <option value="中2">中学2年生</option>
+                          <option value="中3">中学3年生</option>
+                          <option value="高1">高校1年生</option>
+                          <option value="高2">高校2年生</option>
+                          <option value="高3">高校3年生</option>
+                        </>
+                      )}
                     </select>
-                  </div>
-
-                  <div className={styles.formGroup} style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>区分トグル</label>
-                    <div className={styles.segmentControl}>
-                      <button
-                        type="button"
-                        className={`${styles.segmentBtn} ${filterCategory === 'all' ? styles.segmentBtnActive : ''}`}
-                        onClick={() => setFilterCategory('all')}
-                      >
-                        すべて
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.segmentBtn} ${filterCategory === 'elementary' ? styles.segmentBtnActive : ''}`}
-                        onClick={() => setFilterCategory('elementary')}
-                      >
-                        小学生
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.segmentBtn} ${filterCategory === 'junior_high' ? styles.segmentBtnActive : ''}`}
-                        onClick={() => setFilterCategory('junior_high')}
-                      >
-                        中学生
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.segmentBtn} ${filterCategory === 'high_school' ? styles.segmentBtnActive : ''}`}
-                        onClick={() => setFilterCategory('high_school')}
-                      >
-                        高校生
-                      </button>
-                    </div>
                   </div>
 
                   <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                     <label htmlFor="filter-name" style={{ fontSize: '0.75rem', fontWeight: 600 }}>生徒名検索</label>
                     <input
                       id="filter-name"
+                      data-testid="filter-name"
                       type="text"
                       placeholder="名前を入力..."
                       value={filterName}
@@ -2299,19 +2308,21 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                       if (!isMatch) return false;
                     }
 
-                    if (filterSchoolId && st.school_id !== filterSchoolId) return false;
-                    if (filterGrade && st.grade !== filterGrade) return false;
-                    
                     const school = schools.find(s => s.id === st.school_id);
+                    const studentSchoolName = school?.name || '';
+
+                    if (filterSchoolName && !studentSchoolName.includes(filterSchoolName)) return false;
+                    if (filterGrade && st.grade !== filterGrade) return false;
+                    if (filterName && !st.name.includes(filterName)) return false;
+                    
                     const isElem = st.grade.startsWith('小') || st.grade === '園児' || school?.type === 'elementary';
                     const isJhs = st.grade.startsWith('中') || school?.type === 'junior_high';
                     const isHigh = st.grade.startsWith('高') || st.grade === '既卒' || school?.type === 'high_school';
 
-                    if (filterCategory === 'elementary' && !isElem) return false;
-                    if (filterCategory === 'junior_high' && !isJhs) return false;
-                    if (filterCategory === 'high_school' && !isHigh) return false;
+                    if (currentTeacherType === 'elementary' && !isElem) return false;
+                    if (currentTeacherType === 'junior_high' && !isJhs) return false;
+                    if (currentTeacherType === 'high_school' && !isHigh) return false;
                     
-                    if (filterName && !st.name.includes(filterName)) return false;
                     return true;
                   })
                   .map(st => {
