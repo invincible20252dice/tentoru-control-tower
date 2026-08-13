@@ -56,6 +56,7 @@ export interface Student {
   weekly_sessions_count?: string | null;
   weekly_duration_minutes?: string | null;
   selected_days?: string[];
+  selected_subjects?: string[];
   default_slots?: number;
   branch_id?: string | null;
 }
@@ -769,7 +770,8 @@ class DatabaseService {
         registered_grade: '中3',
         registered_year: 2026,
         weekly_sessions_count: '2回',
-        weekly_duration_minutes: '120分'
+        weekly_duration_minutes: '120分',
+        selected_subjects: ['数学', '英語', '理科', '社会', '国語']
       },
       {
         id: 'std-2',
@@ -797,7 +799,8 @@ class DatabaseService {
         registered_grade: '小5',
         registered_year: 2025,
         weekly_sessions_count: '3回',
-        weekly_duration_minutes: '90分'
+        weekly_duration_minutes: '90分',
+        selected_subjects: ['算数', '国語', '英語']
       }
     ];
     const rawList = this.getMockData('students', seed);
@@ -808,10 +811,14 @@ class DatabaseService {
       const assignedTeachers = s.assigned_teachers && Array.isArray(s.assigned_teachers) && s.assigned_teachers.length > 0
         ? s.assigned_teachers
         : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']);
+      const selectedSubjects = s.selected_subjects && Array.isArray(s.selected_subjects) && s.selected_subjects.length > 0
+        ? s.selected_subjects
+        : (s.grade.startsWith('小') || s.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
       return {
         ...s,
         assigned_teachers: assignedTeachers,
         teacher_in_charge: assignedTeachers[0] || s.teacher_in_charge || '',
+        selected_subjects: selectedSubjects,
         registered_year: regYear,
         registered_grade: regGrade,
         grade: calculateCurrentGrade(regGrade, regYear, curYear)
@@ -1119,10 +1126,15 @@ class DatabaseService {
       ? student.assigned_teachers
       : (student.teacher_in_charge ? [student.teacher_in_charge] : []);
 
+    const selectedSubjects = student.selected_subjects && Array.isArray(student.selected_subjects) && student.selected_subjects.length > 0
+      ? student.selected_subjects
+      : (student.grade.startsWith('小') || student.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
+
     const toSave: Student = {
       ...student,
       assigned_teachers: assignedTeachers,
       teacher_in_charge: assignedTeachers[0] || student.teacher_in_charge || '',
+      selected_subjects: selectedSubjects,
       registered_year: student.registered_year ?? getSchoolYear(student.created_at || new Date().toISOString()),
       registered_grade: student.registered_grade ?? student.grade
     };
@@ -1146,9 +1158,9 @@ class DatabaseService {
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
-        // If column assigned_teachers is not present on Supabase, fallback by saving payload without assigned_teachers
-        if (error.message?.includes('assigned_teachers') || error.code === 'PGRST204' || error.message?.includes('column')) {
-          const { assigned_teachers, ...fallbackPayload } = payloadToSave;
+        // If column assigned_teachers or selected_subjects is not present on Supabase, fallback by saving payload without those columns
+        if (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.code === 'PGRST204' || error.message?.includes('column')) {
+          const { assigned_teachers, selected_subjects, ...fallbackPayload } = payloadToSave;
           const { data: fbData, error: fbError } = await this.supabase
             .from('students')
             .upsert(fallbackPayload)
@@ -1181,6 +1193,7 @@ class DatabaseService {
       ...toSave,
       ...(savedData || {}),
       assigned_teachers: toSave.assigned_teachers,
+      selected_subjects: toSave.selected_subjects,
       grade: calculateCurrentGrade((savedData?.registered_grade || toSave.registered_grade!), (savedData?.registered_year || toSave.registered_year!), curYear)
     };
 

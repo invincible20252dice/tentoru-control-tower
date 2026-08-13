@@ -3995,4 +3995,74 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmountJhs();
   });
+
+  it('should support dynamic selected subjects configuration, grade category linking, chip toggling, and persistence', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    // 1. Render TeacherDashboard and select student
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const studentCard = screen.getByText(/佐藤 拓海/);
+    fireEvent.click(studentCard);
+
+    // Go to student detail tab
+    const detailTabBtn = screen.getByRole('button', { name: /生徒情報/ });
+    fireEvent.click(detailTabBtn);
+
+    // 2. Check 選択教科 UI exists and chips are present
+    expect(screen.getByText('📚 選択教科')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-数学')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-英語')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-理科')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-社会')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-国語')).toBeInTheDocument();
+
+    // 3. Toggle off 理科
+    const rikaChip = screen.getByTestId('subject-chip-理科');
+    fireEvent.click(rikaChip);
+
+    // Toggle on and off
+    fireEvent.click(screen.getByTestId('subject-chip-社会'));
+    fireEvent.click(screen.getByTestId('subject-chip-国語'));
+    fireEvent.click(screen.getByTestId('subject-chip-英語'));
+
+    // Attempt to deselect the last remaining subject (数学)
+    fireEvent.click(screen.getByTestId('subject-chip-数学'));
+    expect(alertSpy).toHaveBeenCalledWith('少なくとも1つの教科を選択してください。');
+
+    // Toggle 英語 back on
+    fireEvent.click(screen.getByTestId('subject-chip-英語'));
+
+    // Save student details
+    const saveBtn = screen.getByRole('button', { name: '変更を保存する' });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // Verify in db
+    const updatedStudent = db.getStudents().find(s => s.id === 'std-1');
+    expect(updatedStudent?.selected_subjects).toEqual(['数学', '英語']);
+
+    // Check timetable subject options prioritizing selected subjects
+    const scheduleTabBtn = screen.getByRole('button', { name: /学習計画・コマ割り/ });
+    fireEvent.click(scheduleTabBtn);
+    expect(screen.getAllByText(/数学 ⭐ \(選択教科\)/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/英語 ⭐ \(選択教科\)/).length).toBeGreaterThanOrEqual(1);
+
+    unmount();
+
+    // 4. Test Elementary student (Suzuki Yui) in elementary mode
+    const { unmount: unmountElem } = render(<TeacherDashboard teacherType="elementary" onBackToPortal={() => {}} />);
+    const elemStudentCard = screen.getByText(/鈴木 結衣/);
+    fireEvent.click(elemStudentCard);
+
+    const elemDetailTabBtn = screen.getByRole('button', { name: /生徒情報/ });
+    fireEvent.click(elemDetailTabBtn);
+
+    expect(screen.getByText('📚 選択教科')).toBeInTheDocument();
+    expect(screen.getByTestId('subject-chip-算数')).toBeInTheDocument();
+    expect(screen.queryByTestId('subject-chip-数学')).not.toBeInTheDocument();
+
+    unmountElem();
+    alertSpy.mockRestore();
+  });
 });

@@ -340,6 +340,13 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           weekly_sessions_count: (freshSt as any).weekly_sessions_count || '2回',
           weekly_duration_minutes: (freshSt as any).weekly_duration_minutes || '120分',
           selected_days: freshSt.selected_days || ['tuesday', 'friday'],
+          selected_subjects: freshSt.selected_subjects && Array.isArray(freshSt.selected_subjects) && freshSt.selected_subjects.length > 0
+            ? freshSt.selected_subjects
+            : (freshSt.grade.startsWith('小') || freshSt.grade === '園児' || currentTeacherType === 'elementary'
+                ? ['算数', '国語', '英語']
+                : (freshSt.grade.startsWith('高') || freshSt.grade === '既卒' || currentTeacherType === 'high_school'
+                    ? ['数学', '国語', '英語']
+                    : ['数学', '国語', '英語', '理科', '社会'])),
           default_slots: (freshSt as any).default_slots || freshSt.period_count || 2,
           period_count: (freshSt as any).default_slots || freshSt.period_count || 2
         });
@@ -629,11 +636,23 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         ? (editForm as any).assigned_teachers
         : (editForm.teacher_in_charge ? [editForm.teacher_in_charge] : ['福田 尚弘']);
 
+      const isElem = (editForm.grade || selectedStudent.grade).startsWith('小') || (editForm.grade || selectedStudent.grade) === '園児' || currentTeacherType === 'elementary';
+      const isHigh = (editForm.grade || selectedStudent.grade).startsWith('高') || (editForm.grade || selectedStudent.grade) === '既卒' || currentTeacherType === 'high_school';
+      const defaultSubjs = isElem 
+        ? ['算数', '国語', '英語'] 
+        : isHigh 
+          ? ['数学', '国語', '英語'] 
+          : ['数学', '国語', '英語', '理科', '社会'];
+      const currentSelectedSubjects = (editForm as any).selected_subjects && Array.isArray((editForm as any).selected_subjects) && (editForm as any).selected_subjects.length > 0
+        ? (editForm as any).selected_subjects
+        : (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0 ? selectedStudent.selected_subjects : defaultSubjs);
+
       const updated = {
         ...selectedStudent,
         ...editForm,
         assigned_teachers: currentAssignedTeachers,
         teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
+        selected_subjects: currentSelectedSubjects,
         weekly_sessions_count: (editForm as any).weekly_sessions_count || selectedStudent.weekly_sessions_count || '2回',
         weekly_duration_minutes: (editForm as any).weekly_duration_minutes || selectedStudent.weekly_duration_minutes || '120分',
         selected_days: (editForm as any).selected_days || selectedStudent.selected_days || ['tuesday', 'friday'],
@@ -649,6 +668,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         ...saved,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
+        selected_subjects: saved.selected_subjects || currentSelectedSubjects,
         weekly_sessions_count: saved.weekly_sessions_count || '2回',
         weekly_duration_minutes: saved.weekly_duration_minutes || '120分',
         selected_days: saved.selected_days || (editForm as any).selected_days || ['tuesday', 'friday'],
@@ -2628,11 +2648,40 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                   className={styles.select}
                                 >
                                   <option value="">-- コマ割りなし --</option>
-                                  <option value="数学">{isElementary ? '算数' : '数学'}</option>
-                                  <option value="英語">英語</option>
-                                  <option value="理科">理科</option>
-                                  <option value="社会">社会</option>
-                                  <option value="国語">国語</option>
+                                  {(() => {
+                                    const isElem = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
+                                    const isHigh = selectedStudent.grade.startsWith('高') || selectedStudent.grade === '既卒' || currentTeacherType === 'high_school';
+                                    const defaultSubjs = isElem 
+                                      ? ['算数', '国語', '英語'] 
+                                      : isHigh 
+                                        ? ['数学', '国語', '英語'] 
+                                        : ['数学', '国語', '英語', '理科', '社会'];
+                                    const studentSubjs = (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0)
+                                      ? selectedStudent.selected_subjects
+                                      : defaultSubjs;
+                                    const baseSubjs = isElem
+                                      ? ['算数', '国語', '英語', '理科', '社会']
+                                      : isHigh
+                                        ? ['数学', '国語', '英語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会']
+                                        : ['数学', '英語', '理科', '社会', '国語'];
+                                    
+                                    const otherSubjs = baseSubjs.filter(s => !studentSubjs.includes(s));
+
+                                    return (
+                                      <>
+                                        {studentSubjs.map(sub => (
+                                          <option key={sub} value={sub === '算数' ? '数学' : sub}>
+                                            {sub} ⭐ (選択教科)
+                                          </option>
+                                        ))}
+                                        {otherSubjs.map(sub => (
+                                          <option key={sub} value={sub === '算数' ? '数学' : sub}>
+                                            {sub}
+                                          </option>
+                                        ))}
+                                      </>
+                                    );
+                                  })()}
                                   <option value="テスト">テスト</option>
                                   <option value="その他">その他</option>
                                   <option value="自由記述">自由記述</option>
@@ -2640,8 +2689,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                                 {currentConfig.subject && (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    {/* カリキュラム単元選択（数学・英語・理科・社会・国語） */}
-                                    {['数学', '英語', '理科', '社会', '国語'].includes(currentConfig.subject) && (
+                                    {/* カリキュラム単元選択 */}
+                                    {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (
                                       <select
                                         value={currentConfig.unitId}
                                         onChange={e => {
@@ -2655,7 +2704,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                       >
                                         <option value="">-- カリキュラム単元から選択 --</option>
                                         {allCurriculumUnits
-                                          .filter(u => u.school_id === selectedStudent.school_id && u.subject === currentConfig.subject)
+                                          .filter(u => u.school_id === selectedStudent.school_id && (u.subject === currentConfig.subject || (currentConfig.subject === '数学' && u.subject === '算数') || (currentConfig.subject === '算数' && u.subject === '数学')))
                                           .map(u => (
                                             <option key={u.id} value={u.id}>{u.name}</option>
                                           ))}
@@ -5329,6 +5378,88 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                             })}
                           </div>
                         </div>
+
+                        {/* 選択教科設定 */}
+                        <div style={{ marginTop: '14px', backgroundColor: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block' }}>
+                              📚 選択教科
+                            </label>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              {(() => {
+                                const isElem = (editForm.grade || selectedStudent.grade).startsWith('小') || (editForm.grade || selectedStudent.grade) === '園児' || currentTeacherType === 'elementary';
+                                const isHigh = (editForm.grade || selectedStudent.grade).startsWith('高') || (editForm.grade || selectedStudent.grade) === '既卒' || currentTeacherType === 'high_school';
+                                const defaultSubjs = isElem 
+                                  ? ['算数', '国語', '英語'] 
+                                  : isHigh 
+                                    ? ['数学', '国語', '英語'] 
+                                    : ['数学', '国語', '英語', '理科', '社会'];
+                                const curSubjs = (editForm as any).selected_subjects || selectedStudent.selected_subjects || defaultSubjs;
+                                return `選択中: ${curSubjs.length}教科`;
+                              })()}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} data-testid="selected-subjects-container">
+                            {(() => {
+                              const isElem = (editForm.grade || selectedStudent.grade).startsWith('小') || (editForm.grade || selectedStudent.grade) === '園児' || currentTeacherType === 'elementary';
+                              const isHigh = (editForm.grade || selectedStudent.grade).startsWith('高') || (editForm.grade || selectedStudent.grade) === '既卒' || currentTeacherType === 'high_school';
+                              const availableSubjs = isElem
+                                ? ['算数', '国語', '英語', '理科', '社会']
+                                : isHigh
+                                  ? ['数学', '国語', '英語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会']
+                                  : ['数学', '国語', '英語', '理科', '社会'];
+                              const defaultSubjs = isElem 
+                                ? ['算数', '国語', '英語'] 
+                                : isHigh 
+                                  ? ['数学', '国語', '英語'] 
+                                  : ['数学', '国語', '英語', '理科', '社会'];
+                              const curSubjs = ((editForm as any).selected_subjects || selectedStudent.selected_subjects || defaultSubjs);
+
+                              return availableSubjs.map(sub => {
+                                const isSelected = curSubjs.includes(sub);
+                                return (
+                                  <button
+                                    key={sub}
+                                    type="button"
+                                    data-testid={`subject-chip-${sub}`}
+                                    onClick={() => {
+                                      let updated: string[];
+                                      if (isSelected) {
+                                        if (curSubjs.length <= 1) {
+                                          alert('少なくとも1つの教科を選択してください。');
+                                          return;
+                                        }
+                                        updated = curSubjs.filter((s: string) => s !== sub);
+                                      } else {
+                                        updated = [...curSubjs, sub];
+                                      }
+                                      setEditForm({ ...editForm, selected_subjects: updated } as any);
+                                    }}
+                                    style={{
+                                      padding: '6px 14px',
+                                      borderRadius: '20px',
+                                      border: isSelected ? '2px solid #3b82f6' : '1px solid #cbd5e1',
+                                      backgroundColor: isSelected ? '#3b82f6' : '#ffffff',
+                                      color: isSelected ? '#ffffff' : '#334155',
+                                      fontWeight: 700,
+                                      fontSize: '0.85rem',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      boxShadow: isSelected ? '0 2px 6px rgba(59, 130, 246, 0.3)' : 'none',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    {isSelected && <span>✓</span>}
+                                    {sub}
+                                  </button>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
                       </div>
 
                       {/* 教科別スタート位置設定 */}
@@ -5339,33 +5470,49 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         </p>
                         
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {[
-                            { key: 'start_unit_math', label: '数学（算数）', subject: '数学' },
-                            { key: 'start_unit_english', label: '英語', subject: '英語' },
-                            { key: 'start_unit_science', label: '理科', subject: '理科' },
-                            { key: 'start_unit_social', label: '社会', subject: '社会' },
-                            { key: 'start_unit_japanese', label: '国語', subject: '国語' }
-                          ].map(item => {
-                            const val = (editForm as any)[item.key] || '';
-                            const schoolUnits = allCurriculumUnits.filter(u => u.school_id === selectedStudent.school_id && u.subject === item.subject);
+                          {(() => {
+                            const isElem = (editForm.grade || selectedStudent.grade).startsWith('小') || (editForm.grade || selectedStudent.grade) === '園児' || currentTeacherType === 'elementary';
+                            const defaultSubjs = isElem ? ['算数', '国語', '英語'] : ['数学', '国語', '英語', '理科', '社会'];
+                            const curSubjs = ((editForm as any).selected_subjects || selectedStudent.selected_subjects || defaultSubjs);
                             
-                            return (
-                              <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                <label style={{ fontSize: '0.8rem', fontWeight: 600, width: '100px' }}>{item.label}:</label>
-                                <select
-                                  value={val}
-                                  onChange={e => setEditForm({ ...editForm, [item.key]: e.target.value || null })}
-                                  className={styles.select}
-                                  style={{ flex: 1, fontSize: '0.8rem', padding: '4px 6px' }}
-                                >
-                                  <option value="">-- 最初から開始 --</option>
-                                  {schoolUnits.map(u => (
-                                    <option key={u.id} value={u.id}>{u.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            );
-                          })}
+                            const items = [
+                              { key: 'start_unit_math', label: isElem ? '算数' : '数学', subject: isElem ? '算数' : '数学' },
+                              { key: 'start_unit_english', label: '英語', subject: '英語' },
+                              { key: 'start_unit_science', label: '理科', subject: '理科' },
+                              { key: 'start_unit_social', label: '社会', subject: '社会' },
+                              { key: 'start_unit_japanese', label: '国語', subject: '国語' }
+                            ];
+
+                            return items.map(item => {
+                              const val = (editForm as any)[item.key] || '';
+                              const schoolUnits = allCurriculumUnits.filter(u => u.school_id === selectedStudent.school_id && (u.subject === item.subject || (item.subject === '数学' && u.subject === '算数') || (item.subject === '算数' && u.subject === '数学')));
+                              const isSelected = curSubjs.includes(item.subject) || (item.subject === '数学' && curSubjs.includes('算数')) || (item.subject === '算数' && curSubjs.includes('数学'));
+
+                              return (
+                                <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: isSelected ? 1 : 0.65 }}>
+                                  <label style={{ fontSize: '0.8rem', fontWeight: 600, width: '130px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    {item.label}:
+                                    {isSelected && (
+                                      <span style={{ fontSize: '0.65rem', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                                        選択中
+                                      </span>
+                                    )}
+                                  </label>
+                                  <select
+                                    value={val}
+                                    onChange={e => setEditForm({ ...editForm, [item.key]: e.target.value || null })}
+                                    className={styles.select}
+                                    style={{ flex: 1, fontSize: '0.8rem', padding: '4px 6px' }}
+                                  >
+                                    <option value="">-- 最初から開始 --</option>
+                                    {schoolUnits.map(u => (
+                                      <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
                       </div>
 
