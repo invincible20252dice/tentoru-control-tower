@@ -4239,15 +4239,32 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.queryByRole('columnheader', { name: '月' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: '週' })).not.toBeInTheDocument();
 
-    // Verify milestone step cards are rendered
+    // Verify milestone step cards are rendered with grade indicators across all elementary grades
     expect(screen.getByText('STEP 1')).toBeInTheDocument();
+    expect(screen.getByText(/1から5までのかず/)).toBeInTheDocument();
+    expect(screen.getAllByText('小1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('小5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('小6').length).toBeGreaterThan(0);
 
-    // Test switching subject in elementary view
+    // Test switching subject in elementary view (国語, 理科, 社会, 英語)
     const subjectSelect = screen.getByDisplayValue('算数');
     await act(async () => {
       fireEvent.change(subjectSelect, { target: { value: '国語' } });
     });
     expect(subjectSelect).toHaveValue('国語');
+    expect(screen.getByText(/同音異義語・同訓異字の使い分け/)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(subjectSelect, { target: { value: '理科' } });
+    });
+    expect(subjectSelect).toHaveValue('理科');
+    expect(screen.getByText(/発芽に必要な条件/)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(subjectSelect, { target: { value: '英語' } });
+    });
+    expect(subjectSelect).toHaveValue('英語');
+    expect(screen.getByText(/自己紹介と日常会話/)).toBeInTheDocument();
 
     // Test CSV import button in sidebar
     const csvImportMenuBtn = screen.getByText('カリキュラムCSVインポート');

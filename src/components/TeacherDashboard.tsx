@@ -150,7 +150,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
   // Curriculum State
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('数学');
+  const [selectedSubject, setSelectedSubject] = useState(currentTeacherType === 'elementary' ? '算数' : '数学');
   const [schoolUnits, setSchoolUnits] = useState<CurriculumUnit[]>([]);
 
   // Daily Scheduler State
@@ -477,7 +477,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           setSelectedSubject('数学');
         }
       } else {
-        setSelectedSubject('算数');
+        const elemSubjects = ['算数', '国語', '英語', '理科', '社会'];
+        if (!elemSubjects.includes(selectedSubject)) {
+          setSelectedSubject('算数');
+        }
       }
     }
     setSelectedTemplateId('');
@@ -4196,26 +4199,46 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 (() => {
                   const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
 
-                  // 小学生向け進行状況と完了予測計算
+                  // 小学生向け進行状況と完了予測計算（全学年カリキュラムマスターを優先取得・学年フィルター撤廃）
+                  const targetSubject = (isElementary && selectedSubject === '数学') ? '算数' : selectedSubject;
+                  const rawMasters = db.getCurriculumMasters();
+                  const masterUnits = rawMasters
+                    .filter(m => m.subject === targetSubject || (targetSubject === '算数' && (m.subject === '算数' || m.subject === '数学')) || (targetSubject === '数学' && (m.subject === '数学' || m.subject === '算数')))
+                    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+
                   const subjectUnits = allCurriculumUnits.filter(u => 
                     u.school_id === selectedStudent.school_id && (
-                      u.subject === selectedSubject || 
-                      (selectedSubject === '算数' && u.subject === '数学') || 
-                      (selectedSubject === '数学' && u.subject === '算数')
+                      u.subject === targetSubject || 
+                      (targetSubject === '算数' && u.subject === '数学') || 
+                      (targetSubject === '数学' && u.subject === '算数')
                     )
                   );
-                  const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === selectedSubject || (selectedSubject === '算数' && u.subject === '数学'));
-                  const masterUnits = db.getCurriculumMasters().filter(m => m.subject === selectedSubject || (selectedSubject === '算数' && m.subject === '算数'));
+                  const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === targetSubject || (targetSubject === '算数' && u.subject === '数学'));
+
+                  // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
+                  const timelineUnits = masterUnits.length > 0
+                    ? masterUnits.map((m, idx) => ({
+                        id: m.id,
+                        name: `${m.unit_name} - ${m.lesson_name}`,
+                        unit_name: m.unit_name,
+                        lesson_name: m.lesson_name,
+                        grade: m.grade,
+                        sequence_order: idx + 1,
+                        sort_order: m.sort_order ?? (idx + 1),
+                        subject: m.subject,
+                        school_id: ''
+                      }))
+                    : fallbackUnits;
                   
-                  const totalCount = fallbackUnits.length > 0 ? fallbackUnits.length : (masterUnits.length > 0 ? masterUnits.length : 18);
+                  const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
                   
                   const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
-                  const unitIds = new Set(fallbackUnits.map(u => u.id));
+                  const unitIds = new Set(timelineUnits.map(u => u.id));
                   const completedSubjectTasks = studentCompletedTasks.filter(t => unitIds.has(t.unit_id));
                   
                   let startSeq = 0;
                   if (selectedStudent && selectedStudent.start_unit_id) {
-                    const su = fallbackUnits.find(u => u.id === selectedStudent.start_unit_id);
+                    const su = timelineUnits.find(u => u.id === selectedStudent.start_unit_id);
                     if (su) startSeq = su.sequence_order - 1;
                   }
                   
@@ -4509,40 +4532,40 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                             {/* Add Milestone Row form */}
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                              <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>行の追加:</h4>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>行を追加:</span>
                               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                <select 
-                                  id="add-month-select"
-                                  value={addMonth} 
-                                  onChange={e => setAddMonth(parseInt(e.target.value))}
-                                  className={styles.select} 
-                                  style={{ width: '80px', padding: '4px' }}
-                                >
-                                  {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
-                                    <option key={m} value={m}>{m}月</option>
-                                  ))}
-                                </select>
-                                <select 
-                                  id="add-week-select"
-                                  value={addWeek} 
-                                  onChange={e => setAddWeek(parseInt(e.target.value))}
-                                  className={styles.select} 
-                                  style={{ width: '80px', padding: '4px' }}
-                                >
-                                  {[1, 2, 3, 4, 5].map(w => (
-                                    <option key={w} value={w}>{w}週目</option>
-                                  ))}
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddMilestoneRow(addMonth, addWeek)}
-                                  className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#10b981' }}
-                                >
-                                  ➕ 行を追加
-                                </button>
+                                  <select 
+                                    id="add-month-select"
+                                    value={addMonth} 
+                                    onChange={e => setAddMonth(parseInt(e.target.value))}
+                                    className={styles.select} 
+                                    style={{ width: '80px', padding: '4px' }}
+                                  >
+                                    {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
+                                      <option key={m} value={m}>{m}月</option>
+                                    ))}
+                                  </select>
+                                  <select 
+                                    id="add-week-select"
+                                    value={addWeek} 
+                                    onChange={e => setAddWeek(parseInt(e.target.value))}
+                                    className={styles.select} 
+                                    style={{ width: '80px', padding: '4px' }}
+                                  >
+                                    {[1, 2, 3, 4, 5].map(w => (
+                                      <option key={w} value={w}>{w}週目</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddMilestoneRow(addMonth, addWeek)}
+                                    className={styles.btn}
+                                    style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#10b981' }}
+                                  >
+                                    ➕ 行を追加
+                                  </button>
+                                </div>
                               </div>
-                            </div>
                           </>
                         )}
                       </div>
@@ -4599,7 +4622,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                             </h4>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {(fallbackUnits.length > 0 ? fallbackUnits : masterUnits.map((m, idx) => ({ id: m.id, name: `${m.unit_name} - ${m.lesson_name}`, sequence_order: idx + 1, subject: m.subject, school_id: '' }))).map((unit, idx) => {
+                              {timelineUnits.map((unit, idx) => {
                                 const stepNum = idx + 1;
                                 const isCompleted = stepNum <= completedCount;
                                 const isCurrent = stepNum === completedCount + 1;
@@ -4630,6 +4653,18 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                       }}>
                                         STEP {stepNum}
                                       </span>
+                                      {(unit as any).grade && (
+                                        <span style={{
+                                          fontSize: '0.72rem',
+                                          fontWeight: 700,
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          backgroundColor: '#e2e8f0',
+                                          color: '#334155'
+                                        }}>
+                                          {(unit as any).grade}
+                                        </span>
+                                      )}
                                       <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 700 : (isCompleted ? 600 : 500), color: isCurrent ? '#1e40af' : (isCompleted ? '#166534' : '#334155') }}>
                                         {unit.name}
                                       </span>

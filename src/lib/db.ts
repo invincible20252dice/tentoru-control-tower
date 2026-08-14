@@ -1777,27 +1777,74 @@ class DatabaseService {
   }
 
   // 13.5. CurriculumMasters CRUD
-  public getCurriculumMasters(): CurriculumMaster[] {
+  public getCurriculumMasters(subject?: string): CurriculumMaster[] {
     const seed: CurriculumMaster[] = [
+      // 小1 算数
+      { id: 'cm-p1-m1', grade: '小1', subject: '算数', unit_name: '1章 かずとすうじ', lesson_name: '1から5までのかず', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-p1-m2', grade: '小1', subject: '算数', unit_name: '1章 かずとすうじ', lesson_name: 'いくつといくつ（数の合成・分解）', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-p1-m3', grade: '小1', subject: '算数', unit_name: '2章 たしざんとひきざん', lesson_name: 'あわせていくつ（1桁の加法）', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-p1-m4', grade: '小1', subject: '算数', unit_name: '2章 たしざんとひきざん', lesson_name: 'のこりはいくつ（1桁の減法）', sort_order: 4, created_at: new Date().toISOString() },
+      // 小2 算数
+      { id: 'cm-p2-m1', grade: '小2', subject: '算数', unit_name: '1章 2けたのたし算・ひき算', lesson_name: '2桁のたし算の筆算', sort_order: 5, created_at: new Date().toISOString() },
+      { id: 'cm-p2-m2', grade: '小2', subject: '算数', unit_name: '1章 2けたのたし算・ひき算', lesson_name: '2桁のひき算の筆算', sort_order: 6, created_at: new Date().toISOString() },
+      { id: 'cm-p2-m3', grade: '小2', subject: '算数', unit_name: '2章 かけ算（九九）', lesson_name: 'かけ算の意味と九九（前半 2〜5の段）', sort_order: 7, created_at: new Date().toISOString() },
+      { id: 'cm-p2-m4', grade: '小2', subject: '算数', unit_name: '2章 かけ算（九九）', lesson_name: '九九の完成（後半 6〜9の段・1の段）', sort_order: 8, created_at: new Date().toISOString() },
+      // 小3 算数
+      { id: 'cm-p3-m1', grade: '小3', subject: '算数', unit_name: '1章 わり算の基礎', lesson_name: 'わり算の意味と九九を使った計算', sort_order: 9, created_at: new Date().toISOString() },
+      { id: 'cm-p3-m2', grade: '小3', subject: '算数', unit_name: '1章 わり算の基礎', lesson_name: 'あまりのあるわり算', sort_order: 10, created_at: new Date().toISOString() },
+      { id: 'cm-p3-m3', grade: '小3', subject: '算数', unit_name: '2章 小数と分数', lesson_name: '小数の意味と加減', sort_order: 11, created_at: new Date().toISOString() },
+      { id: 'cm-p3-m4', grade: '小3', subject: '算数', unit_name: '2章 小数と分数', lesson_name: '分数の意味と同分母加減', sort_order: 12, created_at: new Date().toISOString() },
+      // 小4 算数
+      { id: 'cm-p4-m1', grade: '小4', subject: '算数', unit_name: '1章 わり算の筆算', lesson_name: '2桁・3桁÷1桁の筆算', sort_order: 13, created_at: new Date().toISOString() },
+      { id: 'cm-p4-m2', grade: '小4', subject: '算数', unit_name: '1章 わり算の筆算', lesson_name: '2桁÷2桁の筆算と商の仮定', sort_order: 14, created_at: new Date().toISOString() },
+      { id: 'cm-p4-m3', grade: '小4', subject: '算数', unit_name: '2章 面積と角度', lesson_name: '長方形・正方形の面積公式', sort_order: 15, created_at: new Date().toISOString() },
+      { id: 'cm-p4-m4', grade: '小4', subject: '算数', unit_name: '2章 面積と角度', lesson_name: '角度の測定と三角形の内角', sort_order: 16, created_at: new Date().toISOString() },
       // 小5 算数
-      { id: 'cm-elem-1', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数と10倍・100倍・1/10', sort_order: 1, created_at: new Date().toISOString() },
-      { id: 'cm-elem-2', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数の位取りと数の構成', sort_order: 2, created_at: new Date().toISOString() },
-      { id: 'cm-elem-3', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×整数の計算', sort_order: 3, created_at: new Date().toISOString() },
-      { id: 'cm-elem-4', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷整数の計算', sort_order: 4, created_at: new Date().toISOString() },
-      { id: 'cm-elem-5', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×小数の筆算', sort_order: 5, created_at: new Date().toISOString() },
-      { id: 'cm-elem-6', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷小数の筆算と余り', sort_order: 6, created_at: new Date().toISOString() },
-      { id: 'cm-elem-7', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '三角形と四角形の内角の和', sort_order: 7, created_at: new Date().toISOString() },
-      { id: 'cm-elem-8', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '直方体・立方体の体積公式', sort_order: 8, created_at: new Date().toISOString() },
-      { id: 'cm-elem-9', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公約数・最大公約数の求め方', sort_order: 9, created_at: new Date().toISOString() },
-      { id: 'cm-elem-10', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公倍数・最小公倍数の求め方', sort_order: 10, created_at: new Date().toISOString() },
-      { id: 'cm-elem-11', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '通分と約分', sort_order: 11, created_at: new Date().toISOString() },
-      { id: 'cm-elem-12', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '分数のたし算とひき算', sort_order: 12, created_at: new Date().toISOString() },
-      { id: 'cm-elem-13', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '単位量あたりの大きさ・人口密度', sort_order: 13, created_at: new Date().toISOString() },
-      { id: 'cm-elem-14', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '速さ・道のり・時間の公式', sort_order: 14, created_at: new Date().toISOString() },
-      { id: 'cm-elem-15', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '割合の意味と比べられる量・もとにする量', sort_order: 15, created_at: new Date().toISOString() },
-      { id: 'cm-elem-16', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '百分率（％）と歩合の計算', sort_order: 16, created_at: new Date().toISOString() },
-      { id: 'cm-elem-17', grade: '小5', subject: '算数', unit_name: '7章 正多角形と円周の長さ', lesson_name: '円周率と円周の長さ公式', sort_order: 17, created_at: new Date().toISOString() },
-      { id: 'cm-elem-18', grade: '小5', subject: '算数', unit_name: '8章 角柱と円柱', lesson_name: '見取り図と展開図・底面と側面', sort_order: 18, created_at: new Date().toISOString() },
+      { id: 'cm-elem-1', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数と10倍・100倍・1/10', sort_order: 17, created_at: new Date().toISOString() },
+      { id: 'cm-elem-2', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数の位取りと数の構成', sort_order: 18, created_at: new Date().toISOString() },
+      { id: 'cm-elem-3', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×整数の計算', sort_order: 19, created_at: new Date().toISOString() },
+      { id: 'cm-elem-4', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷整数の計算', sort_order: 20, created_at: new Date().toISOString() },
+      { id: 'cm-elem-5', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×小数の筆算', sort_order: 21, created_at: new Date().toISOString() },
+      { id: 'cm-elem-6', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷小数の筆算と余り', sort_order: 22, created_at: new Date().toISOString() },
+      { id: 'cm-elem-7', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '三角形と四角形の内角の和', sort_order: 23, created_at: new Date().toISOString() },
+      { id: 'cm-elem-8', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '直方体・立方体の体積公式', sort_order: 24, created_at: new Date().toISOString() },
+      { id: 'cm-elem-9', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公約数・最大公約数の求め方', sort_order: 25, created_at: new Date().toISOString() },
+      { id: 'cm-elem-10', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公倍数・最小公倍数の求め方', sort_order: 26, created_at: new Date().toISOString() },
+      { id: 'cm-elem-11', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '通分と約分', sort_order: 27, created_at: new Date().toISOString() },
+      { id: 'cm-elem-12', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '分数のたし算とひき算', sort_order: 28, created_at: new Date().toISOString() },
+      { id: 'cm-elem-13', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '単位量あたりの大きさ・人口密度', sort_order: 29, created_at: new Date().toISOString() },
+      { id: 'cm-elem-14', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '速さ・道のり・時間の公式', sort_order: 30, created_at: new Date().toISOString() },
+      { id: 'cm-elem-15', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '割合の意味と比べられる量・もとにする量', sort_order: 31, created_at: new Date().toISOString() },
+      { id: 'cm-elem-16', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '百分率（％）と歩合の計算', sort_order: 32, created_at: new Date().toISOString() },
+      { id: 'cm-elem-17', grade: '小5', subject: '算数', unit_name: '7章 正多角形と円周の長さ', lesson_name: '円周率と円周の長さ公式', sort_order: 33, created_at: new Date().toISOString() },
+      { id: 'cm-elem-18', grade: '小5', subject: '算数', unit_name: '8章 角柱と円柱', lesson_name: '見取り図と展開図・底面と側面', sort_order: 34, created_at: new Date().toISOString() },
+      // 小6 算数
+      { id: 'cm-p6-m1', grade: '小6', subject: '算数', unit_name: '1章 分数の乗除', lesson_name: '分数×分数の計算と約分', sort_order: 35, created_at: new Date().toISOString() },
+      { id: 'cm-p6-m2', grade: '小6', subject: '算数', unit_name: '1章 分数の乗除', lesson_name: '分数÷分数の計算と逆数', sort_order: 36, created_at: new Date().toISOString() },
+      { id: 'cm-p6-m3', grade: '小6', subject: '算数', unit_name: '2章 比とその利用', lesson_name: '比の値と等しい比の性質', sort_order: 37, created_at: new Date().toISOString() },
+      { id: 'cm-p6-m4', grade: '小6', subject: '算数', unit_name: '2章 比とその利用', lesson_name: '比例・反比例のグラフと応用', sort_order: 38, created_at: new Date().toISOString() },
+      { id: 'cm-p6-m5', grade: '小6', subject: '算数', unit_name: '3章 円の面積・立体の体積', lesson_name: '円の面積公式（半径×半径×3.14）', sort_order: 39, created_at: new Date().toISOString() },
+      { id: 'cm-p6-m6', grade: '小6', subject: '算数', unit_name: '3章 円の面積・立体の体積', lesson_name: '柱体の体積公式（底面積×高さ）', sort_order: 40, created_at: new Date().toISOString() },
+      // 小5・小6 国語
+      { id: 'cm-p-jp1', grade: '小5', subject: '国語', unit_name: '1章 言語事項', lesson_name: '同音異義語・同訓異字の使い分け', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-p-jp2', grade: '小5', subject: '国語', unit_name: '1章 言語事項', lesson_name: '敬語の種類（尊敬語・謙譲語・丁寧語）', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-p-jp3', grade: '小6', subject: '国語', unit_name: '2章 説明文・論説文', lesson_name: '段落相互の関係と要約の作成', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-p-jp4', grade: '小6', subject: '国語', unit_name: '3章 物語文・心情読解', lesson_name: '登場人物の心情変化と主題の把握', sort_order: 4, created_at: new Date().toISOString() },
+      // 小5・小6 理科
+      { id: 'cm-p-sc1', grade: '小5', subject: '理科', unit_name: '1章 植物の発芽と成長', lesson_name: '発芽に必要な条件（水・空気・温度）', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-p-sc2', grade: '小5', subject: '理科', unit_name: '2章 電流の働き', lesson_name: '電磁石の強さと極の性質', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-p-sc3', grade: '小6', subject: '理科', unit_name: '3章 水溶液の性質', lesson_name: '酸性・アルカリ性・中性の指示薬判定', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-p-sc4', grade: '小6', subject: '理科', unit_name: '4章 人の体のつくりと働き', lesson_name: '呼吸・消化・血液循環の仕組み', sort_order: 4, created_at: new Date().toISOString() },
+      // 小5・小6 社会
+      { id: 'cm-p-so1', grade: '小5', subject: '社会', unit_name: '1章 日本の国土と農業', lesson_name: '米づくりの盛んな地域と気候条件', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-p-so2', grade: '小5', subject: '社会', unit_name: '2章 日本の工業', lesson_name: '太平洋ベルトと工業地帯の特色', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-p-so3', grade: '小6', subject: '社会', unit_name: '3章 日本の歴史', lesson_name: '縄文・弥生・古墳時代の成り立ち', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-p-so4', grade: '小6', subject: '社会', unit_name: '4章 政治・国際社会', lesson_name: '日本国憲法の三大原則と国会・内閣・裁判所', sort_order: 4, created_at: new Date().toISOString() },
+      // 小5・小6 英語
+      { id: 'cm-p-en1', grade: '小5', subject: '英語', unit_name: '1章 自己紹介と日常会話', lesson_name: 'What do you like? / I like ...', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-p-en2', grade: '小5', subject: '英語', unit_name: '2章 時間とスケジュール', lesson_name: 'What time is it? / Daily routine', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-p-en3', grade: '小6', subject: '英語', unit_name: '3章 過去形と思い出', lesson_name: 'Where did you go? / I went to ...', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-p-en4', grade: '小6', subject: '英語', unit_name: '4章 将来の夢・職業', lesson_name: 'What do you want to be? / I want to be ...', sort_order: 4, created_at: new Date().toISOString() },
       // 中3 数学
       { id: 'cm-jhs-1', grade: '中3', subject: '数学', unit_name: '1章 式の展開と因数分解', lesson_name: '多項式の乗法と公式①', sort_order: 1, created_at: new Date().toISOString() },
       { id: 'cm-jhs-2', grade: '中3', subject: '数学', unit_name: '1章 式の展開と因数分解', lesson_name: '乗法公式②③④と展開の工夫', sort_order: 2, created_at: new Date().toISOString() },
@@ -1805,7 +1852,57 @@ class DatabaseService {
       { id: 'cm-jhs-4', grade: '中3', subject: '数学', unit_name: '2章 平方根', lesson_name: '平方根の意味と根号（√）', sort_order: 4, created_at: new Date().toISOString() },
       { id: 'cm-jhs-5', grade: '中3', subject: '数学', unit_name: '2章 平方根', lesson_name: '根号を含む式の計算と有理化', sort_order: 5, created_at: new Date().toISOString() }
     ];
-    return this.getMockData('curriculum_masters', seed);
+    const stored = this.getMockData('curriculum_masters', seed);
+    // Merge any missing seed items so that newly added default masters are always available
+    const existingIds = new Set(stored.map((m: any) => m.id));
+    let hasNew = false;
+    seed.forEach(s => {
+      if (!existingIds.has(s.id)) {
+        stored.push(s);
+        hasNew = true;
+      }
+    });
+    if (hasNew) {
+      this.saveMockData('curriculum_masters', stored);
+    }
+    const sorted = [...stored].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    if (subject) {
+      return sorted.filter(m => m.subject === subject);
+    }
+    return sorted;
+  }
+
+  public async fetchCurriculumMasters(subject?: string): Promise<CurriculumMaster[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        let query = this.supabase
+          .from('curriculum_masters')
+          .select('*')
+          .order('sort_order', { ascending: true })
+          .limit(1000);
+
+        if (subject) {
+          query = query.eq('subject', subject);
+        }
+
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) {
+          const currentList = this.getCurriculumMasters();
+          data.forEach((item: CurriculumMaster) => {
+            const idx = currentList.findIndex(c => c.id === item.id);
+            if (idx >= 0) currentList[idx] = item;
+            else currentList.push(item);
+          });
+          this.saveMockData('curriculum_masters', currentList);
+          return (data as CurriculumMaster[]).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        } else if (error) {
+          console.warn('Supabase fetchCurriculumMasters warning, fallback to local storage:', error);
+        }
+      } catch (e) {
+        console.warn('Supabase fetchCurriculumMasters exception:', e);
+      }
+    }
+    return this.getCurriculumMasters(subject);
   }
 
   public async saveCurriculumMasters(masters: CurriculumMaster[]): Promise<CurriculumMaster[]> {
