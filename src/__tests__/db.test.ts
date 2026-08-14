@@ -907,6 +907,55 @@ describe('Database Service CRUD Tests', () => {
     await expect(localDb.deleteBranch('branch-1')).resolves.not.toThrow();
     await expect(localDb.sendBranchPasswordReset('test@branch.jp')).resolves.toBeDefined();
   });
+
+  it('should support deleteCurriculumMastersByGrades in mock and supabase modes', async () => {
+    // 1. Mock mode test
+    db.clearCurriculumMasters();
+    const testMasters: CurriculumMaster[] = [
+      { id: 'cm-t1', grade: '小1', subject: '算数', unit_name: '単元1', lesson_name: '授業1', sort_order: 1 },
+      { id: 'cm-t2', grade: '小3', subject: '算数', unit_name: '単元2', lesson_name: '授業2', sort_order: 2 },
+      { id: 'cm-t3', grade: '中3', subject: '数学', unit_name: '単元3', lesson_name: '授業3', sort_order: 3 },
+      { id: 'cm-t4', grade: '無段階', subject: '算数', unit_name: '単元4', lesson_name: '授業4', sort_order: 4 }
+    ];
+    await db.saveCurriculumMasters(testMasters);
+    expect(db.getCurriculumMasters().length).toBe(4);
+
+    // Delete legacy grades
+    const result = await db.deleteCurriculumMastersByGrades(['小1', '小2', '小3', '小4', '小5', '小6', '中3']);
+    expect(result.success).toBe(true);
+    expect(result.deletedCount).toBe(3);
+
+    const remaining = db.getCurriculumMasters();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].id).toBe('cm-t4');
+
+    // 2. Supabase non-mock mode test
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    const deleteMock = vi.fn().mockReturnValue({
+      in: vi.fn().mockResolvedValue({ error: null })
+    });
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        delete: deleteMock
+      })
+    };
+
+    const res2 = await localDb.deleteCurriculumMastersByGrades(['小1', '小2']);
+    expect(res2.success).toBe(true);
+    expect(deleteMock).toHaveBeenCalled();
+
+    // 3. Supabase exception fallback
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue({
+        delete: vi.fn().mockReturnValue({
+          in: vi.fn().mockRejectedValue(new Error('Supabase Error'))
+        })
+      })
+    };
+    const res3 = await localDb.deleteCurriculumMastersByGrades(['小1']);
+    expect(res3.success).toBe(true);
+  });
 });
 
 describe('Gemini API Key Utility Tests', () => {

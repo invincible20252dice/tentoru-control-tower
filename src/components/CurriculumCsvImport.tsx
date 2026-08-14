@@ -292,6 +292,34 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     }
   };
 
+  // Delete legacy format data (小1, 小2, 小3, 小4, 小5, 小6, 中3)
+  const handleDeleteLegacyData = async () => {
+    const targetGrades = ['小1', '小2', '小3', '小4', '小5', '小6', '中3'];
+    if (confirm(`旧フォーマット（${targetGrades.join(', ')}）のカリキュラムマスターデータを一括削除しますか？\n（Supabase DBおよびローカルキャッシュから削除されます）`)) {
+      try {
+        // 1. Client-side DB delete
+        const res = await db.deleteCurriculumMastersByGrades(targetGrades);
+
+        // 2. Server-side API trigger (if online)
+        try {
+          await fetch('/api/admin/curriculum-masters/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grades: targetGrades })
+          });
+        } catch (apiErr) {
+          console.warn('API cleanup error (ignoring if offline):', apiErr);
+        }
+
+        loadMasters();
+        showToast(`旧フォーマットデータ（${targetGrades.join(', ')}）を一括削除しました。`, 'success');
+      } catch (err: any) {
+        console.error('Delete legacy data error:', err);
+        showToast(`削除に失敗しました: ${err.message || err}`, 'error');
+      }
+    }
+  };
+
   // Filtered list
   const filteredMasters = masters.filter(m => {
     if (filterGrade !== 'all' && m.grade !== filterGrade) return false;
@@ -727,27 +755,50 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
                 更新
               </button>
               {masters.length > 0 && (
-                <button
-                  type="button"
-                  data-testid="clear-all-masters-btn"
-                  onClick={handleClearAll}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #fca5a5',
-                    backgroundColor: '#fee2e2',
-                    color: '#dc2626',
-                    fontSize: '0.78rem',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Trash2 size={14} />
-                  全件クリア
-                </button>
+                <>
+                  <button
+                    type="button"
+                    data-testid="delete-legacy-masters-btn"
+                    onClick={handleDeleteLegacyData}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #fed7aa',
+                      backgroundColor: '#fff7ed',
+                      color: '#c2410c',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    旧フォーマット一括削除 (小1~小6, 中3)
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clear-all-masters-btn"
+                    onClick={handleClearAll}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #fca5a5',
+                      backgroundColor: '#fee2e2',
+                      color: '#dc2626',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    全件クリア
+                  </button>
+                </>
               )}
             </div>
           </div>

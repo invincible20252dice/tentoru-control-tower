@@ -4196,6 +4196,15 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(confirmSpy).toHaveBeenCalled();
     }
 
+    // Test delete legacy masters (小1~小6, 中3)
+    const deleteLegacyBtn = screen.queryByTestId('delete-legacy-masters-btn');
+    if (deleteLegacyBtn) {
+      await act(async () => {
+        fireEvent.click(deleteLegacyBtn);
+      });
+      expect(confirmSpy).toHaveBeenCalled();
+    }
+
     // Test clear all masters
     const clearAllBtn = screen.queryByText('全件クリア');
     if (clearAllBtn) {
@@ -4214,6 +4223,16 @@ describe('UI Components Render & Interaction Tests', () => {
   });
 
   it('should support elementary timeline UI with progress bar and completion date estimation without monthly/weekly headers, and switch to grid for junior high', async () => {
+    // Ensure test elementary curriculum masters exist in database
+    await db.saveCurriculumMasters([
+      { id: 'cm-p1-m1', grade: '小1', subject: '算数', unit_name: '1章 かずとすうじ', lesson_name: '1から5までのかず', sort_order: 1 },
+      { id: 'cm-p5-m1', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数と10倍', sort_order: 2 },
+      { id: 'cm-p6-m1', grade: '小6', subject: '算数', unit_name: '1章 分数の乗除', lesson_name: '分数×分数', sort_order: 3 },
+      { id: 'cm-p-jp1', grade: '小5', subject: '国語', unit_name: '1章 言語事項', lesson_name: '同音異義語・同訓異字の使い分け', sort_order: 1 },
+      { id: 'cm-p-sc1', grade: '小5', subject: '理科', unit_name: '1章 植物の発芽と成長', lesson_name: '発芽に必要な条件（水・空気・温度）', sort_order: 1 },
+      { id: 'cm-p-en1', grade: '小5', subject: '英語', unit_name: '1章 自己紹介と日常会話', lesson_name: 'What do you like? / I like ...', sort_order: 1 }
+    ]);
+
     // 1. Elementary student test
     const { unmount } = render(<TeacherDashboard teacherType="elementary" onBackToPortal={() => {}} />);
 

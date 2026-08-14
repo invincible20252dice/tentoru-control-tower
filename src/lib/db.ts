@@ -172,6 +172,7 @@ export interface MilestoneTemplate {
 export interface CurriculumMaster {
   id: string;
   grade: string;        // '小5', '中1', etc.
+  grade_level?: string; // Supabase column compatibility
   subject: string;      // '算数', '数学', '英語', '国語', '理科', '社会', etc.
   unit_name: string;    // '1章 正の数・負の数' etc.
   lesson_name: string;  // '正の数・負の数の意味' etc.
@@ -1853,18 +1854,6 @@ class DatabaseService {
       { id: 'cm-jhs-5', grade: '中3', subject: '数学', unit_name: '2章 平方根', lesson_name: '根号を含む式の計算と有理化', sort_order: 5, created_at: new Date().toISOString() }
     ];
     const stored = this.getMockData('curriculum_masters', seed);
-    // Merge any missing seed items so that newly added default masters are always available
-    const existingIds = new Set(stored.map((m: any) => m.id));
-    let hasNew = false;
-    seed.forEach(s => {
-      if (!existingIds.has(s.id)) {
-        stored.push(s);
-        hasNew = true;
-      }
-    });
-    if (hasNew) {
-      this.saveMockData('curriculum_masters', stored);
-    }
     const sorted = [...stored].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     if (subject) {
       return sorted.filter(m => m.subject === subject);
@@ -1957,6 +1946,48 @@ class DatabaseService {
       }
     }
     this.saveMockData('curriculum_masters', []);
+  }
+
+  /**
+   * 旧フォーマット（小1, 小2, 小3, 小4, 小5, 小6, 中3 等）のデータを一括削除
+   * DELETE FROM public.curriculum_masters WHERE grade_level IN (...) OR grade IN (...)
+   */
+  public async deleteCurriculumMastersByGrades(grades: string[] = ['小1', '小2', '小3', '小4', '小5', '小6', '中3']): Promise<{ success: boolean; deletedCount: number }> {
+    let deletedCount = 0;
+    if (!this.isMockMode && this.supabase) {
+      try {
+        // Delete using grade_level column
+        const { error: err1 } = await this.supabase
+          .from('curriculum_masters')
+          .delete()
+          .in('grade_level', grades);
+        if (err1) {
+          console.warn('Supabase deleteCurriculumMastersByGrades (grade_level) warning:', err1);
+        }
+
+        // Also delete using grade column for backwards compatibility
+        const { error: err2 } = await this.supabase
+          .from('curriculum_masters')
+          .delete()
+          .in('grade', grades);
+        if (err2) {
+          console.warn('Supabase deleteCurriculumMastersByGrades (grade) warning:', err2);
+        }
+      } catch (e) {
+        console.warn('Supabase deleteCurriculumMastersByGrades exception:', e);
+      }
+    }
+
+    // Update local cache
+    const currentList = this.getCurriculumMasters();
+    const remaining = currentList.filter(m => {
+      const g = m.grade || m.grade_level || '';
+      return !grades.includes(g);
+    });
+    deletedCount = currentList.length - remaining.length;
+    this.saveMockData('curriculum_masters', remaining);
+
+    return { success: true, deletedCount };
   }
 
   // Clear mock data if needed (for testing or reset)
