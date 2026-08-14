@@ -53,6 +53,7 @@ export interface Student {
   start_unit_basic_english?: string | null;
   start_unit_basic_kanji?: string | null;
   start_unit_basic_calculation?: string | null;
+  subject_start_positions?: Record<string, string>;
   weekly_sessions_count?: string | null;
   weekly_duration_minutes?: string | null;
   selected_days?: string[];

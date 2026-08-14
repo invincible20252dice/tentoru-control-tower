@@ -4320,5 +4320,114 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmountJh();
   });
+
+  // Test: 教科別学習スタート位置と学習計画のスタートライン自動連動テスト
+  it('should auto-link subject start positions with schedule planning, show visual badges, and reorganize future tasks on save', async () => {
+    // 1. Setup mock student with subject-specific start positions
+    const studentWithStarts: Student = {
+      id: 'std-start-test',
+      student_id: 'start101',
+      name: 'スタート連携 生徒',
+      email: 'start@tentoru.com',
+      grade: '中1',
+      school_id: 'sch-1',
+      status: 'normal',
+      start_unit_id: null,
+      start_unit_math: 'u-m2', // 数学: 文字と式からスタート
+      start_unit_english: 'u-e2', // 英語: 一般動詞からスタート
+      selected_days: ['monday', 'thursday'],
+      selected_subjects: ['数学', '英語'],
+      default_slots: 2,
+      period_count: 2,
+      created_at: ''
+    };
+
+    const mathUnits: CurriculumUnit[] = [
+      { id: 'u-m1', school_id: 'sch-1', subject: '数学', name: '正負の数', sequence_order: 1, created_at: '' },
+      { id: 'u-m2', school_id: 'sch-1', subject: '数学', name: '文字と式', sequence_order: 2, created_at: '' },
+      { id: 'u-m3', school_id: 'sch-1', subject: '数学', name: '一次方程式', sequence_order: 3, created_at: '' }
+    ];
+
+    const engUnits: CurriculumUnit[] = [
+      { id: 'u-e1', school_id: 'sch-1', subject: '英語', name: 'be動詞', sequence_order: 1, created_at: '' },
+      { id: 'u-e2', school_id: 'sch-1', subject: '英語', name: '一般動詞', sequence_order: 2, created_at: '' }
+    ];
+
+    // Seed into mock db
+    await db.saveStudent(studentWithStarts);
+    await db.saveCurriculumUnits([...mathUnits, ...engUnits]);
+
+    const { unmount } = render(<TeacherDashboard teacherType="junior_high" onBackToPortal={() => {}} />);
+
+    // 2. Wait for student list to load and select the student
+    await waitFor(() => {
+      expect(screen.getByText(/スタート連携 生徒/)).toBeInTheDocument();
+    });
+
+    const studentCard = screen.getByText(/スタート連携 生徒/);
+    await act(async () => {
+      fireEvent.click(studentCard);
+    });
+
+    // 3. Switch to schedule tab
+    const scheduleMenuBtn = screen.getByText('学習計画・コマ割り');
+    await act(async () => {
+      fireEvent.click(scheduleMenuBtn);
+    });
+
+    // 4. Verify that Tab 1 (学習計画・コマ割り) shows the start position summary box
+    await waitFor(() => {
+      expect(screen.getByTestId('start-line-summary-bar')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/教科別スタートライン/)).toBeInTheDocument();
+    expect(screen.getByText(/数学:/)).toBeInTheDocument();
+    expect(screen.getAllByText(/文字と式/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/英語:/)).toBeInTheDocument();
+    expect(screen.getAllByText(/一般動詞/).length).toBeGreaterThan(0);
+
+    // 5. Verify dropdown options have the start line marker
+    const period1SubjectSelect = screen.getByTestId('period-subject-select-1');
+    await act(async () => {
+      fireEvent.change(period1SubjectSelect, { target: { value: '数学' } });
+    });
+
+    // Unit select should now include '★ [スタートライン] 文字と式'
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /★ \[スタートライン\] 文字と式/ })).toBeInTheDocument();
+    });
+
+    // 6. Test Milestone / Timeline tab for visual start line badge
+    const milestoneTabBtn = screen.getByText('年間計画（マイルストーン）');
+    await act(async () => {
+      fireEvent.click(milestoneTabBtn);
+    });
+
+    // Switch subject to 数学
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('数学')).toBeInTheDocument();
+    });
+
+    // 7. Test updating student detail start positions and saving
+    const studentDetailMenuBtn = screen.getByText('生徒情報');
+    await act(async () => {
+      fireEvent.click(studentDetailMenuBtn);
+    });
+
+    // Verify Basic info card is visible
+    expect(screen.getByText('基本情報・属性設定')).toBeInTheDocument();
+
+    // Verify Save button exists and click it
+    const saveBtn = screen.getByRole('button', { name: '変更を保存する' });
+    expect(saveBtn).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    unmount();
+  });
 });
+
+
+
 

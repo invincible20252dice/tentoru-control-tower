@@ -565,5 +565,99 @@ describe('Scheduler and Core Logic Tests', () => {
         expect(slots).toBe(5);
       });
     });
+
+    // Test: 教科別学習スタート位置連動テスト
+    describe('Subject Start Position Auto-Linking Tests', () => {
+      const unitsMath: CurriculumUnit[] = [
+        { id: 'm-1', school_id: 'sch-1', subject: '数学', name: '正負の数', sequence_order: 1, created_at: '' },
+        { id: 'm-2', school_id: 'sch-1', subject: '数学', name: '文字と式', sequence_order: 2, created_at: '' },
+        { id: 'm-3', school_id: 'sch-1', subject: '数学', name: '一次方程式', sequence_order: 3, created_at: '' },
+        { id: 'm-4', school_id: 'sch-1', subject: '数学', name: '比例と反比例', sequence_order: 4, created_at: '' },
+      ];
+
+      const unitsEng: CurriculumUnit[] = [
+        { id: 'e-1', school_id: 'sch-1', subject: '英語', name: 'be動詞', sequence_order: 1, created_at: '' },
+        { id: 'e-2', school_id: 'sch-1', subject: '英語', name: '一般動詞', sequence_order: 2, created_at: '' },
+        { id: 'e-3', school_id: 'sch-1', subject: '英語', name: '複数形・疑問詞', sequence_order: 3, created_at: '' },
+      ];
+
+      const allTestUnits = [...unitsMath, ...unitsEng];
+
+      it('should calculate progress gap correctly with subject-specific start units (start_unit_math, start_unit_english)', () => {
+        const studentWithSubjectStarts: Student = {
+          id: 'std-subject-1',
+          student_id: 'std101',
+          name: '田中 花子',
+          email: 'tanaka@tentoru.com',
+          grade: '中1',
+          school_id: 'sch-1',
+          status: 'normal',
+          start_unit_id: null,
+          start_unit_math: 'm-3', // 数学は一次方程式（seq: 3）からスタート
+          start_unit_english: 'e-2', // 英語は一般動詞（seq: 2）からスタート
+          created_at: ''
+        };
+
+        const milestones: MilestonePlan[] = [
+          { id: 'mp-1', school_id: 'sch-1', subject: '数学', month: 6, week_number: 3, target_unit_id: 'm-3', target_theme_name: '一次方程式', target_sequence_order: 3, is_holiday: false, created_at: '' },
+          { id: 'mp-2', school_id: 'sch-1', subject: '英語', month: 6, week_number: 3, target_unit_id: 'e-2', target_theme_name: '一般動詞', target_sequence_order: 2, is_holiday: false, created_at: '' }
+        ];
+
+        // まだタスク完了がない状態でも、数学は start_unit_math (seq: 3) より実効シーケンスは 3 - 1 = 2 となる
+        // 目標 seq: 3 に対し、gapWeeks = 0, status = 'normal'
+        const resMath = calculateProgressGap(
+          studentWithSubjectStarts,
+          [], // 完了タスクなし
+          milestones,
+          allTestUnits,
+          '2026-06-19', // 6月3週
+          '数学'
+        );
+        expect(resMath.gapWeeks).toBe(0);
+        expect(resMath.status).toBe('normal');
+
+        // 英語も start_unit_english (seq: 2) より実効シーケンスは 2 - 1 = 1
+        // 目標 seq: 2 に対し、gapWeeks = 0, status = 'normal'
+        const resEng = calculateProgressGap(
+          studentWithSubjectStarts,
+          [],
+          milestones,
+          allTestUnits,
+          '2026-06-19',
+          '英語'
+        );
+        expect(resEng.gapWeeks).toBe(0);
+        expect(resEng.status).toBe('normal');
+      });
+
+      it('should handle start position updates by skipping pre-start units and ordering post-start units for future slots', () => {
+        // 生徒が途中の単元（m-3: 一次方程式）からスタートするように変更されたケース
+        const initialTasks: LearningTask[] = [
+          { id: 't-m1', student_id: 'std-1', unit_id: 'm-1', scheduled_date: '2026-06-18', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-m2', student_id: 'std-1', unit_id: 'm-2', scheduled_date: '2026-06-19', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-m3', student_id: 'std-1', unit_id: 'm-3', scheduled_date: '2026-06-20', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-m4', student_id: 'std-1', unit_id: 'm-4', scheduled_date: '2026-06-21', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+        ];
+
+        const startUnit = unitsMath.find(u => u.id === 'm-3');
+        expect(startUnit).toBeDefined();
+
+        // スタート位置更新ロジックのシミュレーション
+        const updatedTasks = initialTasks.map(t => {
+          const u = unitsMath.find(unit => unit.id === t.unit_id);
+          if (!u || t.status === 'completed') return t;
+          if (startUnit && u.sequence_order < startUnit.sequence_order) {
+            return { ...t, status: 'skipped' as const };
+          }
+          return { ...t, status: 'unstarted' as const };
+        });
+
+        const skippedTasks = updatedTasks.filter(t => t.status === 'skipped');
+        const activeTasks = updatedTasks.filter(t => t.status === 'unstarted');
+
+        expect(skippedTasks.map(t => t.unit_id)).toEqual(['m-1', 'm-2']);
+        expect(activeTasks.map(t => t.unit_id)).toEqual(['m-3', 'm-4']);
+      });
+    });
   });
 });

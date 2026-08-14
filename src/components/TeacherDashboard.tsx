@@ -39,7 +39,9 @@ import {
   generateAIReportText,
   PersonalStyle,
   calculateProgressGap,
-  getYearMonthWeek
+  getYearMonthWeek,
+  getStudentStartUnitIdForSubject,
+  applyStartPositionsToTasks
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -680,6 +682,17 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         period_count: saved.default_slots || saved.period_count || newSlots,
         target_schools: (saved as any).target_schools || cleanTargetSchools
       } as any);
+
+      // 教科別スタート位置に基づき未実行タスクを動的再計算・連動保存
+      try {
+        const allCurrentTasks = db.getLearningTasks();
+        const recalculatedTasks = applyStartPositionsToTasks(saved, allCurrentTasks, allCurriculumUnits);
+        await db.saveLearningTasks(recalculatedTasks);
+        setStudentTasks(recalculatedTasks.filter(t => t.student_id === saved.id));
+      } catch (taskErr) {
+        console.warn('Auto task recalculation warning:', taskErr);
+      }
+
       // 生徒リスト自体もリロードして更新を反映
       const listSt = db.getStudents();
       setStudents(listSt);
@@ -1362,13 +1375,40 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   // コマごとの教科変更時
   const handleSubjectChange = (p: number, sub: string) => {
     let initialTheme = '';
+    let initialUnitId = '';
+
     // もし「テスト」が選ばれ、すでにテストが1件だけ登録されているなら、それを自動でセットする
     if (sub === 'テスト' && todayTests.length === 1) {
       initialTheme = todayTests[0].content;
+    } else if (selectedStudent && ['数学', '算数', '英語', '理科', '社会', '国語', '歴史', '地理', '物理', '化学', '生物', '日本史', '世界史', '現代社会'].includes(sub)) {
+      // 該当教科のスタート位置を取得
+      const startUnitId = getStudentStartUnitIdForSubject(selectedStudent, sub);
+      const schoolUnits = allCurriculumUnits.filter(u => 
+        (u.school_id === selectedStudent.school_id || !u.school_id) && 
+        (u.subject === sub || (sub === '数学' && u.subject === '算数') || (sub === '算数' && u.subject === '数学'))
+      ).sort((a, b) => a.sequence_order - b.sequence_order);
+
+      // 生徒の未完了タスクで最も若い sequence_order の単元、またはスタート位置単元を自動選択
+      const uncompletedTasksForSub = studentTasks.filter(t => 
+        t.status !== 'completed' && t.status !== 'skipped' &&
+        schoolUnits.some(u => u.id === t.unit_id)
+      );
+
+      if (uncompletedTasksForSub.length > 0) {
+        const firstUncompletedUnit = schoolUnits.find(u => uncompletedTasksForSub.some(t => t.unit_id === u.id));
+        if (firstUncompletedUnit) {
+          initialUnitId = firstUncompletedUnit.id;
+        }
+      } else if (startUnitId && schoolUnits.some(u => u.id === startUnitId)) {
+        initialUnitId = startUnitId;
+      } else if (schoolUnits.length > 0) {
+        initialUnitId = schoolUnits[0].id;
+      }
     }
+
     setPeriodSelections({
       ...periodSelections,
-      [p]: { subject: sub, unitId: '', customTheme: initialTheme }
+      [p]: { subject: sub, unitId: initialUnitId, customTheme: initialTheme }
     });
   };
 
@@ -2655,6 +2695,60 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         })()}
                       </div>
                       
+                      {/* 教科別スタートライン（基準単元）設定状況 */}
+                      {(() => {
+                        const isElem = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
+                        const subjects = isElem ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語'];
+                        const startInfos = subjects.map(sub => {
+                          const sId = getStudentStartUnitIdForSubject(selectedStudent, sub);
+                          const u = sId ? allCurriculumUnits.find(unit => unit.id === sId) : null;
+                          return { subject: sub, unitName: u ? u.name : '最初から開始', isSet: Boolean(u) };
+                        });
+
+                        return (
+                          <div 
+                            data-testid="start-line-summary-bar"
+                            style={{ 
+                              marginBottom: '16px', 
+                              padding: '10px 14px', 
+                              backgroundColor: '#f0fdf4', 
+                              borderRadius: '8px', 
+                              border: '1px solid #bbf7d0', 
+                              display: 'flex', 
+                              flexDirection: 'column', 
+                              gap: '6px' 
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>⭐</span> 教科別スタートライン (基準単元連動中)
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: '#15803d' }}>
+                                ※「基本情報・属性設定」で変更すると、スケジュール・コマ割りが自動最適化されます
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                              {startInfos.map(info => (
+                                <span 
+                                  key={info.subject}
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    backgroundColor: info.isSet ? '#dcfce7' : '#ffffff',
+                                    color: info.isSet ? '#14532d' : '#64748b',
+                                    border: info.isSet ? '1px solid #86efac' : '1px solid #e2e8f0',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  <strong>{info.subject}:</strong> {info.isSet ? `★ ${info.unitName}` : '最初から開始'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <div className={styles.timetableSetup}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
                           const currentConfig = periodSelections[p];
@@ -2665,6 +2759,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                               <span className={styles.cellNum} style={{ marginTop: '8px' }}>{p}</span>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
                                 <select
+                                  data-testid={`period-subject-select-${p}`}
                                   value={currentConfig.subject}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
@@ -2714,6 +2809,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                     {/* カリキュラム単元選択 */}
                                     {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (
                                       <select
+                                        data-testid={`period-unit-select-${p}`}
                                         value={currentConfig.unitId}
                                         onChange={e => {
                                           const uId = e.target.value;
@@ -2726,10 +2822,15 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                       >
                                         <option value="">-- カリキュラム単元から選択 --</option>
                                         {allCurriculumUnits
-                                          .filter(u => u.school_id === selectedStudent.school_id && (u.subject === currentConfig.subject || (currentConfig.subject === '数学' && u.subject === '算数') || (currentConfig.subject === '算数' && u.subject === '数学')))
-                                          .map(u => (
-                                            <option key={u.id} value={u.id}>{u.name}</option>
-                                          ))}
+                                          .filter(u => (u.school_id === selectedStudent.school_id || !u.school_id) && (u.subject === currentConfig.subject || (currentConfig.subject === '数学' && u.subject === '算数') || (currentConfig.subject === '算数' && u.subject === '数学')))
+                                          .map(u => {
+                                            const isStartUnit = u.id === getStudentStartUnitIdForSubject(selectedStudent, currentConfig.subject);
+                                            return (
+                                              <option key={u.id} value={u.id}>
+                                                {isStartUnit ? '★ [スタートライン] ' : ''}{u.name}
+                                              </option>
+                                            );
+                                          })}
                                       </select>
                                     )}
 
@@ -4237,8 +4338,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                   const completedSubjectTasks = studentCompletedTasks.filter(t => unitIds.has(t.unit_id));
                   
                   let startSeq = 0;
-                  if (selectedStudent && selectedStudent.start_unit_id) {
-                    const su = timelineUnits.find(u => u.id === selectedStudent.start_unit_id);
+                  const subjectStartUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
+                  if (selectedStudent && subjectStartUnitId) {
+                    const su = timelineUnits.find(u => u.id === subjectStartUnitId);
                     if (su) startSeq = su.sequence_order - 1;
                   }
                   
@@ -4665,6 +4767,31 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                           {(unit as any).grade}
                                         </span>
                                       )}
+                                      {(() => {
+                                        const sUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
+                                        if (sUnitId === unit.id) {
+                                          return (
+                                            <span 
+                                              data-testid="timeline-start-line-badge"
+                                              style={{
+                                                fontSize: '0.7rem',
+                                                fontWeight: 800,
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                backgroundColor: '#fef3c7',
+                                                color: '#92400e',
+                                                border: '1px solid #fcd34d',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '2px'
+                                              }}
+                                            >
+                                              ⭐ スタートライン
+                                            </span>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
                                       <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 700 : (isCompleted ? 600 : 500), color: isCurrent ? '#1e40af' : (isCompleted ? '#166534' : '#334155') }}>
                                         {unit.name}
                                       </span>

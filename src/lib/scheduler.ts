@@ -56,6 +56,89 @@ export function getYearMonthWeek(dateStr: string): { month: number; week_number:
   };
 }
 
+/**
+ * 生徒の教科ごとのスタート位置（単元ID）を取得するヘルパー関数
+ */
+export function getStudentStartUnitIdForSubject(student: Student, subject: string): string | null {
+  if (!student) return null;
+  const sub = subject;
+
+  if (sub === '数学' || sub === '算数') {
+    return student.start_unit_math || student.subject_start_positions?.['数学'] || student.subject_start_positions?.['算数'] || student.start_unit_id || null;
+  }
+  if (sub === '英語') {
+    return student.start_unit_english || student.subject_start_positions?.['英語'] || student.start_unit_id || null;
+  }
+  if (sub === '理科') {
+    return student.start_unit_science || student.subject_start_positions?.['理科'] || student.start_unit_id || null;
+  }
+  if (sub === '社会' || sub === '歴史' || sub === '地理') {
+    return student.start_unit_social || student.subject_start_positions?.['社会'] || student.subject_start_positions?.['歴史'] || student.subject_start_positions?.['地理'] || student.start_unit_id || null;
+  }
+  if (sub === '国語') {
+    return student.start_unit_japanese || student.subject_start_positions?.['国語'] || student.start_unit_id || null;
+  }
+  return student.subject_start_positions?.[sub] || student.start_unit_id || null;
+}
+
+/**
+ * 生徒の教科別スタート位置に基づき、未完了タスクのスキップ／未着手状態を再配置・再計算する
+ */
+export function applyStartPositionsToTasks(
+  student: Student,
+  allTasks: LearningTask[],
+  allCurriculumUnits: CurriculumUnit[]
+): LearningTask[] {
+  const studentSchoolUnits = allCurriculumUnits.filter(u => u.school_id === student.school_id || !u.school_id);
+  const studentTasks = allTasks.filter(t => t.student_id === student.id);
+  const otherTasks = allTasks.filter(t => t.student_id !== student.id);
+
+  const updatedStudentTasks = studentTasks.map(task => {
+    // 既に完了したタスクは変更しない
+    if (task.status === 'completed') return task;
+
+    const unit = studentSchoolUnits.find(u => u.id === task.unit_id);
+    if (!unit) return task;
+
+    const startUnitId = getStudentStartUnitIdForSubject(student, unit.subject);
+    if (!startUnitId) {
+      // スタート位置が指定されていない場合、自動スキップされたものは未着手に復帰
+      if (task.status === 'skipped' && (task.office_note?.includes('スタート') || task.office_note?.includes('開始位置'))) {
+        return {
+          ...task,
+          status: 'unstarted' as const,
+          office_note: ''
+        };
+      }
+      return task;
+    }
+
+    const startUnit = studentSchoolUnits.find(u => u.id === startUnitId);
+    if (!startUnit) return task;
+
+    if (unit.sequence_order < startUnit.sequence_order) {
+      // スタート位置より前の単元はスキップ
+      if (task.status === 'unstarted') {
+        return {
+          ...task,
+          status: 'skipped' as const,
+          office_note: '★ スタートライン指定によりスキップ'
+        };
+      }
+    } else if (task.status === 'skipped' && (task.office_note?.includes('スタート') || task.office_note?.includes('開始位置'))) {
+      // スタート位置以降で以前スキップされていたものは未着手にリセット
+      return {
+        ...task,
+        status: 'unstarted' as const,
+        office_note: ''
+      };
+    }
+    return task;
+  });
+
+  return [...otherTasks, ...updatedStudentTasks];
+}
+
 export function calculateProgressGap(
   student: Student,
   allTasks: LearningTask[],
@@ -96,15 +179,7 @@ export function calculateProgressGap(
     const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
     currentSequence = Math.max(0, ...completedUnits.map(u => u.sequence_order));
   } else {
-    let startUnitId: string | null | undefined = null;
-    const sub = subject;
-    if (sub === '数学' || sub === '算数') startUnitId = student.start_unit_math;
-    else if (sub === '英語') startUnitId = student.start_unit_english;
-    else if (sub === '理科') startUnitId = student.start_unit_science;
-    else if (sub === '社会' || sub === '歴史' || sub === '地理') startUnitId = student.start_unit_social;
-    else if (sub === '国語') startUnitId = student.start_unit_japanese;
-
-    if (!startUnitId) startUnitId = student.start_unit_id;
+    const startUnitId = getStudentStartUnitIdForSubject(student, subject);
 
     if (startUnitId) {
       const startUnit = subjectUnits.find(u => u.id === startUnitId);
