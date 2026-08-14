@@ -169,6 +169,16 @@ export interface MilestoneTemplate {
   created_at: string;
 }
 
+export interface CurriculumMaster {
+  id: string;
+  grade: string;        // '小5', '中1', etc.
+  subject: string;      // '算数', '数学', '英語', '国語', '理科', '社会', etc.
+  unit_name: string;    // '1章 正の数・負の数' etc.
+  lesson_name: string;  // '正の数・負の数の意味' etc.
+  sort_order: number;   // 連番 (1, 2, 3...)
+  created_at?: string;
+}
+
 export interface CurriculumUnit {
   id: string;
   school_id: string;
@@ -1760,10 +1770,96 @@ class DatabaseService {
     return template;
   }
 
-  public async deleteMilestoneTemplate(id: string): Promise<void> {
-    let list = this.getMilestoneTemplates();
-    list = list.filter(t => t.id !== id);
+  public async deleteMilestoneTemplate(id: string): Promise<boolean> {
+    const list = this.getMilestoneTemplates().filter(t => t.id !== id);
     this.saveMockData('milestone_templates', list);
+    return true;
+  }
+
+  // 13.5. CurriculumMasters CRUD
+  public getCurriculumMasters(): CurriculumMaster[] {
+    const seed: CurriculumMaster[] = [
+      // 小5 算数
+      { id: 'cm-elem-1', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数と10倍・100倍・1/10', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-elem-2', grade: '小5', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数の位取りと数の構成', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-elem-3', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×整数の計算', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-elem-4', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷整数の計算', sort_order: 4, created_at: new Date().toISOString() },
+      { id: 'cm-elem-5', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数×小数の筆算', sort_order: 5, created_at: new Date().toISOString() },
+      { id: 'cm-elem-6', grade: '小5', subject: '算数', unit_name: '2章 小数の乗除', lesson_name: '小数÷小数の筆算と余り', sort_order: 6, created_at: new Date().toISOString() },
+      { id: 'cm-elem-7', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '三角形と四角形の内角の和', sort_order: 7, created_at: new Date().toISOString() },
+      { id: 'cm-elem-8', grade: '小5', subject: '算数', unit_name: '3章 図形の角と体積', lesson_name: '直方体・立方体の体積公式', sort_order: 8, created_at: new Date().toISOString() },
+      { id: 'cm-elem-9', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公約数・最大公約数の求め方', sort_order: 9, created_at: new Date().toISOString() },
+      { id: 'cm-elem-10', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '公倍数・最小公倍数の求め方', sort_order: 10, created_at: new Date().toISOString() },
+      { id: 'cm-elem-11', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '通分と約分', sort_order: 11, created_at: new Date().toISOString() },
+      { id: 'cm-elem-12', grade: '小5', subject: '算数', unit_name: '4章 分数と約数・倍数', lesson_name: '分数のたし算とひき算', sort_order: 12, created_at: new Date().toISOString() },
+      { id: 'cm-elem-13', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '単位量あたりの大きさ・人口密度', sort_order: 13, created_at: new Date().toISOString() },
+      { id: 'cm-elem-14', grade: '小5', subject: '算数', unit_name: '5章 単位量あたりの大きさ', lesson_name: '速さ・道のり・時間の公式', sort_order: 14, created_at: new Date().toISOString() },
+      { id: 'cm-elem-15', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '割合の意味と比べられる量・もとにする量', sort_order: 15, created_at: new Date().toISOString() },
+      { id: 'cm-elem-16', grade: '小5', subject: '算数', unit_name: '6章 割合と百分率', lesson_name: '百分率（％）と歩合の計算', sort_order: 16, created_at: new Date().toISOString() },
+      { id: 'cm-elem-17', grade: '小5', subject: '算数', unit_name: '7章 正多角形と円周の長さ', lesson_name: '円周率と円周の長さ公式', sort_order: 17, created_at: new Date().toISOString() },
+      { id: 'cm-elem-18', grade: '小5', subject: '算数', unit_name: '8章 角柱と円柱', lesson_name: '見取り図と展開図・底面と側面', sort_order: 18, created_at: new Date().toISOString() },
+      // 中3 数学
+      { id: 'cm-jhs-1', grade: '中3', subject: '数学', unit_name: '1章 式の展開と因数分解', lesson_name: '多項式の乗法と公式①', sort_order: 1, created_at: new Date().toISOString() },
+      { id: 'cm-jhs-2', grade: '中3', subject: '数学', unit_name: '1章 式の展開と因数分解', lesson_name: '乗法公式②③④と展開の工夫', sort_order: 2, created_at: new Date().toISOString() },
+      { id: 'cm-jhs-3', grade: '中3', subject: '数学', unit_name: '1章 式の展開と因数分解', lesson_name: '因数分解の基本と公式利用', sort_order: 3, created_at: new Date().toISOString() },
+      { id: 'cm-jhs-4', grade: '中3', subject: '数学', unit_name: '2章 平方根', lesson_name: '平方根の意味と根号（√）', sort_order: 4, created_at: new Date().toISOString() },
+      { id: 'cm-jhs-5', grade: '中3', subject: '数学', unit_name: '2章 平方根', lesson_name: '根号を含む式の計算と有理化', sort_order: 5, created_at: new Date().toISOString() }
+    ];
+    return this.getMockData('curriculum_masters', seed);
+  }
+
+  public async saveCurriculumMasters(masters: CurriculumMaster[]): Promise<CurriculumMaster[]> {
+    let savedList: CurriculumMaster[] = [];
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('curriculum_masters').upsert(masters).select();
+        if (!error && data) {
+          savedList = data;
+        } else {
+          console.warn('Supabase curriculum_masters upsert warning, fallback to local storage:', error);
+          savedList = masters;
+        }
+      } catch (e) {
+        console.warn('Supabase curriculum_masters upsert exception:', e);
+        savedList = masters;
+      }
+    } else {
+      savedList = masters;
+    }
+
+    // Always update local cache
+    const currentList = this.getCurriculumMasters();
+    masters.forEach(m => {
+      const idx = currentList.findIndex(item => item.id === m.id);
+      if (idx >= 0) currentList[idx] = m;
+      else currentList.push(m);
+    });
+    this.saveMockData('curriculum_masters', currentList);
+
+    return savedList;
+  }
+
+  public async deleteCurriculumMaster(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('curriculum_masters').delete().eq('id', id);
+      } catch (e) {
+        console.warn('Supabase deleteCurriculumMaster exception:', e);
+      }
+    }
+    const list = this.getCurriculumMasters().filter(m => m.id !== id);
+    this.saveMockData('curriculum_masters', list);
+  }
+
+  public async clearCurriculumMasters(): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('curriculum_masters').delete().neq('id', 'dummy');
+      } catch (e) {
+        console.warn('Supabase clearCurriculumMasters exception:', e);
+      }
+    }
+    this.saveMockData('curriculum_masters', []);
   }
 
   // Clear mock data if needed (for testing or reset)
@@ -1771,6 +1867,7 @@ class DatabaseService {
     if (!this.isBrowser()) return;
     localStorage.removeItem('tentoru_schools');
     localStorage.removeItem('tentoru_curriculum_units');
+    localStorage.removeItem('tentoru_curriculum_masters');
     localStorage.removeItem('tentoru_students');
     localStorage.removeItem('tentoru_learning_tasks');
     localStorage.removeItem('tentoru_learning_logs');

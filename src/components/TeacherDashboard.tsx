@@ -3,7 +3,8 @@ import styles from './TeacherDashboard.module.css';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 import { HorizontalDatePicker } from './HorizontalDatePicker';
 import { BranchManagement } from './BranchManagement';
-import { Building2 } from 'lucide-react';
+import { CurriculumCsvImport } from './CurriculumCsvImport';
+import { Building2, FileSpreadsheet } from 'lucide-react';
 import { 
   db, 
   Student, 
@@ -80,7 +81,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [userRole, setUserRole] = useState<UserRole>(initialRole || 'admin');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(initialBranchId || 'all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches'>('student-list');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import'>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
   // 生徒詳細（生徒情報）画面用 State
@@ -2161,6 +2162,15 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 <Building2 size={16} style={{ marginRight: '8px' }} />
                 校舎アカウント管理
               </button>
+              <button
+                type="button"
+                data-testid="menu-curriculum-import"
+                className={`${styles.menuItem} ${activeTab === 'curriculum-import' ? styles.menuItemActive : ''}`}
+                onClick={() => setActiveTab('curriculum-import')}
+              >
+                <FileSpreadsheet size={16} style={{ marginRight: '8px' }} />
+                カリキュラムCSVインポート
+              </button>
             </div>
           )}
 
@@ -2492,8 +2502,17 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
             </div>
           )}
 
+          {/* Curriculum CSV Import (Admin Only) */}
+          {activeTab === 'curriculum-import' && (
+            <div className={styles.card}>
+              <CurriculumCsvImport
+                onImportCompleted={loadData}
+              />
+            </div>
+          )}
+
           {/* Student Specific Tab Screens */}
-          {activeTab !== 'student-list' && activeTab !== 'create-student' && activeTab !== 'branches' && (
+          {activeTab !== 'student-list' && activeTab !== 'create-student' && activeTab !== 'branches' && activeTab !== 'curriculum-import' && (
             !selectedStudent ? (
               <div className={`${styles.card} ${styles.noStudentSelected}`}>
                 {/* Info Icon */}
@@ -4174,315 +4193,491 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
               {/* Tab 7: 年間計画 (マイルストーン可視化) */}
               {activeTab === 'milestones' && (
-                <div className={styles.card}>
-                  <div className={styles.cardTitle}>
-                    <span>年間基準計画（マイルストーン）カスタマイズ設定</span>
-                    <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 'normal' }}>
-                      レベル別に出し分け、章や単元（授業テーマ）の順序調整・削除・追加、休校日設定、およびテンプレート保存・呼び出しが可能です。
-                    </span>
-                  </div>
+                (() => {
+                  const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
 
-                  <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      {/* Subject select */}
-                      <div>
-                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
-                        <select 
-                          value={selectedSubject} 
-                          onChange={e => setSelectedSubject(e.target.value)} 
-                          className={styles.select}
-                          style={{ width: '120px', padding: '6px' }}
-                        >
-                          {selectedStudent.grade.startsWith('中') ? (
-                            <>
-                              <option value="数学">数学</option>
-                              <option value="英語">英語</option>
-                              <option value="理科">理科</option>
-                              <option value="歴史">歴史</option>
-                              <option value="地理">地理</option>
-                              <option value="国語">国語</option>
-                            </>
-                          ) : (
-                            <option value="算数">算数</option>
-                          )}
-                        </select>
+                  // 小学生向け進行状況と完了予測計算
+                  const subjectUnits = allCurriculumUnits.filter(u => 
+                    u.school_id === selectedStudent.school_id && (
+                      u.subject === selectedSubject || 
+                      (selectedSubject === '算数' && u.subject === '数学') || 
+                      (selectedSubject === '数学' && u.subject === '算数')
+                    )
+                  );
+                  const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === selectedSubject || (selectedSubject === '算数' && u.subject === '数学'));
+                  const masterUnits = db.getCurriculumMasters().filter(m => m.subject === selectedSubject || (selectedSubject === '算数' && m.subject === '算数'));
+                  
+                  const totalCount = fallbackUnits.length > 0 ? fallbackUnits.length : (masterUnits.length > 0 ? masterUnits.length : 18);
+                  
+                  const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
+                  const unitIds = new Set(fallbackUnits.map(u => u.id));
+                  const completedSubjectTasks = studentCompletedTasks.filter(t => unitIds.has(t.unit_id));
+                  
+                  let startSeq = 0;
+                  if (selectedStudent && selectedStudent.start_unit_id) {
+                    const su = fallbackUnits.find(u => u.id === selectedStudent.start_unit_id);
+                    if (su) startSeq = su.sequence_order - 1;
+                  }
+                  
+                  const completedCount = Math.max(completedSubjectTasks.length, startSeq);
+                  const progressPercent = Math.min(100, Math.round((completedCount / totalCount) * 100));
+                  
+                  const studentDays = (selectedStudent.selected_days?.length || 2);
+                  const studentSlots = (selectedStudent.default_slots || selectedStudent.period_count || 2);
+                  const selectedSubjsCount = (selectedStudent.selected_subjects?.length || 3);
+                  const weeklyPace = Math.max(1, Math.round((studentDays * studentSlots) / selectedSubjsCount));
+                  const remainingCount = Math.max(0, totalCount - completedCount);
+                  const estimatedWeeks = Math.ceil(remainingCount / weeklyPace);
+                  
+                  const estDate = new Date(Date.now() + estimatedWeeks * 7 * 24 * 60 * 60 * 1000);
+                  const formattedEstDate = `${estDate.getFullYear()}年${estDate.getMonth() + 1}月${estDate.getDate()}日`;
+
+                  return (
+                    <div className={styles.card}>
+                      <div className={styles.cardTitle}>
+                        <span>{isElementary ? '🎒 小学生向け進度タイムライン（無段階ペース管理）' : '年間基準計画（マイルストーン）カスタマイズ設定'}</span>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 'normal' }}>
+                          {isElementary
+                            ? '小学生カリキュラムは固定の月・週区切りにとらわれず、生徒の学習スピードと通塾コマ数に応じた無段階タイムラインで進行します。'
+                            : 'レベル別に出し分け、章や単元（授業テーマ）の順序調整・削除・追加、休校日設定、およびテンプレート保存・呼び出しが可能です。'
+                          }
+                        </span>
                       </div>
 
-                      {/* Level Toggle switch */}
-                      <div>
-                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>学習レベル:</label>
-                        <div className={styles.segmentControl} style={{ display: 'inline-flex' }}>
-                          <button
-                            type="button"
-                            className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
-                            onClick={() => setSelectedLevel('A')}
-                          >
-                            レベルA (発展)
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
-                            onClick={() => setSelectedLevel('B')}
-                          >
-                            レベルB (標準)
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.segmentBtn} ${selectedLevel === 'C' ? styles.segmentBtnActive : ''}`}
-                            onClick={() => setSelectedLevel('C')}
-                          >
-                            レベルC (基礎)
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Month filter toggle */}
-                      <div>
-                        <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>表示月:</label>
-                        <div className={styles.segmentControl} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '2px' }}>
-                          <button
-                            type="button"
-                            className={`${styles.segmentBtn} ${selectedMonthFilter === 'all' ? styles.segmentBtnActive : ''}`}
-                            onClick={() => setSelectedMonthFilter('all')}
-                            style={{ padding: '4px 8px', fontSize: '0.85rem' }}
-                          >
-                            すべて
-                          </button>
-                          {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
-                            <button
-                              key={m}
-                              type="button"
-                              className={`${styles.segmentBtn} ${selectedMonthFilter === m ? styles.segmentBtnActive : ''}`}
-                              onClick={() => setSelectedMonthFilter(m)}
-                              style={{ padding: '4px 8px', fontSize: '0.85rem' }}
+                      <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {/* Subject select */}
+                          <div>
+                            <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
+                            <select 
+                              value={selectedSubject} 
+                              onChange={e => setSelectedSubject(e.target.value)} 
+                              className={styles.select}
+                              style={{ width: '120px', padding: '6px' }}
                             >
-                              {m}月
-                            </button>
-                          ))}
+                              {isElementary ? (
+                                <>
+                                  <option value="算数">算数</option>
+                                  <option value="国語">国語</option>
+                                  <option value="英語">英語</option>
+                                  <option value="理科">理科</option>
+                                  <option value="社会">社会</option>
+                                </>
+                              ) : selectedStudent.grade.startsWith('中') ? (
+                                <>
+                                  <option value="数学">数学</option>
+                                  <option value="英語">英語</option>
+                                  <option value="理科">理科</option>
+                                  <option value="歴史">歴史</option>
+                                  <option value="地理">地理</option>
+                                  <option value="国語">国語</option>
+                                </>
+                              ) : (
+                                <option value="算数">算数</option>
+                              )}
+                            </select>
+                          </div>
+
+                          {/* Level Toggle switch */}
+                          <div>
+                            <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>学習レベル:</label>
+                            <div className={styles.segmentControl} style={{ display: 'inline-flex' }}>
+                              <button
+                                type="button"
+                                className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
+                                onClick={() => setSelectedLevel('A')}
+                              >
+                                レベルA (発展)
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
+                                onClick={() => setSelectedLevel('B')}
+                              >
+                                レベルB (標準)
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.segmentBtn} ${selectedLevel === 'C' ? styles.segmentBtnActive : ''}`}
+                                onClick={() => setSelectedLevel('C')}
+                              >
+                                レベルC (基礎)
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Month filter toggle (Only for Junior High / High School) */}
+                          {!isElementary && (
+                            <div>
+                              <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>表示月:</label>
+                              <div className={styles.segmentControl} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '2px' }}>
+                                <button
+                                  type="button"
+                                  className={`${styles.segmentBtn} ${selectedMonthFilter === 'all' ? styles.segmentBtnActive : ''}`}
+                                  onClick={() => setSelectedMonthFilter('all')}
+                                  style={{ padding: '4px 8px', fontSize: '0.85rem' }}
+                                >
+                                  すべて
+                                </button>
+                                {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    className={`${styles.segmentBtn} ${selectedMonthFilter === m ? styles.segmentBtnActive : ''}`}
+                                    onClick={() => setSelectedMonthFilter(m)}
+                                    style={{ padding: '4px 8px', fontSize: '0.85rem' }}
+                                  >
+                                    {m}月
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: '0.9rem' }}>
+                            現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
+                          </div>
                         </div>
-                      </div>
 
-                      <div style={{ fontSize: '0.9rem' }}>
-                        現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
-                      </div>
-                    </div>
-
-                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
-
-                    {/* Template theme Save & Apply CRUD section */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>授業テーマ・計画テンプレート管理</h4>
-                      
-                      {/* Save Template */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <input
-                          type="text"
-                          placeholder="現在の計画をテンプレート名として保存（自由記述）..."
-                          value={newTemplateName}
-                          onChange={e => setNewTemplateName(e.target.value)}
-                          className={styles.input}
-                          style={{ maxWidth: '350px', fontSize: '0.85rem' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveTemplate(newTemplateName)}
-                          className={styles.btn}
-                          style={{ width: 'auto', padding: '6px 14px', fontSize: '0.85rem', background: '#3b82f6' }}
-                        >
-                          計画テンプレートを保存
-                        </button>
-                      </div>
-
-                      {/* Saved Templates Dropdown & Actions */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>保存済みテンプレート:</label>
-                        <select
-                          value={selectedTemplateId}
-                          onChange={e => {
-                            setSelectedTemplateId(e.target.value);
-                            setEditingTemplateId(null);
-                          }}
-                          className={styles.select}
-                          style={{ width: '380px', padding: '6px', fontSize: '0.85rem' }}
-                        >
-                          <option value="">-- テンプレートを選択 --</option>
-                          {milestoneTemplates
-                            .map(t => (
-                              <option key={t.id} value={t.id}>
-                                {t.name} ({t.grade} {t.subject} レベル{t.level === 'A' ? 'A (発展)' : t.level === 'B' ? 'B (標準)' : 'C (基礎)'} - {t.plans.length}行)
-                              </option>
-                            ))}
-                        </select>
-
-                        {selectedTemplateId && (
+                        {!isElementary && (
                           <>
-                            {editingTemplateId === selectedTemplateId ? (
-                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                            {/* Template theme Save & Apply CRUD section */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                              <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>授業テーマ・計画テンプレート管理</h4>
+                              
+                              {/* Save Template */}
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <input
                                   type="text"
-                                  value={editingTemplateName}
-                                  onChange={e => setEditingTemplateName(e.target.value)}
+                                  placeholder="現在の計画をテンプレート名として保存（自由記述）..."
+                                  value={newTemplateName}
+                                  onChange={e => setNewTemplateName(e.target.value)}
                                   className={styles.input}
-                                  style={{ padding: '4px 6px', fontSize: '0.8rem', width: '200px' }}
+                                  style={{ maxWidth: '350px', fontSize: '0.85rem' }}
                                 />
                                 <button
                                   type="button"
-                                  onClick={async () => {
-                                    await handleUpdateTemplateName(selectedTemplateId, editingTemplateName);
+                                  onClick={() => handleSaveTemplate(newTemplateName)}
+                                  className={styles.btn}
+                                  style={{ width: 'auto', padding: '6px 14px', fontSize: '0.85rem', background: '#3b82f6' }}
+                                >
+                                  計画テンプレートを保存
+                                </button>
+                              </div>
+
+                              {/* Saved Templates Dropdown & Actions */}
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>保存済みテンプレート:</label>
+                                <select
+                                  value={selectedTemplateId}
+                                  onChange={e => {
+                                    setSelectedTemplateId(e.target.value);
                                     setEditingTemplateId(null);
                                   }}
-                                  className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#10b981' }}
+                                  className={styles.select}
+                                  style={{ width: '380px', padding: '6px', fontSize: '0.85rem' }}
                                 >
-                                  保存
-                                </button>
+                                  <option value="">-- テンプレートを選択 --</option>
+                                  {milestoneTemplates.map(t => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.name} ({t.grade} {t.subject} レベル{t.level === 'A' ? 'A (発展)' : t.level === 'B' ? 'B (標準)' : 'C (基礎)'} - {t.plans.length}行)
+                                    </option>
+                                  ))}
+                                </select>
+
+                                {selectedTemplateId && (
+                                  <>
+                                    {editingTemplateId === selectedTemplateId ? (
+                                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                        <input
+                                          type="text"
+                                          value={editingTemplateName}
+                                          onChange={e => setEditingTemplateName(e.target.value)}
+                                          className={styles.input}
+                                          style={{ padding: '4px 6px', fontSize: '0.8rem', width: '200px' }}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            await handleUpdateTemplateName(selectedTemplateId, editingTemplateName);
+                                            setEditingTemplateId(null);
+                                          }}
+                                          className={styles.btn}
+                                          style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#10b981' }}
+                                        >
+                                          保存
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingTemplateId(null)}
+                                          className={styles.btn}
+                                          style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#64748b' }}
+                                        >
+                                          キャンセル
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', gap: '6px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleApplyTemplate(selectedTemplateId)}
+                                          className={styles.btn}
+                                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#10b981' }}
+                                        >
+                                          呼び出して適用
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const t = milestoneTemplates.find(x => x.id === selectedTemplateId);
+                                            if (t) {
+                                              setEditingTemplateId(t.id);
+                                              setEditingTemplateName(t.name);
+                                            }
+                                          }}
+                                          className={styles.btn}
+                                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#e2e8f0', color: '#0f172a', border: '1px solid #cbd5e1' }}
+                                        >
+                                          名称変更
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            if (confirm('このテンプレートを削除してもよろしいですか？')) {
+                                              await handleDeleteTemplate(selectedTemplateId);
+                                              setSelectedTemplateId('');
+                                            }
+                                          }}
+                                          className={styles.btn}
+                                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#ef4444' }}
+                                        >
+                                          削除
+                                        </button>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                            {/* Chapter Order Adjustment area */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>章順序の一括調整 (章単位の入れ替え):</h4>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {Array.from(new Set(getFilteredMilestones().map(p => p.chapter).filter(Boolean))).map(chName => (
+                                  <div 
+                                    key={chName as string} 
+                                    style={{ 
+                                      display: 'inline-flex', 
+                                      alignItems: 'center', 
+                                      gap: '6px', 
+                                      backgroundColor: '#ffffff', 
+                                      border: '1px solid #cbd5e1', 
+                                      borderRadius: '6px', 
+                                      padding: '4px 8px',
+                                      fontSize: '0.8rem',
+                                      fontWeight: 600 
+                                    }}
+                                  >
+                                    <span>{chName as string}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveChapter(chName as string, 'up')}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
+                                      title="章を上へ移動"
+                                    >
+                                      🔼
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveChapter(chName as string, 'down')}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
+                                      title="章を下へ移動"
+                                    >
+                                      🔽
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+
+                            {/* Add Milestone Row form */}
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>行の追加:</h4>
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <select 
+                                  id="add-month-select"
+                                  value={addMonth} 
+                                  onChange={e => setAddMonth(parseInt(e.target.value))}
+                                  className={styles.select} 
+                                  style={{ width: '80px', padding: '4px' }}
+                                >
+                                  {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
+                                    <option key={m} value={m}>{m}月</option>
+                                  ))}
+                                </select>
+                                <select 
+                                  id="add-week-select"
+                                  value={addWeek} 
+                                  onChange={e => setAddWeek(parseInt(e.target.value))}
+                                  className={styles.select} 
+                                  style={{ width: '80px', padding: '4px' }}
+                                >
+                                  {[1, 2, 3, 4, 5].map(w => (
+                                    <option key={w} value={w}>{w}週目</option>
+                                  ))}
+                                </select>
                                 <button
                                   type="button"
-                                  onClick={() => setEditingTemplateId(null)}
+                                  onClick={() => handleAddMilestoneRow(addMonth, addWeek)}
                                   className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 10px', fontSize: '0.75rem', background: '#64748b' }}
+                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#10b981' }}
                                 >
-                                  キャンセル
+                                  ➕ 行を追加
                                 </button>
                               </div>
-                            ) : (
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => handleApplyTemplate(selectedTemplateId)}
-                                  className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#10b981' }}
-                                >
-                                  呼び出して適用
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const t = milestoneTemplates.find(x => x.id === selectedTemplateId);
-                                    if (t) {
-                                      setEditingTemplateId(t.id);
-                                      setEditingTemplateName(t.name);
-                                    }
-                                  }}
-                                  className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#e2e8f0', color: '#0f172a', border: '1px solid #cbd5e1' }}
-                                >
-                                  名称変更
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (confirm('このテンプレートを削除してもよろしいですか？')) {
-                                      await handleDeleteTemplate(selectedTemplateId);
-                                      setSelectedTemplateId('');
-                                    }
-                                  }}
-                                  className={styles.btn}
-                                  style={{ width: 'auto', padding: '4px 12px', fontSize: '0.75rem', background: '#ef4444' }}
-                                >
-                                  削除
-                                </button>
-                              </div>
-                            )}
+                            </div>
                           </>
                         )}
                       </div>
-                    </div>
 
-                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+                      {/* Content Area: Elementary continuous timeline vs Junior High spreadsheet */}
+                      {isElementary ? (
+                        <div data-testid="elementary-timeline-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                          {/* Summary Cards */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
+                            {/* Progress Card */}
+                            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  📊 進行状況（進度バー）
+                                </span>
+                                <span data-testid="elementary-progress-percent" style={{ fontSize: '1.2rem', fontWeight: 900, color: '#15803d' }}>
+                                  {selectedSubject} {progressPercent}% 完了
+                                </span>
+                              </div>
+                              
+                              {/* Progress bar */}
+                              <div style={{ width: '100%', height: '14px', backgroundColor: '#dcfce7', borderRadius: '7px', overflow: 'hidden', border: '1px solid #86efac', marginBottom: '8px' }}>
+                                <div style={{ width: `${progressPercent}%`, height: '100%', backgroundColor: '#22c55e', borderRadius: '7px', transition: 'width 0.5s ease', backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 75%, transparent 75%, transparent)' }}></div>
+                              </div>
+                              
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#166534', fontWeight: 600 }}>
+                                <span>完了: {completedCount} 単元</span>
+                                <span>全 {totalCount} 単元 (残り {remainingCount} 単元)</span>
+                              </div>
+                            </div>
 
-                    {/* Chapter Ordering section */}
-                    <div>
-                      <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: 700 }}>章ごと(単元ごと)での順番変更</h4>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {Array.from(new Set(getFilteredMilestones().map(p => p.chapter).filter(Boolean))).map((chName) => (
-                          <div key={chName as string} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}>
-                            <span>{chName as string}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveChapter(chName as string, 'up')}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
-                              title="章を上へ移動"
-                            >
-                              🔼
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveChapter(chName as string, 'down')}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'inline-flex' }}
-                              title="章を下へ移動"
-                            >
-                              🔽
-                            </button>
+                            {/* Completion Prediction Card */}
+                            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  🎯 全単元完了の推定予定日
+                                </span>
+                                <span data-testid="elementary-estimated-date" style={{ fontSize: '1.1rem', fontWeight: 900, color: '#1d4ed8' }}>
+                                  {remainingCount === 0 ? '全単元完了！' : `${formattedEstDate}頃 完了見込み`}
+                                </span>
+                              </div>
+                              
+                              <div style={{ fontSize: '0.8rem', color: '#1e3a8a', lineHeight: 1.6 }}>
+                                <div>通塾設定: <strong>週{studentDays}日 / 標準{studentSlots}コマ</strong>（消化ペース: 週約<strong>{weeklyPace}</strong>単元進行想定）</div>
+                                <div style={{ marginTop: '2px' }}>所要期間見込み: <strong>約 {estimatedWeeks} 週間</strong> (月・週の縛りのない無段階学習タイムライン)</div>
+                              </div>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
 
-                    <hr style={{ border: '0', borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+                          {/* Continuous Timeline List */}
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '18px', overflow: 'hidden' }}>
+                            <h4 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              🚀 {selectedSubject} 無段階学習タイムライン（ステップ別カリキュラム）
+                            </h4>
 
-                    {/* Add Milestone Row form */}
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <h4 style={{ margin: '0', fontSize: '0.9rem', fontWeight: 700 }}>行の追加:</h4>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <select 
-                          id="add-month-select"
-                          value={addMonth} 
-                          onChange={e => setAddMonth(parseInt(e.target.value))}
-                          className={styles.select} 
-                          style={{ width: '80px', padding: '4px' }}
-                        >
-                          {[4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => (
-                            <option key={m} value={m}>{m}月</option>
-                          ))}
-                        </select>
-                        <select 
-                          id="add-week-select"
-                          value={addWeek} 
-                          onChange={e => setAddWeek(parseInt(e.target.value))}
-                          className={styles.select} 
-                          style={{ width: '80px', padding: '4px' }}
-                        >
-                          {[1, 2, 3, 4, 5].map(w => (
-                            <option key={w} value={w}>{w}週目</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => handleAddMilestoneRow(addMonth, addWeek)}
-                          className={styles.btn}
-                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#10b981' }}
-                        >
-                          ➕ 行を追加
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {(fallbackUnits.length > 0 ? fallbackUnits : masterUnits.map((m, idx) => ({ id: m.id, name: `${m.unit_name} - ${m.lesson_name}`, sequence_order: idx + 1, subject: m.subject, school_id: '' }))).map((unit, idx) => {
+                                const stepNum = idx + 1;
+                                const isCompleted = stepNum <= completedCount;
+                                const isCurrent = stepNum === completedCount + 1;
 
-                  {/* スプレッドシート風グリッド */}
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #cbd5e1', fontSize: '0.85rem' }}>
-                      <thead>
-                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #94a3b8' }}>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>月</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>週</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>章</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '380px', textAlign: 'left' }}>単元名</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '130px', textAlign: 'center' }}>進捗</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '160px', textAlign: 'center' }}>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getDisplayMilestones()
-                          .map((plan, idx, arr) => {
-                            const { month: currMonth, week_number: currWeek } = getYearMonthWeek(scheduleDate);
-                            const isTodayWeek = plan.month === currMonth && plan.week_number === currWeek;
- 
-                            // 生徒の現在進捗を取得
-                            const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
-                            const subjectUnits = allCurriculumUnits.filter(u => u.subject === selectedSubject);
-                            const subjectUnitIds = new Set(subjectUnits.map(u => u.id));
-                            const completedSubjectTasks = studentCompletedTasks.filter(t => subjectUnitIds.has(t.unit_id));
+                                return (
+                                  <div
+                                    key={unit.id}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      padding: '10px 16px',
+                                      borderRadius: '8px',
+                                      backgroundColor: isCompleted ? '#f0fdf4' : (isCurrent ? '#eff6ff' : '#f8fafc'),
+                                      border: isCurrent ? '2px solid #3b82f6' : (isCompleted ? '1px solid #bbf7d0' : '1px solid #e2e8f0'),
+                                      boxShadow: isCurrent ? '0 2px 6px rgba(59, 130, 246, 0.2)' : 'none',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                      <span style={{
+                                        fontSize: '0.75rem',
+                                        fontWeight: 800,
+                                        padding: '3px 8px',
+                                        borderRadius: '12px',
+                                        backgroundColor: isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1'),
+                                        color: '#ffffff'
+                                      }}>
+                                        STEP {stepNum}
+                                      </span>
+                                      <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 700 : (isCompleted ? 600 : 500), color: isCurrent ? '#1e40af' : (isCompleted ? '#166534' : '#334155') }}>
+                                        {unit.name}
+                                      </span>
+                                    </div>
+
+                                    <div>
+                                      {isCompleted ? (
+                                        <span style={{ fontSize: '0.78rem', backgroundColor: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: '6px', fontWeight: 700 }}>
+                                          ✓ 完了
+                                        </span>
+                                      ) : isCurrent ? (
+                                        <span style={{ fontSize: '0.78rem', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: '6px', fontWeight: 800 }}>
+                                          📍 現在地（取り組み中）
+                                        </span>
+                                      ) : (
+                                        <span style={{ fontSize: '0.78rem', backgroundColor: '#f1f5f9', color: '#64748b', padding: '3px 10px', borderRadius: '6px', fontWeight: 600 }}>
+                                          ○ 予定
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* スプレッドシート風グリッド (中学生・高校生) */
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #cbd5e1', fontSize: '0.85rem' }}>
+                            <thead>
+                              <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #94a3b8' }}>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>月</th>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '70px', textAlign: 'center' }}>週</th>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '180px', textAlign: 'left' }}>章</th>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '380px', textAlign: 'left' }}>単元名</th>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '130px', textAlign: 'center' }}>進捗</th>
+                                <th style={{ border: '1px solid #cbd5e1', padding: '10px', width: '160px', textAlign: 'center' }}>操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {getDisplayMilestones()
+                                .map((plan, idx, arr) => {
+                                  const { month: currMonth, week_number: currWeek } = getYearMonthWeek(scheduleDate);
+                                  const isTodayWeek = plan.month === currMonth && plan.week_number === currWeek;
+
+                                  // 生徒の現在進捗を取得
+                                  const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
  
                             let studentSeq = 0;
                             if (completedSubjectTasks.length > 0) {
@@ -4669,19 +4864,24 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                               </tr>
                             );
                           })}
-                      </tbody>
-                    </table>
-                  </div>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-                  <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
-                    <p style={{ margin: '0 0 4px 0' }}><strong>💡 マイルストーン計画のカスタマイズについて:</strong></p>
-                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                      <li>各セルのテキストボックスやプルダウンから、章名・単元名・到達順序をインラインで直接編集できます。</li>
-                      <li><strong>📅 ボタン:</strong> その週を休校日（イベント日）にトグル切り替えします。オンの時は `holiday_name` が入力可能になります。</li>
-                      <li><strong>📍バッジ:</strong> 選択された生徒が今日までに完了したテーマ数（現在地）を示しています。</li>
-                    </ul>
-                  </div>
-                </div>
+                      {!isElementary && (
+                        <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
+                          <p style={{ margin: '0 0 4px 0' }}><strong>💡 マイルストーン計画のカスタマイズについて:</strong></p>
+                          <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                            <li>各セルのテキストボックスやプルダウンから、章名・単元名・到達順序をインラインで直接編集できます。</li>
+                            <li><strong>📅 ボタン:</strong> その週を休校日（イベント日）にトグル切り替えします。オンの時は `holiday_name` が入力可能になります。</li>
+                            <li><strong>📍バッジ:</strong> 選択された生徒が今日までに完了したテーマ数（現在地）を示しています。</li>
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               )}
 
               {activeTab === 'student-detail' && (

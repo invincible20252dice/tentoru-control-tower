@@ -5,10 +5,11 @@ import SugorokuMap from '../components/SugorokuMap';
 import TeacherDashboard from '../components/TeacherDashboard';
 import StudentDashboard from '../components/StudentDashboard';
 import Portal from '../app/page';
-import { db, CurriculumUnit, LearningTask, Student, CustomClass, MiniTestResult } from '../lib/db';
+import { db, CurriculumUnit, LearningTask, Student, CustomClass, MiniTestResult, CurriculumMaster } from '../lib/db';
 import { TestScoreRadarChart } from '../components/TestScoreRadarChart';
 import { WeeklyScheduleViewer } from '../components/WeeklyScheduleViewer';
 import { StudentScheduleConfigForm } from '../components/StudentScheduleConfigForm';
+import { CurriculumCsvImport } from '../components/CurriculumCsvImport';
 import { saveGeminiApiKey, getGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
 import { calculateProgressGap, rescheduleFutureUncompletedTasks, getYearMonthWeek } from '../lib/scheduler';
 
@@ -4065,4 +4066,223 @@ describe('UI Components Render & Interaction Tests', () => {
     unmountElem();
     alertSpy.mockRestore();
   });
+
+  it('should support CurriculumCsvImport parsing, preview, auto sort_order assignment, bulk import, search, and delete operations', async () => {
+    // Setup mocks
+    const originalClipboard = navigator.clipboard;
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    });
+    const originalReadAsText = FileReader.prototype.readAsText;
+    FileReader.prototype.readAsText = function(blob: any) {
+      const text = blob._text || (blob && typeof blob.toString === 'function' ? blob.toString() : '');
+      if (this.onload) {
+        this.onload({ target: { result: text } } as any);
+      }
+    };
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const mockBack = vi.fn();
+    const mockCompleted = vi.fn();
+
+    const { unmount } = render(<CurriculumCsvImport onBack={mockBack} onImportCompleted={mockCompleted} />);
+
+    // Check title and UI elements
+    expect(screen.getByText('カリキュラムデータ CSV一括インポート')).toBeInTheDocument();
+    expect(screen.getByText(/サンプルCSVダウンロード/)).toBeInTheDocument();
+    expect(screen.getByText(/形式をコピー/)).toBeInTheDocument();
+
+    // Test format copy
+    fireEvent.click(screen.getByText(/形式をコピー/));
+    expect(navigator.clipboard.writeText).toHaveBeenCalled();
+
+    // Test template download
+    const createObjectUrlSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('mock-blob-url');
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    fireEvent.click(screen.getByText(/サンプルCSVダウンロード/));
+    expect(createObjectUrlSpy).toHaveBeenCalled();
+    createObjectUrlSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+
+    // Test back button
+    const backBtn = screen.getByText('戻る');
+    fireEvent.click(backBtn);
+    expect(mockBack).toHaveBeenCalled();
+
+    // Test drag over / drag leave
+    const dropZone = screen.getByTestId('csv-dropzone');
+    fireEvent.dragOver(dropZone);
+    fireEvent.dragLeave(dropZone);
+
+    // Test invalid drop (non-csv file)
+    const badFile = new File(['hello'], 'test.txt', { type: 'text/plain' });
+    await act(async () => {
+      fireEvent.drop(dropZone, { dataTransfer: { files: [badFile] } });
+    });
+    expect(screen.getByText(/CSVファイル \(\.csv\) を選択してください/)).toBeInTheDocument();
+
+    // Test CSV with missing header
+    const invalidCsv = `名前,年齢,所属
+山田,15,中3`;
+    const invalidFile = new File([invalidCsv], 'invalid.csv', { type: 'text/csv' });
+    (invalidFile as any)._text = invalidCsv;
+    const fileInput = screen.getByTestId('csv-file-input');
+    
+    // Simulate file upload with invalid CSV
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [invalidFile] } });
+    });
+
+    // Test valid CSV upload
+    const validCsv = `学年,教科,単元名,授業名
+小5,算数,1章 整数と小数,小数と10倍・100倍・1/10
+小5,算数,1章 整数と小数,小数の位取りと数の構成
+小5,算数,2章 小数の乗除,小数×整数の計算
+中1,数学,1章 正の数・負の数,正の数・負の数の意味`;
+    const validFile = new File([validCsv], 'curriculum.csv', { type: 'text/csv' });
+    (validFile as any)._text = validCsv;
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [validFile] } });
+    });
+
+    // Verify preview is displayed
+    expect(screen.getByText(/インポートデータ プレビュー/)).toBeInTheDocument();
+    expect(screen.getAllByText(/4件/).length).toBeGreaterThanOrEqual(1);
+
+    // Check preview items and automatic sort order
+    expect(screen.getByText('小数と10倍・100倍・1/10')).toBeInTheDocument();
+    expect(screen.getByText('正の数・負の数の意味')).toBeInTheDocument();
+
+    // Test cancel/clear preview
+    const cancelPreviewBtn = screen.getByText('キャンセル');
+    fireEvent.click(cancelPreviewBtn);
+    expect(screen.queryByText(/インポートデータ プレビュー/)).not.toBeInTheDocument();
+
+    // Re-upload
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [validFile] } });
+    });
+
+    const importBtn = screen.getByTestId('execute-import-btn');
+    expect(importBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(importBtn);
+    });
+
+    expect(mockCompleted).toHaveBeenCalled();
+
+    // Switch to "登録済みマスター一覧" tab
+    const listTabBtn = screen.getByText(/登録済みマスター一覧/);
+    await act(async () => {
+      fireEvent.click(listTabBtn);
+    });
+
+    // Search and filter
+    const searchInput = screen.getByPlaceholderText(/単元・授業名で検索/);
+    fireEvent.change(searchInput, { target: { value: '正の数' } });
+    expect(screen.getByText('正の数・負の数の意味')).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: '' } });
+
+    // Test delete single item
+    const deleteBtns = screen.getAllByTitle('削除');
+    if (deleteBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+      expect(confirmSpy).toHaveBeenCalled();
+    }
+
+    // Test clear all masters
+    const clearAllBtn = screen.queryByText('全件クリア');
+    if (clearAllBtn) {
+      await act(async () => {
+        fireEvent.click(clearAllBtn);
+      });
+      expect(confirmSpy).toHaveBeenCalled();
+    }
+
+    unmount();
+    confirmSpy.mockRestore();
+    FileReader.prototype.readAsText = originalReadAsText;
+    if (originalClipboard) {
+      Object.assign(navigator, { clipboard: originalClipboard });
+    }
+  });
+
+  it('should support elementary timeline UI with progress bar and completion date estimation without monthly/weekly headers, and switch to grid for junior high', async () => {
+    // 1. Elementary student test
+    const { unmount } = render(<TeacherDashboard teacherType="elementary" onBackToPortal={() => {}} />);
+
+    // Select elementary student (Suzuki Yui - 小5)
+    const elemStudentCard = screen.getByText(/鈴木 結衣/);
+    await act(async () => {
+      fireEvent.click(elemStudentCard);
+    });
+
+    // Navigate to Milestones tab
+    const milestoneTabBtn = screen.getByText('年間計画（マイルストーン）');
+    await act(async () => {
+      fireEvent.click(milestoneTabBtn);
+    });
+
+    // Verify elementary-specific headers and elements
+    expect(screen.getByText(/小学生カリキュラムは固定の月・週区切りにとらわれず/)).toBeInTheDocument();
+    expect(screen.getByText(/進行状況（進度バー）/)).toBeInTheDocument();
+    expect(screen.getByText(/全単元完了の推定予定日/)).toBeInTheDocument();
+    expect(screen.getByText(/消化ペース/)).toBeInTheDocument();
+
+    // Verify monthly and weekly table headers are NOT present for elementary
+    expect(screen.queryByRole('columnheader', { name: '月' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: '週' })).not.toBeInTheDocument();
+
+    // Verify milestone step cards are rendered
+    expect(screen.getByText('STEP 1')).toBeInTheDocument();
+
+    // Test switching subject in elementary view
+    const subjectSelect = screen.getByDisplayValue('算数');
+    await act(async () => {
+      fireEvent.change(subjectSelect, { target: { value: '国語' } });
+    });
+    expect(subjectSelect).toHaveValue('国語');
+
+    // Test CSV import button in sidebar
+    const csvImportMenuBtn = screen.getByText('カリキュラムCSVインポート');
+    await act(async () => {
+      fireEvent.click(csvImportMenuBtn);
+    });
+    expect(screen.getByText('カリキュラムデータ CSV一括インポート')).toBeInTheDocument();
+
+    unmount();
+
+    // 2. Junior High student test
+    const { unmount: unmountJh } = render(<TeacherDashboard teacherType="junior_high" onBackToPortal={() => {}} />);
+
+    // Select junior high student (Sato Takumi - 中1)
+    const jhStudentCard = screen.getByText(/佐藤 拓海/);
+    await act(async () => {
+      fireEvent.click(jhStudentCard);
+    });
+
+    // Navigate to Milestones tab
+    const jhMilestoneTabBtn = screen.getByText('年間計画（マイルストーン）');
+    await act(async () => {
+      fireEvent.click(jhMilestoneTabBtn);
+    });
+
+    // Verify spreadsheet grid headers for junior high (月, 週, 章, 単元名)
+    expect(screen.getByRole('columnheader', { name: '月' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '週' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '章' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '単元名' })).toBeInTheDocument();
+
+    // Verify elementary description is NOT present
+    expect(screen.queryByText(/小学生カリキュラムは固定の月・週区切りにとらわれず/)).not.toBeInTheDocument();
+
+    unmountJh();
+  });
 });
+
