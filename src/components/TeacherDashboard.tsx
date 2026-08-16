@@ -6102,6 +6102,17 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                 gradeOptions = isElem ? defaultElemGrades : [...defaultJhsGrades, ...defaultElemGrades];
                               }
 
+                              // Sort grade options naturally
+                              const gradeOrder = ['1年生', '2年生', '3年生', '4年生', '5年生', '6年生', '中1', '中2', '中3', '高1', '高2', '高3'];
+                              gradeOptions.sort((a, b) => {
+                                const ia = gradeOrder.indexOf(a);
+                                const ib = gradeOrder.indexOf(b);
+                                if (ia !== -1 && ib !== -1) return ia - ib;
+                                if (ia !== -1) return -1;
+                                if (ib !== -1) return 1;
+                                return a.localeCompare(b, 'ja');
+                              });
+
                               // Current selected grade in state, or infer from existing val
                               let curGrade = selectedStartGrades[item.key] || '';
                               if (!curGrade && val) {
