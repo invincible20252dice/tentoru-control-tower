@@ -6061,7 +6061,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '24px' }}>
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>教科別学習スタート位置</h4>
                         <p style={{ margin: '0 0 12px 0', fontSize: '0.75rem', color: '#64748b' }}>
-                          各教科でカリキュラム自動生成を開始する「基準単元」を設定できます。学年で絞り込んでから授業を選択してください。
+                          各教科でカリキュラム自動生成を開始する「基準単元」を設定できます。学年で絞り込んでから単元を選択してください（選択した単元の先頭授業から開始されます）。
                         </p>
                         
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -6125,14 +6125,55 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                 (u.subject === item.subject || (item.subject === '数学' && u.subject === '算数') || (item.subject === '算数' && u.subject === '数学'))
                               );
 
-                              const displayLessons: Array<{ id: string; name: string }> = filteredMasters.length > 0
-                                ? filteredMasters.map(m => ({
-                                    id: m.id,
-                                    name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name
-                                  }))
-                                : (!curGrade && mastersForSubject.length === 0 && schoolUnits.length > 0
-                                    ? schoolUnits.map(u => ({ id: u.id, name: u.name }))
-                                    : []);
+                              // 1. Group unique units by unit_name in ascending order of sort_order, saving earliest lesson id
+                              const uniqueUnitOptions: Array<{ id: string; name: string; lessonIds: string[]; sort_order: number }> = [];
+                              const seenUnitNames = new Set<string>();
+
+                              if (filteredMasters.length > 0) {
+                                for (const m of filteredMasters) {
+                                  const rawName = (m.unit_name || m.lesson_name || '').trim();
+                                  if (!rawName) continue;
+                                  if (!seenUnitNames.has(rawName)) {
+                                    seenUnitNames.add(rawName);
+                                    uniqueUnitOptions.push({
+                                      id: m.id, // Earliest lesson ID in this unit (lowest sort_order)
+                                      name: rawName,
+                                      lessonIds: [m.id],
+                                      sort_order: m.sort_order || 0
+                                    });
+                                  } else {
+                                    const existing = uniqueUnitOptions.find(u => u.name === rawName);
+                                    if (existing) {
+                                      existing.lessonIds.push(m.id);
+                                    }
+                                  }
+                                }
+                              } else if (!curGrade && mastersForSubject.length === 0 && schoolUnits.length > 0) {
+                                for (const u of schoolUnits) {
+                                  const rawName = (u.name || '').trim();
+                                  if (!rawName) continue;
+                                  if (!seenUnitNames.has(rawName)) {
+                                    seenUnitNames.add(rawName);
+                                    uniqueUnitOptions.push({
+                                      id: u.id,
+                                      name: rawName,
+                                      lessonIds: [u.id],
+                                      sort_order: u.sequence_order || 0
+                                    });
+                                  }
+                                }
+                              }
+
+                              // Determine currently selected unit value in dropdown
+                              let currentDropdownValue = '';
+                              if (val) {
+                                const matchedUnit = uniqueUnitOptions.find(u => u.id === val || u.lessonIds.includes(val));
+                                if (matchedUnit) {
+                                  currentDropdownValue = matchedUnit.id;
+                                } else {
+                                  currentDropdownValue = val;
+                                }
+                              }
 
                               return (
                                 <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: isSelected ? 1 : 0.65 }}>
@@ -6169,11 +6210,14 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                     ))}
                                   </select>
 
-                                  {/* ② 授業選択 */}
+                                  {/* ② 単元選択 (単元名のみ重複なく表示・先頭授業IDを自動バインド) */}
                                   <select
                                     data-testid={`start-unit-select-${item.key}`}
-                                    value={val}
-                                    onChange={e => setEditForm({ ...editForm, [item.key]: e.target.value || null })}
+                                    value={currentDropdownValue}
+                                    onChange={e => {
+                                      const chosenVal = e.target.value;
+                                      setEditForm({ ...editForm, [item.key]: chosenVal || null });
+                                    }}
                                     className={styles.select}
                                     style={{ flex: 1, fontSize: '0.8rem', padding: '4px 6px' }}
                                   >
@@ -6181,7 +6225,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                     {!curGrade && mastersForSubject.length > 0 ? (
                                       <option value="" disabled>先に学年を選択してください</option>
                                     ) : (
-                                      displayLessons.map(u => (
+                                      uniqueUnitOptions.map(u => (
                                         <option key={u.id} value={u.id}>{u.name}</option>
                                       ))
                                     )}

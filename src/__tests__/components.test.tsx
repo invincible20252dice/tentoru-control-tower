@@ -4428,10 +4428,12 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(mathGradeSelect, { target: { value: '4年生' } });
     });
 
-    // Check that grade 4 lessons are available in the second dropdown
-    expect(screen.getByRole('option', { name: /2桁・3桁÷1桁の筆算/ })).toBeInTheDocument();
+    // Check that grade 4 unique units are available (distinct unit_name, not duplicated per lesson)
+    expect(screen.getByRole('option', { name: '1章 わり算の筆算' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2章 面積と角度' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /2桁・3桁÷1桁の筆算/ })).not.toBeInTheDocument();
 
-    // Select a lesson from grade 4
+    // Select unit '1章 わり算の筆算' which automatically maps to earliest lesson ID 'cm-p4-m1'
     await act(async () => {
       fireEvent.change(mathUnitSelect, { target: { value: 'cm-p4-m1' } });
     });
@@ -4444,7 +4446,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(saveBtn);
     });
 
-    // Verify student's start_unit_math is saved
+    // Verify student's start_unit_math is saved with earliest lesson ID
     const updatedStudents = db.getStudents();
     const targetStudent = updatedStudents.find(s => s.id === studentWithStarts.id);
     expect(targetStudent?.start_unit_math).toBe('cm-p4-m1');
@@ -4631,6 +4633,96 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(schoolsAfterCreate.some(s => s.name.includes('ひまわり'))).toBe(true);
 
     confirmSpy.mockRestore();
+    unmount();
+  });
+
+  it('should display unique unit_name dropdown in student detail, automatically map to first lesson ID, and reflect as current position (📍 現在地) in elementary milestone timeline', async () => {
+    db.clearMockData();
+    localStorage.setItem('tentoru_learning_tasks', JSON.stringify([]));
+    localStorage.setItem('tentoru_curriculum_units', JSON.stringify([]));
+    localStorage.setItem('tentoru_students', JSON.stringify([]));
+
+    const elemStudent: Student = {
+      id: 'std-elem-unique-unit',
+      student_id: 'student_elem_u',
+      name: '鈴木 花子',
+      email: 'hanako@tentoru-student.com',
+      grade: '小4',
+      school_id: 'sch-1',
+      status: 'normal',
+      start_unit_id: null,
+      start_unit_math: null,
+      selected_subjects: ['算数', '国語', '英語'],
+      selected_days: ['mon', 'thu'],
+      default_slots: 2,
+      period_count: 2,
+      created_at: ''
+    };
+
+    await db.saveStudent(elemStudent);
+
+    const { unmount } = render(<TeacherDashboard teacherType="elementary" onBackToPortal={() => {}} />);
+
+    // 1. Select student
+    await waitFor(() => {
+      expect(screen.getByText(/鈴木 花子/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText(/鈴木 花子/));
+    });
+
+    // 2. Open 生徒情報
+    const studentDetailMenuBtn = screen.getByText('生徒情報');
+    await act(async () => {
+      fireEvent.click(studentDetailMenuBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('教科別学習スタート位置')).toBeInTheDocument();
+    });
+
+    const mathGradeSelect = screen.getByTestId('start-grade-select-start_unit_math');
+    const mathUnitSelect = screen.getByTestId('start-unit-select-start_unit_math');
+
+    // 3. Select 4年生
+    await act(async () => {
+      fireEvent.change(mathGradeSelect, { target: { value: '4年生' } });
+    });
+
+    // Verify unique unit_names are listed without lesson duplication
+    expect(screen.getByRole('option', { name: '1章 わり算の筆算' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2章 面積と角度' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /2桁・3桁÷1桁の筆算/ })).not.toBeInTheDocument();
+
+    // 4. Select unit '1章 わり算の筆算' (value: 'cm-p4-m1') and save
+    await act(async () => {
+      fireEvent.change(mathUnitSelect, { target: { value: 'cm-p4-m1' } });
+    });
+
+    const saveBtn = screen.getByRole('button', { name: '変更を保存する' });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    const targetStudent = db.getStudents().find(s => s.id === elemStudent.id);
+    expect(targetStudent?.start_unit_math).toBe('cm-p4-m1');
+
+    // 5. Navigate to 年間計画（マイルストーン）timeline tab
+    const milestoneTabBtn = screen.getByText('年間計画（マイルストーン）');
+    await act(async () => {
+      fireEvent.click(milestoneTabBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('⭐ スタートライン')).toBeInTheDocument();
+    });
+
+    // Verify that the start unit step is displayed as 📍 現在地（取り組み中）
+    expect(screen.getByText('📍 現在地（取り組み中）')).toBeInTheDocument();
+    // Verify earlier steps show ✓ 完了
+    expect(screen.getAllByText('✓ 完了').length).toBeGreaterThan(0);
+
     unmount();
   });
 });
