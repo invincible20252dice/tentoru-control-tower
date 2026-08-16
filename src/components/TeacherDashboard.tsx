@@ -136,7 +136,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
   const allSchoolNames = Array.from(new Set([
     ...schools.map(s => s.name),
-    ...students.map(st => schools.find(s => s.id === st.school_id)?.name || '').filter(Boolean)
+    ...students.map(st => st.school_name || schools.find(s => s.id === st.school_id)?.name || '').filter(Boolean)
   ])).filter(Boolean).sort();
 
   // Account Issuance State
@@ -277,7 +277,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   }, [activeTab, newStudentGrade, schools, newStudentSchoolId]);
 
   // Load Initial Data
-  const loadData = () => {
+  const loadData = (targetStudent?: Student | null) => {
     setApplyScope('individual');
     const listSt = db.getStudents();
     const listSch = db.getSchools();
@@ -308,9 +308,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       setSelectedSchoolId(listSch[0].id);
     }
 
-    if (selectedStudent) {
+    const stToProcess = targetStudent !== undefined ? targetStudent : selectedStudent;
+    if (stToProcess) {
       // Re-find selected student to get fresh state
-      const freshSt = listSt.find(s => s.id === selectedStudent.id);
+      const freshSt = listSt.find(s => s.id === stToProcess.id) || stToProcess;
       if (freshSt) {
         setSelectedStudent(freshSt);
         setSelectedLevel(freshSt.level || 'A');
@@ -363,6 +364,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           birthday: freshSt.birthday || '',
           grade: freshSt.grade,
           school_id: freshSt.school_id,
+          school_name: freshSt.school_name || listSch.find(s => s.id === freshSt.school_id)?.name || '',
           club_activities: freshSt.club_activities || '',
           hobbies: freshSt.hobbies || '',
           parent_name: freshSt.parent_name || '',
@@ -612,6 +614,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       const studentId = `student${randId}`;
       const email = `${studentId}@tentoru-student.com`;
 
+      const allCurrentSchools = db.getSchools();
+      const currentSchoolObj = allCurrentSchools.find(s => s.id === targetSchoolId);
+      const studentSchoolName = currentSchoolObj?.name || (targetSchoolId === 'add_new' ? newCustomSchoolName.trim() : '');
+
       const newStudent: Student = {
         id: `std-${Date.now()}`,
         student_id: studentId,
@@ -619,6 +625,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         email,
         grade: newStudentGrade,
         school_id: targetSchoolId,
+        school_name: studentSchoolName,
         status: 'normal',
         start_unit_id: null,
         created_at: new Date().toISOString(),
@@ -673,6 +680,32 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     }
   };
 
+  // 生徒編集画面への遷移
+  const handleSelectStudentForEdit = (st: Student) => {
+    setSelectedStudent(st);
+    setStartUnitId(st.start_unit_id || '');
+    setActiveTab('student-detail');
+    loadData(st);
+  };
+
+  // 生徒削除
+  const handleDeleteStudent = async (st: Student) => {
+    const confirmed = window.confirm(`${st.name} さんの生徒データを完全に削除しますか？\n※関連する学習計画・タスク履歴もすべて削除されます。この操作は取り消せません。`);
+    if (!confirmed) return;
+
+    try {
+      await db.deleteStudent(st.id);
+      if (selectedStudent?.id === st.id) {
+        setSelectedStudent(null);
+      }
+      loadData(null);
+      alert(`${st.name} さんの生徒データを削除しました。`);
+    } catch (err: any) {
+      console.error('Failed to delete student:', err);
+      alert(`生徒の削除に失敗しました: ${err.message || err}`);
+    }
+  };
+
   // 生徒情報の保存
   const handleSaveStudentDetail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -696,9 +729,32 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         ? (editForm as any).selected_subjects
         : (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0 ? selectedStudent.selected_subjects : defaultSubjs);
 
+      const finalizedSchoolName = editForm.school_name !== undefined 
+        ? editForm.school_name 
+        : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || '');
+
+      let targetSchoolId = editForm.school_id || selectedStudent.school_id;
+      const matchedSchool = schools.find(s => s.name === finalizedSchoolName);
+      if (matchedSchool) {
+        targetSchoolId = matchedSchool.id;
+      } else if (finalizedSchoolName && finalizedSchoolName.trim()) {
+        const newSchId = `sch-${Date.now()}`;
+        const newSch = {
+          id: newSchId,
+          name: finalizedSchoolName.trim(),
+          type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
+          created_at: new Date().toISOString()
+        };
+        await db.saveSchool(newSch);
+        targetSchoolId = newSchId;
+        setSchools(db.getSchools());
+      }
+
       const updated = {
         ...selectedStudent,
         ...editForm,
+        school_name: finalizedSchoolName,
+        school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
         teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
         selected_subjects: currentSelectedSubjects,
@@ -715,6 +771,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       setPeriodCount(saved.default_slots || saved.period_count || newSlots);
       setEditForm({
         ...saved,
+        school_name: saved.school_name || finalizedSchoolName,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
         selected_subjects: saved.selected_subjects || currentSelectedSubjects,
@@ -2426,7 +2483,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                     }
 
                     const school = schools.find(s => s.id === st.school_id);
-                    const studentSchoolName = school?.name || '';
+                    const studentSchoolName = st.school_name || school?.name || '';
 
                     if (filterSchoolName && !studentSchoolName.includes(filterSchoolName)) return false;
                     if (filterGrade && st.grade !== filterGrade) return false;
@@ -2460,16 +2517,18 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                       gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
                     }
 
-                    const schoolName = schools.find(s => s.id === st.school_id)?.name || '未所属';
+                    const schoolName = st.school_name || schools.find(s => s.id === st.school_id)?.name || '未所属';
 
                     return (
                       <div
                         key={st.id}
                         className={styles.studentCard}
+                        data-testid={`student-card-${st.id}`}
                         onClick={() => {
                           setSelectedStudent(st);
                           setStartUnitId(st.start_unit_id || '');
                           setActiveTab('schedule');
+                          loadData(st);
                         }}
                       >
                         <div>
@@ -2479,9 +2538,63 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                           </div>
                           <div className={styles.studentCardSchool}>{schoolName}</div>
                         </div>
-                        <div className={styles.studentCardFooter}>
-                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}>進捗状況:</span>
-                          {gapBadge}
+                        <div className={styles.studentCardFooter} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>進捗:</span>
+                            {gapBadge}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              data-testid={`edit-student-btn-${st.id}`}
+                              title="生徒情報を編集"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectStudentForEdit(st);
+                              }}
+                              style={{
+                                backgroundColor: '#eff6ff',
+                                color: '#2563eb',
+                                border: '1px solid #bfdbfe',
+                                borderRadius: '6px',
+                                padding: '3px 8px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              ✏️ 編集
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`delete-student-btn-${st.id}`}
+                              title="生徒を削除"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteStudent(st);
+                              }}
+                              style={{
+                                backgroundColor: '#fef2f2',
+                                color: '#dc2626',
+                                border: '1px solid #fecaca',
+                                borderRadius: '6px',
+                                padding: '3px 8px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              🗑️ 削除
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );

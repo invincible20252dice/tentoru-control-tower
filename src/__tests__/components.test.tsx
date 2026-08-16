@@ -4451,7 +4451,100 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmount();
   });
+
+  it('should display direct school_name on student card, and support edit and delete actions', async () => {
+    db.clearMockData();
+    localStorage.setItem('tentoru_learning_tasks', JSON.stringify([]));
+    localStorage.setItem('tentoru_curriculum_units', JSON.stringify([]));
+    localStorage.setItem('tentoru_students', JSON.stringify([]));
+    localStorage.setItem('tentoru_schools', JSON.stringify([]));
+
+    const testStudent: Student = {
+      id: 'std-custom-school-1',
+      student_id: 'student999',
+      name: '木村 咲良',
+      email: 'kimura@tentoru-student.com',
+      grade: '中2',
+      school_id: 'sch-unregistered',
+      school_name: '自由が丘学園中学校',
+      status: 'normal',
+      start_unit_id: null,
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(testStudent);
+
+    // Also add a task for this student to verify deletion cascading
+    const testTask: LearningTask = {
+      id: 'task-kimura-1',
+      student_id: 'std-custom-school-1',
+      unit_id: 'u-1',
+      scheduled_date: '2026-08-16',
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    };
+    await db.saveLearningTasks([testTask]);
+
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+
+    // 1. Verify student card shows direct school_name
+    expect(screen.getByText('木村 咲良 (中2)')).toBeInTheDocument();
+    expect(screen.getAllByText('自由が丘学園中学校').length).toBeGreaterThanOrEqual(1);
+
+    // 2. Verify edit button navigates to student-detail tab
+    const editBtn = screen.getByTestId('edit-student-btn-std-custom-school-1');
+    expect(editBtn).toBeInTheDocument();
+    
+    await act(async () => {
+      fireEvent.click(editBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('基本情報・属性設定')).toBeInTheDocument();
+    });
+    // Check form fields populated
+    const nameInput = screen.getByDisplayValue('木村 咲良');
+    expect(nameInput).toBeInTheDocument();
+
+    // 3. Return to student-list tab
+    const studentListTabBtn = screen.getByText('生徒一覧');
+    await act(async () => {
+      fireEvent.click(studentListTabBtn);
+    });
+
+    // 4. Test delete action with confirm cancellation
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    confirmSpy.mockReturnValueOnce(false); // cancel deletion
+
+    const deleteBtn = screen.getByTestId('delete-student-btn-std-custom-school-1');
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    // Student should still exist
+    expect(db.getStudents().some(s => s.id === 'std-custom-school-1')).toBe(true);
+
+    // 5. Test delete action with confirm OK
+    confirmSpy.mockReturnValueOnce(true); // confirm deletion
+
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    // Student should be deleted from db
+    expect(db.getStudents().some(s => s.id === 'std-custom-school-1')).toBe(false);
+    // Tasks for student should also be deleted
+    expect(db.getLearningTasks().some(t => t.student_id === 'std-custom-school-1')).toBe(false);
+
+    confirmSpy.mockRestore();
+    unmount();
+  });
 });
+
 
 
 

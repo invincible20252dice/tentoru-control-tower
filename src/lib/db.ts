@@ -817,6 +817,7 @@ class DatabaseService {
     ];
     const rawList = this.getMockData('students', seed);
     const curYear = getSchoolYear();
+    const schoolsList = this.getSchools();
     return rawList.map(s => {
       const regYear = s.registered_year ?? getSchoolYear(s.created_at);
       const regGrade = s.registered_grade ?? s.grade;
@@ -826,8 +827,10 @@ class DatabaseService {
       const selectedSubjects = s.selected_subjects && Array.isArray(s.selected_subjects) && s.selected_subjects.length > 0
         ? s.selected_subjects
         : (s.grade.startsWith('小') || s.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
+      const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
       return {
         ...s,
+        school_name: resolvedSchoolName,
         assigned_teachers: assignedTeachers,
         teacher_in_charge: assignedTeachers[0] || s.teacher_in_charge || '',
         selected_subjects: selectedSubjects,
@@ -1142,8 +1145,12 @@ class DatabaseService {
       ? student.selected_subjects
       : (student.grade.startsWith('小') || student.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
 
+    const schoolsList = this.getSchools();
+    const derivedSchoolName = student.school_name || (student.school_id ? schoolsList.find(s => s.id === student.school_id)?.name : '') || '';
+
     const toSave: Student = {
       ...student,
+      school_name: derivedSchoolName,
       assigned_teachers: assignedTeachers,
       teacher_in_charge: assignedTeachers[0] || student.teacher_in_charge || '',
       selected_subjects: selectedSubjects,
@@ -1165,14 +1172,15 @@ class DatabaseService {
     let savedData: any = null;
 
     if (!this.isMockMode && this.supabase) {
-      const { school_name, school, units, tasks, ...payloadToSave } = toSave as any;
+      // Keep school_name in payloadToSave, only strip transient properties like school, units, tasks
+      const { school, units, tasks, ...payloadToSave } = toSave as any;
       console.log('[DEBUG] Save Payload:', payloadToSave);
       const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
-        // If column assigned_teachers or selected_subjects is not present on Supabase, fallback by saving payload without those columns
-        if (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.code === 'PGRST204' || error.message?.includes('column')) {
-          const { assigned_teachers, selected_subjects, ...fallbackPayload } = payloadToSave;
+        // If column assigned_teachers or selected_subjects or school_name is not present on Supabase, fallback by saving payload without those columns
+        if (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.message?.includes('school_name') || error.code === 'PGRST204' || error.message?.includes('column')) {
+          const { assigned_teachers, selected_subjects, school_name, ...fallbackPayload } = payloadToSave;
           const { data: fbData, error: fbError } = await this.supabase
             .from('students')
             .upsert(fallbackPayload)
@@ -1204,6 +1212,7 @@ class DatabaseService {
     const finalStudent: Student = {
       ...toSave,
       ...(savedData || {}),
+      school_name: toSave.school_name,
       assigned_teachers: toSave.assigned_teachers,
       selected_subjects: toSave.selected_subjects,
       grade: calculateCurrentGrade((savedData?.registered_grade || toSave.registered_grade!), (savedData?.registered_year || toSave.registered_year!), curYear)
@@ -1217,6 +1226,124 @@ class DatabaseService {
     this.saveMockData('students', rawList);
 
     return finalStudent;
+  }
+
+  public async deleteStudent(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      // Clean up related tables first
+      try {
+        await this.supabase.from('learning_tasks').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete learning_tasks warning:', err);
+      }
+      try {
+        await this.supabase.from('student_schedule_configs').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete student_schedule_configs warning:', err);
+      }
+      try {
+        await this.supabase.from('student_interactions').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete student_interactions warning:', err);
+      }
+      try {
+        await this.supabase.from('test_records').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete test_records warning:', err);
+      }
+      try {
+        await this.supabase.from('mini_test_results').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete mini_test_results warning:', err);
+      }
+      try {
+        await this.supabase.from('homework_results').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete homework_results warning:', err);
+      }
+      try {
+        await this.supabase.from('milestone_plans').delete().eq('student_id', id);
+      } catch (err) {
+        console.warn('Supabase delete milestone_plans warning:', err);
+      }
+      const { error } = await this.supabase.from('students').delete().eq('id', id);
+      if (error) throw error;
+    }
+    // Update local cache
+    const rawList = this.getMockData<Student>('students', []);
+    const filtered = rawList.filter(s => s.id !== id);
+    this.saveMockData('students', filtered);
+
+    // Clean up local tasks
+    const tasks = this.getMockData<LearningTask>('learning_tasks', []);
+    this.saveMockData('learning_tasks', tasks.filter(t => t.student_id !== id));
+  }
+
+  public async fetchStudents(): Promise<Student[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('students').select('*').order('created_at', { ascending: true });
+        if (error) throw error;
+        if (data) {
+          const curYear = getSchoolYear();
+          const schoolsList = this.getSchools();
+          const list: Student[] = data.map((s: any) => {
+            const regYear = s.registered_year ?? getSchoolYear(s.created_at);
+            const regGrade = s.registered_grade ?? s.grade;
+            const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+            return {
+              ...s,
+              school_name: resolvedSchoolName,
+              assigned_teachers: s.assigned_teachers && Array.isArray(s.assigned_teachers) ? s.assigned_teachers : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']),
+              teacher_in_charge: (s.assigned_teachers && s.assigned_teachers[0]) || s.teacher_in_charge || '福田 尚弘',
+              selected_subjects: s.selected_subjects && Array.isArray(s.selected_subjects) ? s.selected_subjects : (s.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),
+              registered_year: regYear,
+              registered_grade: regGrade,
+              grade: calculateCurrentGrade(regGrade, regYear, curYear)
+            };
+          });
+          this.saveMockData('students', list);
+          return list;
+        }
+      } catch (err) {
+        console.warn('fetchStudents Supabase error, fallback to local storage:', err);
+      }
+    }
+    return this.getStudents();
+  }
+
+  public async fetchStudent(id: string): Promise<Student | null> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('students').select('*').eq('id', id).single();
+        if (!error && data) {
+          const curYear = getSchoolYear();
+          const schoolsList = this.getSchools();
+          const regYear = data.registered_year ?? getSchoolYear(data.created_at);
+          const regGrade = data.registered_grade ?? data.grade;
+          const resolvedSchoolName = data.school_name || (data.school_id ? schoolsList.find(sc => sc.id === data.school_id)?.name : '') || '';
+          const st: Student = {
+            ...data,
+            school_name: resolvedSchoolName,
+            assigned_teachers: data.assigned_teachers && Array.isArray(data.assigned_teachers) ? data.assigned_teachers : (data.teacher_in_charge ? [data.teacher_in_charge] : ['福田 尚弘']),
+            teacher_in_charge: (data.assigned_teachers && data.assigned_teachers[0]) || data.teacher_in_charge || '福田 尚弘',
+            selected_subjects: data.selected_subjects && Array.isArray(data.selected_subjects) ? data.selected_subjects : (data.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),
+            registered_year: regYear,
+            registered_grade: regGrade,
+            grade: calculateCurrentGrade(regGrade, regYear, curYear)
+          };
+          const list = this.getMockData<Student>('students', []);
+          const idx = list.findIndex(s => s.id === id);
+          if (idx >= 0) list[idx] = st;
+          else list.push(st);
+          this.saveMockData('students', list);
+          return st;
+        }
+      } catch (err) {
+        console.warn('fetchStudent Supabase error:', err);
+      }
+    }
+    return this.getStudents().find(s => s.id === id) || null;
   }
 
   // 3. Curriculum CRUD
