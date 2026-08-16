@@ -1,4 +1,4 @@
-import { CurriculumUnit, LearningTask, Student, ExamThresholdMaster, MilestonePlan } from './db';
+import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
@@ -87,9 +87,19 @@ export function getStudentStartUnitIdForSubject(student: Student, subject: strin
 export function applyStartPositionsToTasks(
   student: Student,
   allTasks: LearningTask[],
-  allCurriculumUnits: CurriculumUnit[]
+  allCurriculumUnits: CurriculumUnit[],
+  curriculumMasters?: CurriculumMaster[]
 ): LearningTask[] {
-  const studentSchoolUnits = allCurriculumUnits.filter(u => u.school_id === student.school_id || !u.school_id);
+  const masterUnitsAsCurriculum: CurriculumUnit[] = (curriculumMasters || []).map((m, idx) => ({
+    id: m.id,
+    school_id: '',
+    subject: m.subject,
+    name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+    sequence_order: m.sort_order ?? (idx + 1),
+    created_at: m.created_at || ''
+  }));
+  const combinedUnits = [...allCurriculumUnits, ...masterUnitsAsCurriculum];
+  const studentSchoolUnits = combinedUnits.filter(u => u.school_id === student.school_id || !u.school_id);
   const studentTasks = allTasks.filter(t => t.student_id === student.id);
   const otherTasks = allTasks.filter(t => t.student_id !== student.id);
 
@@ -97,7 +107,7 @@ export function applyStartPositionsToTasks(
     // 既に完了したタスクは変更しない
     if (task.status === 'completed') return task;
 
-    const unit = studentSchoolUnits.find(u => u.id === task.unit_id);
+    const unit = studentSchoolUnits.find(u => u.id === task.unit_id || String(u.sequence_order) === String(task.unit_id));
     if (!unit) return task;
 
     const startUnitId = getStudentStartUnitIdForSubject(student, unit.subject);
@@ -113,7 +123,7 @@ export function applyStartPositionsToTasks(
       return task;
     }
 
-    const startUnit = studentSchoolUnits.find(u => u.id === startUnitId);
+    const startUnit = studentSchoolUnits.find(u => u.id === startUnitId || String(u.sequence_order) === String(startUnitId));
     if (!startUnit) return task;
 
     if (unit.sequence_order < startUnit.sequence_order) {

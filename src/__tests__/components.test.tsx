@@ -4407,7 +4407,7 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(screen.getByDisplayValue('数学')).toBeInTheDocument();
     });
 
-    // 7. Test updating student detail start positions and saving
+    // 7. Test updating student detail start positions with 2-step grade filtering and saving
     const studentDetailMenuBtn = screen.getByText('生徒情報');
     await act(async () => {
       fireEvent.click(studentDetailMenuBtn);
@@ -4415,6 +4415,26 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // Verify Basic info card is visible
     expect(screen.getByText('基本情報・属性設定')).toBeInTheDocument();
+    expect(screen.getByText('教科別学習スタート位置')).toBeInTheDocument();
+
+    // Verify 2-step UI dropdowns exist
+    const mathGradeSelect = screen.getByTestId('start-grade-select-start_unit_math');
+    const mathUnitSelect = screen.getByTestId('start-unit-select-start_unit_math');
+    expect(mathGradeSelect).toBeInTheDocument();
+    expect(mathUnitSelect).toBeInTheDocument();
+
+    // Change grade to 4年生 and verify filtered options appear
+    await act(async () => {
+      fireEvent.change(mathGradeSelect, { target: { value: '4年生' } });
+    });
+
+    // Check that grade 4 lessons are available in the second dropdown
+    expect(screen.getByRole('option', { name: /2桁・3桁÷1桁の筆算/ })).toBeInTheDocument();
+
+    // Select a lesson from grade 4
+    await act(async () => {
+      fireEvent.change(mathUnitSelect, { target: { value: 'cm-p4-m1' } });
+    });
 
     // Verify Save button exists and click it
     const saveBtn = screen.getByRole('button', { name: '変更を保存する' });
@@ -4423,6 +4443,11 @@ describe('UI Components Render & Interaction Tests', () => {
     await act(async () => {
       fireEvent.click(saveBtn);
     });
+
+    // Verify student's start_unit_math is saved
+    const updatedStudents = db.getStudents();
+    const targetStudent = updatedStudents.find(s => s.id === studentWithStarts.id);
+    expect(targetStudent?.start_unit_math).toBe('cm-p4-m1');
 
     unmount();
   });

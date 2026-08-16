@@ -16,6 +16,7 @@ import {
   SchoolCodeMaster, 
   ExamThresholdMaster, 
   AIReport, 
+  CurriculumMaster,
   PromptSetting,
   TeacherCorrectionLog,
   MiniTestResult,
@@ -54,6 +55,19 @@ interface TeacherDashboardProps {
   teacherType?: 'elementary' | 'junior_high' | 'high_school';
   initialRole?: UserRole;
   initialBranchId?: string;
+}
+
+function normalizeGrade(g?: string): string {
+  if (!g) return '';
+  const trimmed = g.trim();
+  if (trimmed.startsWith('中') || trimmed.startsWith('高') || trimmed === '園児' || trimmed === '既卒') {
+    return trimmed;
+  }
+  const num = trimmed.replace(/[^0-9]/g, '');
+  if (num) {
+    return `${num}年生`;
+  }
+  return trimmed;
 }
 
 export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, theme = 'light', teacherType: propTeacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
@@ -99,6 +113,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
+  const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>([]);
+  const [selectedStartGrades, setSelectedStartGrades] = useState<Record<string, string>>({});
 
   // レベル別・テンプレート機能用 State
   const [newStudentLevel, setNewStudentLevel] = useState<'A' | 'B' | 'C'>('A');
@@ -272,6 +288,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     const listTemplates = db.getMilestoneTemplates();
     const listCc = db.getCustomClasses();
     const listBranches = db.getBranches();
+    const listMasters = db.getCurriculumMasters();
 
     setStudents(listSt);
     setSchools(listSch);
@@ -282,6 +299,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     setMilestoneTemplates(listTemplates);
     setCustomClassesList(listCc);
     setBranches(listBranches);
+    setCurriculumMastersList(listMasters);
 
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
@@ -313,6 +331,31 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         } else {
           initialTargetSchools = [{ school_name: '', course_name: '' }];
         }
+
+        // Initialize 2-step start unit grades
+        const initStartGrades: Record<string, string> = {};
+        const checkKeys: Array<{ key: string; subject: string }> = [
+          { key: 'start_unit_math', subject: '算数' },
+          { key: 'start_unit_english', subject: '英語' },
+          { key: 'start_unit_science', subject: '理科' },
+          { key: 'start_unit_social', subject: '社会' },
+          { key: 'start_unit_japanese', subject: '国語' }
+        ];
+
+        checkKeys.forEach(item => {
+          const currentVal = (freshSt as any)[item.key];
+          if (currentVal) {
+            const matchedMaster = listMasters.find(m => m.id === currentVal || String(m.sort_order) === String(currentVal));
+            if (matchedMaster) {
+              initStartGrades[item.key] = normalizeGrade(matchedMaster.grade_level || matchedMaster.grade);
+            } else {
+              initStartGrades[item.key] = normalizeGrade(freshSt.grade);
+            }
+          } else {
+            initStartGrades[item.key] = '';
+          }
+        });
+        setSelectedStartGrades(initStartGrades);
 
         setEditForm({
           name: freshSt.name,
@@ -686,7 +729,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       // 教科別スタート位置に基づき未実行タスクを動的再計算・連動保存
       try {
         const allCurrentTasks = db.getLearningTasks();
-        const recalculatedTasks = applyStartPositionsToTasks(saved, allCurrentTasks, allCurriculumUnits);
+        const masters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+        const recalculatedTasks = applyStartPositionsToTasks(saved, allCurrentTasks, allCurriculumUnits, masters);
         await db.saveLearningTasks(recalculatedTasks);
         setStudentTasks(recalculatedTasks.filter(t => t.student_id === saved.id));
       } catch (taskErr) {
@@ -2702,7 +2746,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         const startInfos = subjects.map(sub => {
                           const sId = getStudentStartUnitIdForSubject(selectedStudent, sub);
                           const u = sId ? allCurriculumUnits.find(unit => unit.id === sId) : null;
-                          return { subject: sub, unitName: u ? u.name : '最初から開始', isSet: Boolean(u) };
+                          const cm = (!u && sId) ? curriculumMastersList.find(m => m.id === sId || String(m.sort_order) === String(sId)) : null;
+                          const unitName = u ? u.name : (cm ? (cm.unit_name ? `${cm.unit_name} - ${cm.lesson_name}` : cm.lesson_name) : '最初から開始');
+                          return { subject: sub, unitName, isSet: Boolean(u || cm) };
                         });
 
                         return (
@@ -5828,7 +5874,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '24px' }}>
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>教科別学習スタート位置</h4>
                         <p style={{ margin: '0 0 12px 0', fontSize: '0.75rem', color: '#64748b' }}>
-                          各教科でカリキュラム自動生成を開始する「基準単元」を設定できます。設定されていない場合は最初から開始されます。
+                          各教科でカリキュラム自動生成を開始する「基準単元」を設定できます。学年で絞り込んでから授業を選択してください。
                         </p>
                         
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -5847,12 +5893,63 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                             return items.map(item => {
                               const val = (editForm as any)[item.key] || '';
-                              const schoolUnits = allCurriculumUnits.filter(u => u.school_id === selectedStudent.school_id && (u.subject === item.subject || (item.subject === '数学' && u.subject === '算数') || (item.subject === '算数' && u.subject === '数学')));
                               const isSelected = curSubjs.includes(item.subject) || (item.subject === '数学' && curSubjs.includes('算数')) || (item.subject === '算数' && curSubjs.includes('数学'));
+
+                              // Filter curriculum masters for this subject
+                              const mastersForSubject = curriculumMastersList.filter(m => 
+                                m.subject === item.subject ||
+                                (item.subject === '数学' && m.subject === '算数') ||
+                                (item.subject === '算数' && m.subject === '数学')
+                              );
+
+                              // Extract available grades from masters
+                              const rawGrades = Array.from(new Set(mastersForSubject.map(m => m.grade_level || m.grade).filter(Boolean)));
+                              const defaultElemGrades = ['1年生', '2年生', '3年生', '4年生', '5年生', '6年生'];
+                              const defaultJhsGrades = ['中1', '中2', '中3'];
+                              
+                              let gradeOptions: string[] = [];
+                              if (rawGrades.length > 0) {
+                                const mapped = rawGrades.map(g => normalizeGrade(g));
+                                gradeOptions = Array.from(new Set(mapped));
+                              } else {
+                                gradeOptions = isElem ? defaultElemGrades : [...defaultJhsGrades, ...defaultElemGrades];
+                              }
+
+                              // Current selected grade in state, or infer from existing val
+                              let curGrade = selectedStartGrades[item.key] || '';
+                              if (!curGrade && val) {
+                                const foundMaster = mastersForSubject.find(m => m.id === val || String(m.sort_order) === String(val));
+                                if (foundMaster) {
+                                  curGrade = normalizeGrade(foundMaster.grade_level || foundMaster.grade);
+                                }
+                              }
+
+                              // Filter curriculum masters by selected grade
+                              const filteredMasters = curGrade 
+                                ? mastersForSubject.filter(m => {
+                                    const g = m.grade_level || m.grade || '';
+                                    return g === curGrade || normalizeGrade(g) === normalizeGrade(curGrade);
+                                  }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+                                : [];
+
+                              // Also find school units for fallback
+                              const schoolUnits = allCurriculumUnits.filter(u => 
+                                (u.school_id === selectedStudent.school_id || !u.school_id) && 
+                                (u.subject === item.subject || (item.subject === '数学' && u.subject === '算数') || (item.subject === '算数' && u.subject === '数学'))
+                              );
+
+                              const displayLessons: Array<{ id: string; name: string }> = filteredMasters.length > 0
+                                ? filteredMasters.map(m => ({
+                                    id: m.id,
+                                    name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name
+                                  }))
+                                : (!curGrade && mastersForSubject.length === 0 && schoolUnits.length > 0
+                                    ? schoolUnits.map(u => ({ id: u.id, name: u.name }))
+                                    : []);
 
                               return (
                                 <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: isSelected ? 1 : 0.65 }}>
-                                  <label style={{ fontSize: '0.8rem', fontWeight: 600, width: '130px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <label style={{ fontSize: '0.8rem', fontWeight: 600, width: '80px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
                                     {item.label}:
                                     {isSelected && (
                                       <span style={{ fontSize: '0.65rem', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
@@ -5860,16 +5957,47 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                       </span>
                                     )}
                                   </label>
+
+                                  {/* ① 学年絞り込み */}
                                   <select
+                                    data-testid={`start-grade-select-${item.key}`}
+                                    value={curGrade}
+                                    onChange={e => {
+                                      const nextGrade = e.target.value;
+                                      setSelectedStartGrades(prev => ({ ...prev, [item.key]: nextGrade }));
+                                      if (val) {
+                                        const currentUnit = mastersForSubject.find(m => m.id === val || String(m.sort_order) === String(val));
+                                        const unitGrade = currentUnit ? normalizeGrade(currentUnit.grade_level || currentUnit.grade) : '';
+                                        if (nextGrade && unitGrade && unitGrade !== normalizeGrade(nextGrade)) {
+                                          setEditForm(prev => ({ ...prev, [item.key]: null }));
+                                        }
+                                      }
+                                    }}
+                                    className={styles.select}
+                                    style={{ width: '130px', fontSize: '0.8rem', padding: '4px 6px' }}
+                                  >
+                                    <option value="">-- 学年を選択 --</option>
+                                    {gradeOptions.map(g => (
+                                      <option key={g} value={g}>{g}</option>
+                                    ))}
+                                  </select>
+
+                                  {/* ② 授業選択 */}
+                                  <select
+                                    data-testid={`start-unit-select-${item.key}`}
                                     value={val}
                                     onChange={e => setEditForm({ ...editForm, [item.key]: e.target.value || null })}
                                     className={styles.select}
                                     style={{ flex: 1, fontSize: '0.8rem', padding: '4px 6px' }}
                                   >
-                                    <option value="">-- 最初から開始 --</option>
-                                    {schoolUnits.map(u => (
-                                      <option key={u.id} value={u.id}>{u.name}</option>
-                                    ))}
+                                    <option value="">-- スタート位置を選択 (最初から) --</option>
+                                    {!curGrade && mastersForSubject.length > 0 ? (
+                                      <option value="" disabled>先に学年を選択してください</option>
+                                    ) : (
+                                      displayLessons.map(u => (
+                                        <option key={u.id} value={u.id}>{u.name}</option>
+                                      ))
+                                    )}
                                   </select>
                                 </div>
                               );
