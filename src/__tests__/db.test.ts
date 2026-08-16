@@ -23,8 +23,13 @@ describe('Database Service CRUD Tests', () => {
     const saved = await db.saveSchool(newSchool);
     expect(saved.id).toBe('sch-test');
 
-    const freshSchools = db.getSchools();
+    const freshSchools = await db.fetchSchools();
     expect(freshSchools.find(s => s.id === 'sch-test')).toBeDefined();
+
+    // Test deleteSchool
+    await db.deleteSchool('sch-test');
+    const afterDelete = await db.fetchSchools();
+    expect(afterDelete.find(s => s.id === 'sch-test')).toBeUndefined();
   });
 
   it('should sanitize NEXT_PUBLIC_SUPABASE_URL removing /rest/v1 and trailing slashes', () => {

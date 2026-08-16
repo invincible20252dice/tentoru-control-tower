@@ -254,7 +254,17 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   // HTML Element Ref for html2canvas
   const reportRef = useRef<HTMLDivElement>(null);
 
-  // 新規生徒アカウント発行時の所属学校の自動初期値セット
+  // 新規生徒アカウント発行時の所属学校の動的取得・自動初期値セット
+  useEffect(() => {
+    if (activeTab === 'create-student') {
+      db.fetchSchools().then(freshSchools => {
+        if (freshSchools && freshSchools.length > 0) {
+          setSchools(freshSchools);
+        }
+      }).catch(err => console.warn('fetchSchools on create-student error:', err));
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     if (activeTab === 'create-student') {
       if (newStudentSchoolId === 'add_new') return;
@@ -262,7 +272,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
         const isJhs = newStudentGrade.startsWith('中') || newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
         if (isElem) return s.type === 'elementary';
-        if (isJhs) return s.type === 'junior_high';
+        if (isJhs) return s.type === 'junior_high' || s.type === 'high_school';
         return true;
       });
       if (filtered.length > 0) {
@@ -703,6 +713,40 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     } catch (err: any) {
       console.error('Failed to delete student:', err);
       alert(`生徒の削除に失敗しました: ${err.message || err}`);
+    }
+  };
+
+  // 学校名の削除（マスタ整理）
+  const handleDeleteSchool = async () => {
+    if (!newStudentSchoolId || newStudentSchoolId === 'add_new') return;
+    const targetSchool = schools.find(s => s.id === newStudentSchoolId);
+    if (!targetSchool) return;
+
+    const confirmed = window.confirm(`学校名「${targetSchool.name}」をリストから削除しますか？\n※この操作は元に戻せません。`);
+    if (!confirmed) return;
+
+    try {
+      await db.deleteSchool(targetSchool.id);
+      const updatedSchools = await db.fetchSchools();
+      setSchools(updatedSchools);
+
+      // リセット後の初期選択
+      const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
+      const isJhs = newStudentGrade.startsWith('中') || newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
+      const filtered = updatedSchools.filter(s => {
+        if (isElem) return s.type === 'elementary';
+        if (isJhs) return s.type === 'junior_high' || s.type === 'high_school';
+        return true;
+      });
+      if (filtered.length > 0) {
+        setNewStudentSchoolId(filtered[0].id);
+      } else {
+        setNewStudentSchoolId('add_new');
+      }
+      alert(`学校名「${targetSchool.name}」を削除しました。`);
+    } catch (err: any) {
+      console.error('Failed to delete school:', err);
+      alert(`学校名の削除に失敗しました: ${err.message || err}`);
     }
   };
 
@@ -2633,28 +2677,58 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 </div>
                 <div className={styles.formGroup}>
                   <label>所属学校</label>
-                  <select 
-                    value={newStudentSchoolId} 
-                    onChange={e => setNewStudentSchoolId(e.target.value)}
-                    className={styles.select}
-                  >
-                    {schools
-                      .filter(s => {
-                        const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
-                        const isJhs = newStudentGrade.startsWith('中') || newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
-                        if (isElem) return s.type === 'elementary';
-                        if (isJhs) return s.type === 'junior_high';
-                        return true;
-                      })
-                      .map(s => (
-                        <option key={s.id} value={s.id}>{s.name} ({s.type === 'junior_high' ? '中' : '小'})</option>
-                      ))}
-                    <option value="add_new">➕ 新規学校を追加...</option>
-                  </select>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <select 
+                      data-testid="new-student-school-select"
+                      value={newStudentSchoolId} 
+                      onChange={e => setNewStudentSchoolId(e.target.value)}
+                      className={styles.select}
+                      style={{ flex: 1 }}
+                    >
+                      {schools
+                        .filter(s => {
+                          const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
+                          const isJhs = newStudentGrade.startsWith('中') || newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
+                          if (isElem) return s.type === 'elementary';
+                          if (isJhs) return s.type === 'junior_high' || s.type === 'high_school';
+                          return true;
+                        })
+                        .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+                        .map(s => (
+                          <option key={s.id} value={s.id}>{s.name} ({s.type === 'junior_high' ? '中' : s.type === 'high_school' ? '高' : '小'})</option>
+                        ))}
+                      <option value="add_new">➕ 新規学校を追加...</option>
+                    </select>
+                    <button
+                      type="button"
+                      data-testid="delete-school-btn"
+                      title="選択中の学校名をリストから削除"
+                      disabled={!newStudentSchoolId || newStudentSchoolId === 'add_new'}
+                      onClick={handleDeleteSchool}
+                      style={{
+                        backgroundColor: (!newStudentSchoolId || newStudentSchoolId === 'add_new') ? '#f1f5f9' : '#fef2f2',
+                        color: (!newStudentSchoolId || newStudentSchoolId === 'add_new') ? '#94a3b8' : '#dc2626',
+                        border: `1px solid ${(!newStudentSchoolId || newStudentSchoolId === 'add_new') ? '#cbd5e1' : '#fecaca'}`,
+                        borderRadius: '6px',
+                        padding: '8px 12px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        cursor: (!newStudentSchoolId || newStudentSchoolId === 'add_new') ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        whiteSpace: 'nowrap',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      🗑️ 削除
+                    </button>
+                  </div>
                   {newStudentSchoolId === 'add_new' && (
                     <div className={styles.formGroup} style={{ marginTop: '8px', padding: '10px', background: '#f8fafc', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>新規学校名 (固有名詞のみ入力)</label>
                       <input
+                        data-testid="new-custom-school-name-input"
                         type="text"
                         value={newCustomSchoolName}
                         onChange={e => setNewCustomSchoolName(e.target.value)}

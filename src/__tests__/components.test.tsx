@@ -4543,6 +4543,96 @@ describe('UI Components Render & Interaction Tests', () => {
     confirmSpy.mockRestore();
     unmount();
   });
+
+  it('should dynamically display schools in create student tab, support delete school with confirm, and auto-save new school', async () => {
+    db.clearMockData();
+    localStorage.setItem('tentoru_learning_tasks', JSON.stringify([]));
+    localStorage.setItem('tentoru_curriculum_units', JSON.stringify([]));
+    localStorage.setItem('tentoru_students', JSON.stringify([]));
+    localStorage.setItem('tentoru_schools', JSON.stringify([]));
+
+    // Seed test schools
+    await db.saveSchool({ id: 'sch-alpha', name: '青葉中学校', type: 'junior_high', created_at: '' });
+    await db.saveSchool({ id: 'sch-beta', name: '緑が丘中学校', type: 'junior_high', created_at: '' });
+
+    const { unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+
+    // 1. Navigate to '新規生徒アカウント発行' tab
+    const createStudentTabBtn = screen.getByText('新規生徒アカウント発行');
+    await act(async () => {
+      fireEvent.click(createStudentTabBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-student-school-select')).toBeInTheDocument();
+    });
+
+    const schoolSelect = screen.getByTestId('new-student-school-select') as HTMLSelectElement;
+    const deleteSchoolBtn = screen.getByTestId('delete-school-btn') as HTMLButtonElement;
+
+    // Both seeded schools should appear in options
+    expect(screen.getByRole('option', { name: /青葉中学校/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /緑が丘中学校/ })).toBeInTheDocument();
+
+    // 2. Select 'add_new' and verify delete button is disabled
+    await act(async () => {
+      fireEvent.change(schoolSelect, { target: { value: 'add_new' } });
+    });
+    expect(deleteSchoolBtn).toBeDisabled();
+
+    // 3. Select 'sch-beta' (緑が丘中学校) and test cancellation
+    await act(async () => {
+      fireEvent.change(schoolSelect, { target: { value: 'sch-beta' } });
+    });
+    expect(deleteSchoolBtn).not.toBeDisabled();
+
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    confirmSpy.mockReturnValueOnce(false); // cancel
+
+    await act(async () => {
+      fireEvent.click(deleteSchoolBtn);
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    // School should still exist
+    expect(db.getSchools().some(s => s.id === 'sch-beta')).toBe(true);
+
+    // 4. Test deletion with confirm OK
+    confirmSpy.mockReturnValueOnce(true); // confirm delete
+
+    await act(async () => {
+      fireEvent.click(deleteSchoolBtn);
+    });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    // School should be deleted from db
+    expect(db.getSchools().some(s => s.id === 'sch-beta')).toBe(false);
+
+    // 5. Test creating a student with a brand new custom school
+    await act(async () => {
+      fireEvent.change(schoolSelect, { target: { value: 'add_new' } });
+    });
+
+    const studentNameInput = screen.getByPlaceholderText('例: 佐藤 拓海');
+    const customSchoolInput = screen.getByTestId('new-custom-school-name-input');
+
+    await act(async () => {
+      fireEvent.change(studentNameInput, { target: { value: '新規 太郎' } });
+      fireEvent.change(customSchoolInput, { target: { value: 'ひまわり' } });
+    });
+
+    const createSubmitBtn = screen.getByRole('button', { name: '1クリックアカウント発行' });
+    await act(async () => {
+      fireEvent.click(createSubmitBtn);
+    });
+
+    // Check that new school (ひまわり中学校) was added to schools in db
+    const schoolsAfterCreate = db.getSchools();
+    expect(schoolsAfterCreate.some(s => s.name.includes('ひまわり'))).toBe(true);
+
+    confirmSpy.mockRestore();
+    unmount();
+  });
 });
 
 

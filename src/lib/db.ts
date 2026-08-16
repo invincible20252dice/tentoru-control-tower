@@ -1134,6 +1134,79 @@ class DatabaseService {
     }
   }
 
+  public async fetchSchools(): Promise<School[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('schools')
+          .select('*')
+          .order('name', { ascending: true });
+        if (error) throw error;
+        if (data) {
+          let allSchools: School[] = [...data];
+          try {
+            const { data: stData } = await this.supabase.from('students').select('school_name, school_id');
+            if (stData) {
+              const existingNames = new Set(allSchools.map(s => s.name));
+              for (const st of stData) {
+                if (st.school_name && st.school_name.trim() && !existingNames.has(st.school_name.trim())) {
+                  const newSch: School = {
+                    id: st.school_id || `sch-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                    name: st.school_name.trim(),
+                    type: st.school_name.includes('小') ? 'elementary' : st.school_name.includes('高') ? 'high_school' : 'junior_high',
+                    created_at: new Date().toISOString()
+                  };
+                  allSchools.push(newSch);
+                  existingNames.add(newSch.name);
+                }
+              }
+            }
+          } catch (stErr) {
+            console.warn('fetchSchools students sync warning:', stErr);
+          }
+
+          const uniqueSchoolsMap = new Map<string, School>();
+          for (const s of allSchools) {
+            if (!uniqueSchoolsMap.has(s.name)) {
+              uniqueSchoolsMap.set(s.name, s);
+            }
+          }
+          const list = Array.from(uniqueSchoolsMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+          this.saveMockData('schools', list);
+          return list;
+        }
+      } catch (err) {
+        console.warn('fetchSchools Supabase error, fallback to local storage:', err);
+      }
+    }
+    const local = this.getSchools();
+    const uniqueMap = new Map<string, School>();
+    for (const s of local) {
+      if (!uniqueMap.has(s.name)) {
+        uniqueMap.set(s.name, s);
+      }
+    }
+    const sorted = Array.from(uniqueMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    return sorted;
+  }
+
+  public async deleteSchool(idOrName: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error: errId } = await this.supabase.from('schools').delete().eq('id', idOrName);
+        if (errId) {
+          console.warn('deleteSchool by id error, trying by name:', errId);
+          await this.supabase.from('schools').delete().eq('name', idOrName);
+        }
+      } catch (err) {
+        console.warn('deleteSchool Supabase error:', err);
+      }
+    }
+    const list = this.getMockData<School>('schools', []);
+    const filtered = list.filter(s => s.id !== idOrName && s.name !== idOrName);
+    this.saveMockData('schools', filtered);
+  }
+
   // 2. Students CRUD
   public async saveStudent(student: Student): Promise<Student> {
     const curYear = getSchoolYear();
