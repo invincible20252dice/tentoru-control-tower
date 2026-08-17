@@ -1063,7 +1063,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmount();
 
-    const { unmount: unmountTeacher2 } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const { unmount: unmountTeacher2 } = render(<TeacherDashboard initialDate="2026-06-19" onBackToPortal={() => {}} />);
     const studentItem2 = screen.getByText(/佐藤 拓海/);
     fireEvent.click(studentItem2);
     
