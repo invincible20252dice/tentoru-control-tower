@@ -36,7 +36,7 @@ export function calculateLessonRangeForSlot(params: {
 
   // 1. 対象教科の授業リストを抽出
   let masterLessons = curriculumMasters
-    .filter(m => m.subject === subject || (subject === '数学' && m.subject === '算数') || (subject === '算数' && m.subject === '数学'))
+    .filter(m => m.subject === subject)
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map(m => ({
       id: m.id,
@@ -44,7 +44,7 @@ export function calculateLessonRangeForSlot(params: {
       sort_order: m.sort_order ?? 0
     }));
 
-  if (masterLessons.length === 0) {
+  if (masterLessons.length === 0 || (startLessonId && !masterLessons.some(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId)) && curriculumUnits.some(u => u.id === startLessonId))) {
     const unitLessons = curriculumUnits
       .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && (u.subject === subject || (subject === '数学' && u.subject === '算数') || (subject === '算数' && u.subject === '数学')))
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
@@ -53,7 +53,9 @@ export function calculateLessonRangeForSlot(params: {
         name: u.name,
         sort_order: u.sequence_order ?? 0
       }));
-    masterLessons = unitLessons;
+    if (unitLessons.length > 0) {
+      masterLessons = unitLessons;
+    }
   }
 
   if (masterLessons.length === 0) {
