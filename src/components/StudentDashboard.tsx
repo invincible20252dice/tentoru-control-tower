@@ -17,16 +17,45 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const getSystemTodayStr = () => new Date().toISOString().split('T')[0];
   const systemTodayStr = getSystemTodayStr();
 
-  const [tasks, setTasks] = useState<LearningTask[]>([]);
-  const [units, setUnits] = useState<CurriculumUnit[]>([]);
-  const [todayTasks, setTodayTasks] = useState<LearningTask[]>([]);
-  const [showScheduleConfig, setShowScheduleConfig] = useState(false);
-  const [currentDateStr, setCurrentDateStr] = useState<string>(initialDate || systemTodayStr);
+  const determineInitialDate = () => {
+    if (initialDate) return initialDate;
+    const todayStr = getSystemTodayStr();
+    const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
+    const hasTodayTasks = stTasks.some(t => t.scheduled_date === todayStr && t.period !== null);
+    if (hasTodayTasks) return todayStr;
+    const upcomingTasks = stTasks
+      .filter(t => t.scheduled_date >= todayStr && t.period !== null)
+      .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+    if (upcomingTasks.length > 0) return upcomingTasks[0].scheduled_date;
+    const allScheduledTasks = stTasks
+      .filter(t => t.period !== null)
+      .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+    if (allScheduledTasks.length > 0) return allScheduledTasks[0].scheduled_date;
+    return todayStr;
+  };
+
+  const [currentDateStr, setCurrentDateStr] = useState<string>(determineInitialDate);
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
-  const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>([]);
-  const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>([]);
+  const [tasks, setTasks] = useState<LearningTask[]>(() => db.getLearningTasks().filter(t => t.student_id === student.id));
+  const [units, setUnits] = useState<CurriculumUnit[]>(() => db.getCurriculumUnits());
+  const [todayTasks, setTodayTasks] = useState<LearningTask[]>(() => {
+    const d = determineInitialDate();
+    const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
+    const today = stTasks.filter(t => t.scheduled_date === d && t.period !== null);
+    today.sort((a, b) => (a.period || 0) - (b.period || 0));
+    return today;
+  });
+  const [showScheduleConfig, setShowScheduleConfig] = useState(false);
+  const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>(() => {
+    const d = determineInitialDate();
+    return db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === d);
+  });
+  const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>(() => {
+    const d = determineInitialDate();
+    return db.getHomeworkResults().filter(r => r.student_id === student.id && r.date === d);
+  });
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
-  const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(undefined);
+  const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
 
   const loadData = async () => {
     let studentTasks: LearningTask[] = [];

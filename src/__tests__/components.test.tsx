@@ -884,7 +884,7 @@ describe('UI Components Render & Interaction Tests', () => {
       created_at: new Date().toISOString()
     });
 
-    const { unmount: unmountTeacher } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const { unmount: unmountTeacher } = render(<TeacherDashboard initialDate="2026-06-19" onBackToPortal={() => {}} />);
     
     const studentItem = screen.getByText(/佐藤 拓海/);
     fireEvent.click(studentItem);
@@ -1180,7 +1180,7 @@ describe('UI Components Render & Interaction Tests', () => {
   });
 
   it('should support edge cases, unit sorting, custom task updates, and AI report manual corrections in TeacherDashboard', async () => {
-    const { container, unmount } = render(<TeacherDashboard onBackToPortal={() => {}} />);
+    const { container, unmount } = render(<TeacherDashboard initialDate="2026-06-19" onBackToPortal={() => {}} />);
     
     // 生徒を選択する
     const studentItem = screen.getByText(/佐藤 拓海/);
