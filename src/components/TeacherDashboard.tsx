@@ -59,11 +59,13 @@ export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homew
 interface TeacherDashboardProps {
   onBackToPortal: () => void;
   onLogout?: () => void;
-  onViewStudentScreen?: (student: Student) => void;
+  onViewStudentScreen?: (student: Student, date?: string) => void;
+  onViewStudent?: (student: Student, date?: string) => void;
   theme?: 'light' | 'dark';
   teacherType?: 'elementary' | 'junior_high' | 'high_school';
   initialRole?: UserRole;
   initialBranchId?: string;
+  initialDate?: string;
 }
 
 function normalizeGrade(g?: string): string {
@@ -79,7 +81,7 @@ function normalizeGrade(g?: string): string {
   return trimmed;
 }
 
-export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, theme = 'light', teacherType: propTeacherType, initialRole, initialBranchId }: TeacherDashboardProps) {
+export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, onViewStudent, theme = 'light', teacherType: propTeacherType, initialRole, initialBranchId, initialDate }: TeacherDashboardProps) {
   // State
   const [currentTeacherType, setCurrentTeacherType] = useState<'elementary' | 'junior_high' | 'high_school' | 'all'>(() => {
     if (propTeacherType) return propTeacherType;
@@ -181,7 +183,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [schoolUnits, setSchoolUnits] = useState<CurriculumUnit[]>([]);
 
   // Daily Scheduler State
-  const [scheduleDate, setScheduleDate] = useState('2026-06-19');
+  const [scheduleDate, setScheduleDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
   const [applyScope, setApplyScope] = useState<'individual' | 'school' | 'grade' | 'level'>('individual');
   
@@ -1311,6 +1313,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 scheduled_date: scheduleDate,
                 period: p,
                 subject: config.subject,
+                custom_unit_name: rangeString || startLessonName || config.customTheme || clearedTasks[existingTaskIdx].custom_unit_name || (selectedUnit ? selectedUnit.name : ''),
                 start_lesson_id: config.startLessonId || targetUnitId,
                 end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
                 start_lesson_name: startLessonName,
@@ -1329,6 +1332,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 video_watched: false,
                 test_passed: false,
                 subject: config.subject,
+                custom_unit_name: rangeString || startLessonName || config.customTheme || (selectedUnit ? selectedUnit.name : ''),
                 start_lesson_id: config.startLessonId || targetUnitId,
                 end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
                 start_lesson_name: startLessonName,
@@ -3150,11 +3154,14 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         {selectedStudent.status === 'warning' && <span className={`${styles.badge} ${styles.statusWarning}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>計画パンクアラート！⚠️</span>}
                         {selectedStudent.status === 'normal' && <span className={`${styles.badge} ${styles.statusNormal}`} style={{ padding: '6px 12px', fontSize: '0.8rem' }}>通常進捗</span>}
 
-                        {onViewStudentScreen && (
+                        {(onViewStudentScreen || onViewStudent) && (
                           <button
                             type="button"
                             data-testid="banner-view-student-screen-btn"
-                            onClick={() => onViewStudentScreen(selectedStudent)}
+                            onClick={() => {
+                              if (onViewStudentScreen) onViewStudentScreen(selectedStudent, scheduleDate);
+                              else if (onViewStudent) onViewStudent(selectedStudent, scheduleDate);
+                            }}
                             style={{
                               padding: '6px 12px',
                               borderRadius: '6px',

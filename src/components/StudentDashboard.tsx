@@ -10,43 +10,83 @@ interface StudentDashboardProps {
   student: Student;
   onBackToPortal: () => void;
   theme?: 'light' | 'dark';
+  initialDate?: string;
 }
 
-export default function StudentDashboard({ student, onBackToPortal, theme = 'light' }: StudentDashboardProps) {
+export default function StudentDashboard({ student, onBackToPortal, theme = 'light', initialDate }: StudentDashboardProps) {
+  const getSystemTodayStr = () => new Date().toISOString().split('T')[0];
+  const systemTodayStr = getSystemTodayStr();
+
   const [tasks, setTasks] = useState<LearningTask[]>([]);
   const [units, setUnits] = useState<CurriculumUnit[]>([]);
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>([]);
   const [showScheduleConfig, setShowScheduleConfig] = useState(false);
-  const [currentDateStr, setCurrentDateStr] = useState<string>('2026-06-19'); // デモ用初期日付
+  const [currentDateStr, setCurrentDateStr] = useState<string>(initialDate || systemTodayStr);
+  const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
   const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>([]);
   const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>([]);
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(undefined);
 
-  const loadData = () => {
-    const allTasks = db.getLearningTasks();
+  const loadData = async () => {
+    let studentTasks: LearningTask[] = [];
+    try {
+      studentTasks = await db.fetchLearningTasks(student.id);
+    } catch {
+      studentTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
+    }
     const allUnits = db.getCurriculumUnits();
     const config = db.getStudentScheduleConfig(student.id);
     setScheduleConfig(config);
-    
-    // 生徒のタスク
-    const studentTasks = allTasks.filter(t => t.student_id === student.id);
     setTasks(studentTasks);
     setUnits(allUnits);
 
-    // 今日のタスク (period があり、予定日が今日)
-    const today = studentTasks.filter(t => t.scheduled_date === currentDateStr && t.period !== null);
-    // period の昇順でソート
+    // 日付の決定ロジック
+    let targetDate = currentDateStr;
+    if (!hasAutoSelectedDate && !initialDate) {
+      const todayStr = getSystemTodayStr();
+      const hasTodayTasks = studentTasks.some(t => t.scheduled_date === todayStr && t.period !== null);
+      if (hasTodayTasks) {
+        targetDate = todayStr;
+      } else {
+        // 未来の通塾日を優先検索
+        const upcomingTasks = studentTasks
+          .filter(t => t.scheduled_date >= todayStr && t.period !== null)
+          .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+        if (upcomingTasks.length > 0) {
+          targetDate = upcomingTasks[0].scheduled_date;
+        } else {
+          // モックやテスト用など、全タスクの中で最新のコマ割り日を検索
+          const allScheduledTasks = studentTasks
+            .filter(t => t.period !== null)
+            .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+          if (allScheduledTasks.length > 0) {
+            targetDate = allScheduledTasks[0].scheduled_date;
+          } else {
+            targetDate = todayStr;
+          }
+        }
+      }
+      setCurrentDateStr(targetDate);
+      setHasAutoSelectedDate(true);
+    }
+
+    // 今日のタスク (period があり、予定日が targetDate)
+    const today = studentTasks.filter(t => t.scheduled_date === targetDate && t.period !== null);
     today.sort((a, b) => (a.period || 0) - (b.period || 0));
     setTodayTasks(today);
 
-    // 今日の小テスト結果
-    const miniResults = db.getMiniTestResults();
-    const todayMini = miniResults.filter(r => r.student_id === student.id && r.date === currentDateStr);
+    // 小テスト結果
+    let todayMini: MiniTestResult[] = [];
+    try {
+      todayMini = await db.fetchMiniTestResults(student.id, targetDate);
+    } catch {
+      todayMini = db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === targetDate);
+    }
     console.log("STUDENT_DASHBOARD_FILTER_DIAGNOSTICS:", {
       studentId: student.id,
-      currentDateStr,
-      miniResultsCount: miniResults.length,
+      currentDateStr: targetDate,
+      miniResultsCount: todayMini.length,
       todayMiniCount: todayMini.length,
       todayMiniItems: todayMini
     });
@@ -54,13 +94,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     
     const initialScores: Record<string, string> = {};
     todayMini.forEach(r => {
-      initialScores[r.id] = r.score !== null ? r.score.toString() : '';
+      initialScores[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
     });
     setStudentScores(initialScores);
 
-    // 今日の宿題結果
-    const hwResults = db.getHomeworkResults();
-    const todayHw = hwResults.filter(r => r.student_id === student.id && r.date === currentDateStr);
+    // 宿題結果
+    let todayHw: HomeworkResult[] = [];
+    try {
+      todayHw = await db.fetchHomeworkResults(student.id, targetDate);
+    } catch {
+      todayHw = db.getHomeworkResults().filter(r => r.student_id === student.id && r.date === targetDate);
+    }
     setHomeworkResults(todayHw);
   };
 
@@ -154,8 +198,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const allCurrentTasks = db.getLearningTasks();
     const studentTasks = allCurrentTasks.filter(t => t.student_id === student.id);
     
-    // 今週期限を 6/21 (日) と仮定
-    const weekEndDate = '2026-06-21';
+    // 今週期限 (日曜日) を動的に算出
+    const curDate = new Date(currentDateStr);
+    const dayOfWeek = isNaN(curDate.getTime()) ? 0 : curDate.getDay();
+    const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+    const weekEnd = new Date(curDate.getTime() + daysToSunday * 24 * 60 * 60 * 1000);
+    const weekEndDate = isNaN(weekEnd.getTime()) ? currentDateStr : weekEnd.toISOString().split('T')[0];
+
     const thisWeekTasks = studentTasks.filter(t => {
       const d = new Date(t.scheduled_date).getTime();
       const start = new Date(currentDateStr).getTime();
@@ -218,15 +267,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 4. シミュレーター用の「2日連続未達成」を擬似発生させる関数
   const simulateTwoDaysFailure = async () => {
-    // 過去2日間連続で未達成の予定だったという状況を作る
-    // 17日と18日のタスクを強制的に未達成 (status = 'unstarted') に変更し、本日日付を19日にセットする
+    const d = new Date(currentDateStr);
+    const dMinus1 = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const targetToday = currentDateStr;
+
     const allCurrentTasks = db.getLearningTasks();
     const updated = allCurrentTasks.map(t => {
       if (t.student_id === student.id) {
-        if (t.scheduled_date === '2026-06-18') {
+        if (t.scheduled_date === dMinus1) {
           return { ...t, status: 'unstarted' as const, video_watched: false, test_passed: false };
         }
-        if (t.scheduled_date === '2026-06-19') {
+        if (t.scheduled_date === targetToday) {
           return { ...t, status: 'unstarted' as const, video_watched: false, test_passed: false, period: 1 };
         }
       }
@@ -241,7 +292,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       status: 'normal'
     });
 
-    alert('【シミュレーション】18日と19日のタスクを未完了に設定しました。講師ダッシュボード側で「自動リスケジュール」を実行すると、残りのタスク量に応じて自動再編または「計画パンクアラート」が発生します。');
+    alert('【シミュレーション】過去2日間のタスクを未完了に設定しました。講師ダッシュボード側で「自動リスケジュール」を実行すると、残りのタスク量に応じて自動再編または「計画パンクアラート」が発生します。');
     loadData();
   };
 
@@ -302,14 +353,67 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       <div className={styles.grid}>
         {/* Left Side: Todays Timetable */}
         <div className={styles.todoCard}>
-          <h2 className={styles.sectionTitle}>
-            {/* Clock Icon */}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            今日の時間割・タスク ({currentDateStr})
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
+              {/* Clock Icon */}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              {currentDateStr === systemTodayStr ? '今日の時間割・タスク' : '時間割・タスク'} ({currentDateStr})
+            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="date"
+                value={currentDateStr}
+                data-testid="student-date-picker"
+                onChange={e => {
+                  if (e.target.value) {
+                    setCurrentDateStr(e.target.value);
+                    setHasAutoSelectedDate(true);
+                  }
+                }}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '0.8rem',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#1e293b',
+                  cursor: 'pointer'
+                }}
+              />
+              {currentDateStr !== systemTodayStr && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentDateStr(systemTodayStr);
+                    setHasAutoSelectedDate(true);
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    backgroundColor: '#f1f5f9',
+                    color: '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📅 今日に戻る
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 直近の通塾予定日を表示している場合の案内バナー */}
+          {currentDateStr !== systemTodayStr && todayTasks.length > 0 && (
+            <div style={{ marginBottom: '12px', padding: '8px 12px', background: '#eff6ff', borderRadius: '6px', border: '1px solid #bfdbfe', fontSize: '0.8rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>💡</span>
+              <span>本日はコマ割りがありません。直近の通塾予定日（<strong>{currentDateStr}</strong>）の時間割・タスクを表示しています。</span>
+            </div>
+          )}
 
           {/* 本日のテスト表示 */}
           {miniTestResults.length > 0 && (
@@ -400,14 +504,19 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
           {todayTasks.length === 0 ? (
             <div className={styles.emptyTimetable}>
-              今日のコマ割り予定はありません。自習で動画視聴やテストを進めましょう。
+              {currentDateStr === systemTodayStr
+                ? '今日のコマ割り予定はありません。自習で動画視聴やテストを進めましょう。'
+                : `${currentDateStr} のコマ割り予定はありません。`}
             </div>
           ) : (
             <div className={styles.timetable}>
               {todayTasks.map(task => {
                 const unit = units.find(u => u.id === task.unit_id);
                 const subjectName = task.subject || (unit ? unit.subject : 'その他');
-                const themeName = task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし');
+                const themeName = task.lesson_range 
+                  || (task.start_lesson_name && task.end_lesson_name && task.start_lesson_name !== task.end_lesson_name 
+                      ? `${task.start_lesson_name} 〜 ${task.end_lesson_name}` 
+                      : (task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし')));
                 const googleDriveUrl = unit?.google_drive_url;
                 const isCustomTask = !unit;
 
@@ -424,9 +533,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                       </div>
                       <div className={styles.unitName}>{themeName}</div>
 
+                      {/* Period-specific office note */}
+                      {task.office_note && (
+                        <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                          📝 連絡: {task.office_note}
+                        </div>
+                      )}
+
                       {/* Google Drive Link for printing materials */}
                       {googleDriveUrl && (
-                        <div>
+                        <div style={{ marginTop: '6px' }}>
                           <a 
                             href={googleDriveUrl} 
                             target="_blank" 

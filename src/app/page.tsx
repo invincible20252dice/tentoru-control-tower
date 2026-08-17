@@ -13,6 +13,7 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<'login' | 'portal' | 'teacher' | 'student' | 'student-select'>('login');
   const [studentsList, setStudentsList] = useState<Student[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showTeacherTypeSelector, setShowTeacherTypeSelector] = useState(false);
   const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>(() => {
@@ -59,6 +60,7 @@ export default function Home() {
     await db.signOut();
     setSession(null);
     setSelectedStudentId('');
+    setSelectedScheduleDate('');
     setShowTeacherTypeSelector(false);
     setCurrentView('login');
   };
@@ -83,6 +85,7 @@ export default function Home() {
       setCurrentView('login');
     }
     setSelectedStudentId('');
+    setSelectedScheduleDate('');
     setShowTeacherTypeSelector(false);
   };
 
@@ -93,7 +96,10 @@ export default function Home() {
   if (isInitializing) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' }}>
-        <span style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: 600 }}>読み込み中...</span>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: '40px', height: '40px', border: '4px solid #e2e8f0', borderTop: '4px solid #0f766e', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
+          <p style={{ color: '#64748b', fontWeight: 600 }}>TENTORU を起動中...</p>
+        </div>
       </div>
     );
   }
@@ -115,8 +121,9 @@ export default function Home() {
         <TeacherDashboard 
           onBackToPortal={handleBackToPortal} 
           onLogout={handleLogout}
-          onViewStudentScreen={(st) => {
+          onViewStudentScreen={(st, date) => {
             setSelectedStudentId(st.id);
+            if (date) setSelectedScheduleDate(date);
             setCurrentView('student');
           }}
           theme={theme} 
@@ -132,7 +139,12 @@ export default function Home() {
   if (currentView === 'student' && selectedStudent) {
     return (
       <div className={theme === 'dark' ? 'dark-mode' : ''} style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
-        <StudentDashboard student={selectedStudent} onBackToPortal={handleBackToPortal} theme={theme} />
+        <StudentDashboard 
+          student={selectedStudent} 
+          onBackToPortal={handleBackToPortal} 
+          theme={theme} 
+          initialDate={selectedScheduleDate || undefined}
+        />
       </div>
     );
   }
