@@ -54,6 +54,8 @@ import {
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
 
+export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import';
+
 interface TeacherDashboardProps {
   onBackToPortal: () => void;
   onLogout?: () => void;
@@ -104,7 +106,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [userRole, setUserRole] = useState<UserRole>(initialRole || 'admin');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(initialBranchId || 'all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import'>('student-list');
+  const [activeTab, setActiveTab] = useState<DashboardTabType>('student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
   // 生徒詳細（生徒情報）画面用 State
@@ -2263,6 +2265,15 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     setMilestonePlans(updatedPlans);
     await db.saveMilestonePlans(updatedPlans);
     loadData();
+  };
+
+  const handleTabClick = (tab: DashboardTabType) => {
+    setActiveTab(tab);
+    if (!selectedStudent && students.length > 0 && tab !== 'student-list' && tab !== 'branches' && tab !== 'curriculum-import' && tab !== 'create-student') {
+      const st = students[0];
+      setSelectedStudent(st);
+      loadData(st);
+    }
   };
 
   const handleToggleHoliday = async (id: string) => {
