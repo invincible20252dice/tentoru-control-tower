@@ -1,8 +1,96 @@
-import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan } from './db';
+import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
 };
+
+/**
+ * 授業範囲文字列のフォーマット ("開始 〜 目標" または "開始")
+ */
+export function formatLessonRange(startName?: string | null, endName?: string | null): string {
+  if (!startName && !endName) return '';
+  if (startName && endName && startName !== endName) {
+    return `${startName} 〜 ${endName}`;
+  }
+  return startName || endName || '';
+}
+
+/**
+ * 1コマあたりの進捗授業範囲（From 〜 To）を算出する
+ */
+export function calculateLessonRangeForSlot(params: {
+  subject: string;
+  startLessonId?: string | null;
+  lessonsPerSlot?: number;
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  schoolId?: string;
+}): {
+  start_lesson_id: string | null;
+  end_lesson_id: string | null;
+  start_lesson_name: string | null;
+  end_lesson_name: string | null;
+  lesson_range: string | null;
+} {
+  const { subject, startLessonId, lessonsPerSlot = 2, curriculumMasters = [], curriculumUnits = [], schoolId } = params;
+
+  // 1. 対象教科の授業リストを抽出
+  let masterLessons = curriculumMasters
+    .filter(m => m.subject === subject || (subject === '数学' && m.subject === '算数') || (subject === '算数' && m.subject === '数学'))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map(m => ({
+      id: m.id,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+      sort_order: m.sort_order ?? 0
+    }));
+
+  if (masterLessons.length === 0) {
+    const unitLessons = curriculumUnits
+      .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && (u.subject === subject || (subject === '数学' && u.subject === '算数') || (subject === '算数' && u.subject === '数学')))
+      .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        sort_order: u.sequence_order ?? 0
+      }));
+    masterLessons = unitLessons;
+  }
+
+  if (masterLessons.length === 0) {
+    return {
+      start_lesson_id: startLessonId || null,
+      end_lesson_id: startLessonId || null,
+      start_lesson_name: null,
+      end_lesson_name: null,
+      lesson_range: null
+    };
+  }
+
+  // 2. 開始授業の特定
+  let startIdx = 0;
+  if (startLessonId) {
+    const foundIdx = masterLessons.findIndex(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId));
+    if (foundIdx >= 0) {
+      startIdx = foundIdx;
+    }
+  }
+
+  const endIdx = Math.min(startIdx + Math.max(1, lessonsPerSlot) - 1, masterLessons.length - 1);
+  const startItem = masterLessons[startIdx];
+  const endItem = masterLessons[endIdx];
+
+  const startName = startItem?.name || null;
+  const endName = endItem?.name || startName;
+  const rangeStr = formatLessonRange(startName, endName);
+
+  return {
+    start_lesson_id: startItem?.id || null,
+    end_lesson_id: endItem?.id || startItem?.id || null,
+    start_lesson_name: startName,
+    end_lesson_name: endName,
+    lesson_range: rangeStr || null
+  };
+}
 
 /**
  * 学年区分と通塾時間から「標準コマ数」を自動算出するユーティリティ関数
@@ -190,8 +278,8 @@ export function generateAttendanceDates(
 /**
  * 生徒の教科ごとのスタート位置（単元ID）を取得するヘルパー関数
  */
-export function getStudentStartUnitIdForSubject(student: Student, subject: string): string | null {
-  if (!student) return null;
+export function getStudentStartUnitIdForSubject(student?: Student | null, subject?: string): string | null {
+  if (!student || !subject) return null;
   const sub = subject;
 
   if (sub === '数学' || sub === '算数') {
@@ -438,7 +526,9 @@ export function rescheduleDelayedTasks(
   futureDates: string[],
   maxDailyTasks: number = schedulerConfig.maxDailyTasksDefault,
   milestonePlans: MilestonePlan[] = [],
-  curriculumUnits: CurriculumUnit[] = []
+  curriculumUnits: CurriculumUnit[] = [],
+  branchRules?: BranchAIRules,
+  curriculumMasters: CurriculumMaster[] = []
 ): { updatedTasks: LearningTask[]; updatedStudent: Student; isPunked: boolean } {
   const studentTasks = allTasks.filter(t => t.student_id === student.id);
   const otherTasks = allTasks.filter(t => t.student_id !== student.id);
@@ -536,14 +626,35 @@ export function rescheduleDelayedTasks(
     return { updatedTasks: allTasks, updatedStudent, isPunked: true };
   }
 
+  const lessonsPerSlot = branchRules?.lessons_per_slot || 2;
+
   // 均等配分する
   const rescheduledTasks = uncompletedTasks.map((task, index) => {
     const dateIndex = Math.floor(index / tasksPerDay);
     const scheduled_date = targetDates[Math.min(dateIndex, targetDates.length - 1)];
-    return {
-      ...task,
-      scheduled_date,
-    };
+    
+    let taskWithRange = { ...task, scheduled_date };
+    if (!task.lesson_range && task.subject) {
+      const range = calculateLessonRangeForSlot({
+        subject: task.subject,
+        startLessonId: task.start_lesson_id || task.unit_id,
+        lessonsPerSlot,
+        curriculumMasters,
+        curriculumUnits,
+        schoolId: student.school_id
+      });
+      if (range.lesson_range) {
+        taskWithRange = {
+          ...taskWithRange,
+          start_lesson_name: task.start_lesson_name || range.start_lesson_name,
+          end_lesson_name: task.end_lesson_name || range.end_lesson_name,
+          start_lesson_id: task.start_lesson_id || range.start_lesson_id,
+          end_lesson_id: task.end_lesson_id || range.end_lesson_id,
+          lesson_range: range.lesson_range
+        };
+      }
+    }
+    return taskWithRange;
   });
 
   const updatedStudent: Student = {

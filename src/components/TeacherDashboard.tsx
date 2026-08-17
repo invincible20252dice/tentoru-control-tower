@@ -29,7 +29,9 @@ import {
   StudentInteraction,
   getSchoolYear,
   Branch,
-  UserRole
+  UserRole,
+  BranchAIRules,
+  DEFAULT_BRANCH_AI_RULES
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -45,7 +47,9 @@ import {
   applyStartPositionsToTasks,
   calculateEnrollmentPeriod,
   getFirstAttendanceDate,
-  generateAttendanceDates
+  generateAttendanceDates,
+  calculateLessonRangeForSlot,
+  formatLessonRange
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -179,21 +183,34 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
   const [applyScope, setApplyScope] = useState<'individual' | 'school' | 'grade' | 'level'>('individual');
   
-  // 各コマの選択状態：教科、単元ID、カスタムテーマ
-  const [periodSelections, setPeriodSelections] = useState<Record<number, { subject: string; unitId: string; customTheme: string; }>>({
-    1: { subject: '', unitId: '', customTheme: '' },
-    2: { subject: '', unitId: '', customTheme: '' },
-    3: { subject: '', unitId: '', customTheme: '' },
-    4: { subject: '', unitId: '', customTheme: '' },
-    5: { subject: '', unitId: '', customTheme: '' },
-    6: { subject: '', unitId: '', customTheme: '' },
-    7: { subject: '', unitId: '', customTheme: '' },
-    8: { subject: '', unitId: '', customTheme: '' },
-    9: { subject: '', unitId: '', customTheme: '' },
-    10: { subject: '', unitId: '', customTheme: '' }
+  // 各コマの選択状態：教科、単元ID、カスタムテーマ、開始〜終了授業範囲
+  const [periodSelections, setPeriodSelections] = useState<Record<number, { 
+    subject: string; 
+    unitId: string; 
+    customTheme: string;
+    startLessonId?: string;
+    endLessonId?: string;
+    startLessonName?: string;
+    endLessonName?: string;
+    lessonRange?: string;
+  }>>({
+    1: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    2: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    3: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    4: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    5: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    6: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    7: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    8: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    9: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
+    10: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' }
   });
   const [periodCount, setPeriodCount] = useState<number>(2);
   const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
+
+  // 校舎別 AI授業自動設定ルール State
+  const [isBranchAIRulesModalOpen, setIsBranchAIRulesModalOpen] = useState(false);
+  const [branchAIRulesForm, setBranchAIRulesForm] = useState<BranchAIRules>(DEFAULT_BRANCH_AI_RULES);
 
   // 宿題・テスト用の State
   const [todayTests, setTodayTests] = useState<{ id: string; content: string; passingLine?: string; targetScope?: string }[]>([]);
@@ -423,9 +440,27 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
         // Load today's periods values
         const today = freshTasks.filter(t => t.scheduled_date === scheduleDate);
-        const newPeriods: Record<number, { subject: string; unitId: string; customTheme: string; }> = {};
+        const newPeriods: Record<number, { 
+          subject: string; 
+          unitId: string; 
+          customTheme: string;
+          startLessonId?: string;
+          endLessonId?: string;
+          startLessonName?: string;
+          endLessonName?: string;
+          lessonRange?: string;
+        }> = {};
         for (let i = 1; i <= 10; i++) {
-          newPeriods[i] = { subject: '', unitId: '', customTheme: '' };
+          newPeriods[i] = { 
+            subject: '', 
+            unitId: '', 
+            customTheme: '',
+            startLessonId: '',
+            endLessonId: '',
+            startLessonName: '',
+            endLessonName: '',
+            lessonRange: ''
+          };
         }
         const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date(scheduleDate).getDay()];
         const isAttendanceDay = ((freshSt as any).selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
@@ -436,17 +471,31 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           if (t.period) {
             const units = db.getCurriculumUnits();
             const unit = units.find(u => u.id === t.unit_id);
-            if (unit) {
+            const master = curriculumMastersList.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+            const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
+            const endName = t.end_lesson_name || startName;
+
+            if (unit || master) {
               newPeriods[t.period] = {
-                subject: t.subject || unit.subject,
+                subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
                 unitId: t.unit_id,
-                customTheme: ''
+                customTheme: '',
+                startLessonId: t.start_lesson_id || t.unit_id,
+                endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
+                startLessonName: startName,
+                endLessonName: endName,
+                lessonRange: t.lesson_range || formatLessonRange(startName, endName)
               };
             } else {
               newPeriods[t.period] = {
                 subject: t.subject || 'テスト',
                 unitId: '',
-                customTheme: t.custom_unit_name || ''
+                customTheme: t.custom_unit_name || '',
+                startLessonId: t.start_lesson_id || '',
+                endLessonId: t.end_lesson_id || '',
+                startLessonName: t.start_lesson_name || t.custom_unit_name || '',
+                endLessonName: t.end_lesson_name || t.custom_unit_name || '',
+                lessonRange: t.lesson_range || t.custom_unit_name || ''
               };
             }
             if (t.period > loadedPeriodCount) {
@@ -1228,9 +1277,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           hasCustomTimetableUnit = true;
         }
 
-        if (config.unitId) {
-          const selectedUnit = allCurriculumUnits.find(u => u.id === config.unitId);
-          let targetUnitId = config.unitId;
+        if (config.unitId || config.startLessonId) {
+          const effectiveUnitId = config.unitId || config.startLessonId || '';
+          const selectedUnit = allCurriculumUnits.find(u => u.id === effectiveUnitId);
+          const selectedMaster = curriculumMastersList.find(m => m.id === effectiveUnitId || String(m.sort_order) === String(effectiveUnitId));
+          let targetUnitId = effectiveUnitId;
 
           // 学校が異なる場合、適用先の学校のカリキュラム単元から同じものを探す
           if (selectedUnit && selectedUnit.school_id !== student.school_id) {
@@ -1246,6 +1297,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
             }
           }
 
+          const startLessonName = config.startLessonName || (selectedUnit ? selectedUnit.name : (selectedMaster ? (selectedMaster.unit_name ? `${selectedMaster.unit_name} - ${selectedMaster.lesson_name}` : selectedMaster.lesson_name) : ''));
+          const endLessonName = config.endLessonName || startLessonName;
+          const rangeString = config.lessonRange || formatLessonRange(startLessonName, endLessonName);
+
           if (targetUnitId) {
             const existingTaskIdx = clearedTasks.findIndex(task => task.unit_id === targetUnitId);
             if (existingTaskIdx >= 0) {
@@ -1254,6 +1309,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 scheduled_date: scheduleDate,
                 period: p,
                 subject: config.subject,
+                start_lesson_id: config.startLessonId || targetUnitId,
+                end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
+                start_lesson_name: startLessonName,
+                end_lesson_name: endLessonName,
+                lesson_range: rangeString,
                 office_note: commonOfficeNote
               };
             } else {
@@ -1267,6 +1327,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 video_watched: false,
                 test_passed: false,
                 subject: config.subject,
+                start_lesson_id: config.startLessonId || targetUnitId,
+                end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
+                start_lesson_name: startLessonName,
+                end_lesson_name: endLessonName,
+                lesson_range: rangeString,
                 office_note: commonOfficeNote,
                 created_at: new Date().toISOString()
               });
@@ -1283,6 +1348,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 period: p,
                 subject: config.subject,
                 custom_unit_name: customThemeName,
+                start_lesson_id: config.startLessonId || '',
+                end_lesson_id: config.endLessonId || '',
+                start_lesson_name: startLessonName || customThemeName,
+                end_lesson_name: endLessonName || customThemeName,
+                lesson_range: rangeString || customThemeName,
                 office_note: commonOfficeNote
               };
             } else {
@@ -1297,6 +1367,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 test_passed: false,
                 subject: config.subject,
                 custom_unit_name: customThemeName,
+                start_lesson_id: config.startLessonId || '',
+                end_lesson_id: config.endLessonId || '',
+                start_lesson_name: startLessonName || customThemeName,
+                end_lesson_name: endLessonName || customThemeName,
+                lesson_range: rangeString || customThemeName,
                 office_note: commonOfficeNote,
                 created_at: new Date().toISOString()
               });
@@ -1314,6 +1389,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
               period: p,
               subject: config.subject,
               custom_unit_name: config.customTheme,
+              start_lesson_id: config.startLessonId || '',
+              end_lesson_id: config.endLessonId || '',
+              start_lesson_name: config.startLessonName || config.customTheme,
+              end_lesson_name: config.endLessonName || config.customTheme,
+              lesson_range: config.lessonRange || config.customTheme,
               office_note: commonOfficeNote
             };
           } else {
@@ -1328,6 +1408,11 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
               test_passed: false,
               subject: config.subject,
               custom_unit_name: config.customTheme,
+              start_lesson_id: config.startLessonId || '',
+              end_lesson_id: config.endLessonId || '',
+              start_lesson_name: config.startLessonName || config.customTheme,
+              end_lesson_name: config.endLessonName || config.customTheme,
+              lesson_range: config.lessonRange || config.customTheme,
               office_note: commonOfficeNote,
               created_at: new Date().toISOString()
             });
@@ -1551,6 +1636,72 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     loadData();
   };
 
+  // 教科に対応する全授業リスト（マスタまたはカリキュラム単元）の取得
+  const getLessonsForSubject = (subj: string) => {
+    const isElem = Boolean(
+      selectedStudent?.grade?.startsWith('小') || 
+      (selectedStudent?.grade?.includes('年') && !selectedStudent?.grade?.startsWith('中'))
+    );
+
+    let masters = curriculumMastersList.filter(m => {
+      if (subj === '数学' || subj === '算数') {
+        if (isElem) {
+          return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
+        } else {
+          return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
+        }
+      }
+      return m.subject === subj;
+    });
+
+    if (masters.length > 0) {
+      return masters
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({
+          id: m.id,
+          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+          sort_order: m.sort_order ?? 0,
+          isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj))
+        }));
+    }
+
+    return allCurriculumUnits
+      .filter(u => 
+        (u.school_id === selectedStudent?.school_id || !u.school_id) && 
+        (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
+      )
+      .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        sort_order: u.sequence_order ?? 0,
+        isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+      }));
+  };
+
+  const findLessonById = (id: string, subject?: string) => {
+    if (!id) return null;
+    const m = curriculumMastersList.find(item => item.id === id || String(item.sort_order) === String(id));
+    if (m) {
+      return {
+        id: m.id,
+        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+        sort_order: m.sort_order ?? 0,
+        subject: m.subject
+      };
+    }
+    const u = allCurriculumUnits.find(item => item.id === id);
+    if (u) {
+      return {
+        id: u.id,
+        name: u.name,
+        sort_order: u.sequence_order ?? 0,
+        subject: u.subject
+      };
+    }
+    return null;
+  };
+
   // コマごとの教科変更時
   const handleSubjectChange = (p: number, sub: string) => {
     let initialTheme = '';
@@ -1585,10 +1736,123 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       }
     }
 
+    const branchRules = db.getBranchAIRules(selectedStudent?.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
+    const range = calculateLessonRangeForSlot({
+      subject: sub,
+      startLessonId: initialUnitId,
+      lessonsPerSlot: branchRules?.lessons_per_slot || 2,
+      curriculumMasters: curriculumMastersList,
+      curriculumUnits: allCurriculumUnits,
+      schoolId: selectedStudent?.school_id
+    });
+
     setPeriodSelections({
       ...periodSelections,
-      [p]: { subject: sub, unitId: initialUnitId, customTheme: initialTheme }
+      [p]: {
+        subject: sub,
+        unitId: range.start_lesson_id || initialUnitId,
+        customTheme: initialTheme,
+        startLessonId: range.start_lesson_id || initialUnitId,
+        endLessonId: range.end_lesson_id || range.start_lesson_id || initialUnitId,
+        startLessonName: range.start_lesson_name || '',
+        endLessonName: range.end_lesson_name || range.start_lesson_name || '',
+        lessonRange: range.lesson_range || ''
+      }
     });
+  };
+
+  // 開始授業選択時
+  const handleStartLessonChange = (p: number, startId: string) => {
+    const currentConfig = periodSelections[p];
+    if (!startId) {
+      setPeriodSelections({
+        ...periodSelections,
+        [p]: {
+          ...currentConfig,
+          unitId: '',
+          startLessonId: '',
+          endLessonId: '',
+          startLessonName: '',
+          endLessonName: '',
+          lessonRange: ''
+        }
+      });
+      return;
+    }
+
+    const startLesson = findLessonById(startId, currentConfig.subject);
+    const startName = startLesson?.name || '';
+    
+    // 終了授業が未設定または開始授業より前なら、終了目標授業も自動計算
+    const branchRules = db.getBranchAIRules(selectedStudent?.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
+    const lessonsForSubj = getLessonsForSubject(currentConfig.subject);
+    const startIdx = lessonsForSubj.findIndex(l => l.id === startId);
+    let endId = currentConfig.endLessonId;
+    let endIdx = lessonsForSubj.findIndex(l => l.id === endId);
+
+    if (!endId || endIdx < startIdx) {
+      const step = Math.max(0, (branchRules?.lessons_per_slot || 2) - 1);
+      const targetIdx = Math.min(startIdx + step, lessonsForSubj.length - 1);
+      endId = lessonsForSubj[targetIdx]?.id || startId;
+    }
+
+    const endLesson = findLessonById(endId, currentConfig.subject);
+    const endName = endLesson?.name || startName;
+    const rangeStr = formatLessonRange(startName, endName);
+
+    setPeriodSelections({
+      ...periodSelections,
+      [p]: {
+        ...currentConfig,
+        unitId: startId,
+        startLessonId: startId,
+        endLessonId: endId,
+        startLessonName: startName,
+        endLessonName: endName,
+        lessonRange: rangeStr
+      }
+    });
+  };
+
+  // 終了目標授業選択時
+  const handleEndLessonChange = (p: number, endId: string) => {
+    const currentConfig = periodSelections[p];
+    if (!endId) return;
+
+    const endLesson = findLessonById(endId, currentConfig.subject);
+    const endName = endLesson?.name || '';
+    const startId = currentConfig.startLessonId || endId;
+    const startLesson = findLessonById(startId, currentConfig.subject);
+    const startName = startLesson?.name || endName;
+    const rangeStr = formatLessonRange(startName, endName);
+
+    setPeriodSelections({
+      ...periodSelections,
+      [p]: {
+        ...currentConfig,
+        unitId: startId,
+        startLessonId: startId,
+        endLessonId: endId,
+        startLessonName: startName,
+        endLessonName: endName,
+        lessonRange: rangeStr
+      }
+    });
+  };
+
+  // 校舎別 AI自動設定ルール モーダル操作
+  const handleOpenBranchAIRulesModal = () => {
+    const targetBranchId = selectedBranchId !== 'all' ? selectedBranchId : (selectedStudent?.branch_id || 'branch-1');
+    const rules = db.getBranchAIRules(targetBranchId);
+    setBranchAIRulesForm(rules);
+    setIsBranchAIRulesModalOpen(true);
+  };
+
+  const handleSaveBranchAIRules = async () => {
+    const targetBranchId = selectedBranchId !== 'all' ? selectedBranchId : (selectedStudent?.branch_id || 'branch-1');
+    await db.saveBranchAIRules(targetBranchId, branchAIRulesForm);
+    alert('校舎別AI自動設定ルールを保存しました！');
+    setIsBranchAIRulesModalOpen(false);
   };
 
   // コマごとのテーマ変更時（双方向テスト連動を含む）
@@ -1671,6 +1935,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       }
     }
 
+    const targetBranchId = selectedStudent.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1');
+    const branchRules = db.getBranchAIRules(targetBranchId);
+
     const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
       selectedStudent,
       db.getLearningTasks(),
@@ -1678,7 +1945,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       futureDates,
       periodCount,
       milestonePlans,
-      allCurriculumUnits
+      allCurriculumUnits,
+      branchRules,
+      curriculumMastersList
     );
 
     if (isPunked) {
@@ -2990,9 +3259,28 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                               <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span>⭐</span> 教科別スタートライン (基準単元連動中)
                               </span>
-                              <span style={{ fontSize: '0.72rem', color: '#15803d' }}>
-                                ※「基本情報・属性設定」で変更すると、スケジュール・コマ割りが自動最適化されます
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  data-testid="open-branch-ai-rules-modal-btn"
+                                  onClick={handleOpenBranchAIRulesModal}
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    padding: '4px 8px',
+                                    backgroundColor: '#4f46e5',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ⚙️ 校舎別AI自動設定ルール
+                                </button>
+                                <span style={{ fontSize: '0.72rem', color: '#15803d' }}>
+                                  ※「基本情報・属性設定」で変更すると、スケジュール・コマ割りが自動最適化されます
+                                </span>
+                              </div>
                             </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                               {startInfos.map(info => (
@@ -3073,33 +3361,71 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                                 {currentConfig.subject && (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    {/* カリキュラム単元選択 */}
-                                    {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (
-                                      <select
-                                        data-testid={`period-unit-select-${p}`}
-                                        value={currentConfig.unitId}
-                                        onChange={e => {
-                                          const uId = e.target.value;
-                                          setPeriodSelections({
-                                            ...periodSelections,
-                                            [p]: { ...currentConfig, unitId: uId, customTheme: '' }
-                                          });
-                                        }}
-                                        className={styles.select}
-                                      >
-                                        <option value="">-- カリキュラム単元から選択 --</option>
-                                        {allCurriculumUnits
-                                          .filter(u => (u.school_id === selectedStudent.school_id || !u.school_id) && (u.subject === currentConfig.subject || (currentConfig.subject === '数学' && u.subject === '算数') || (currentConfig.subject === '算数' && u.subject === '数学')))
-                                          .map(u => {
-                                            const isStartUnit = u.id === getStudentStartUnitIdForSubject(selectedStudent, currentConfig.subject);
-                                            return (
-                                              <option key={u.id} value={u.id}>
-                                                {isStartUnit ? '★ [スタートライン] ' : ''}{u.name}
-                                              </option>
-                                            );
-                                          })}
-                                      </select>
-                                    )}
+                                    {/* カリキュラム単元・授業進捗範囲設定 */}
+                                    {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
+                                      const lessons = getLessonsForSubject(currentConfig.subject);
+                                      return (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                            <div>
+                                              <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                                                開始授業 (From):
+                                              </label>
+                                              <select
+                                                data-testid={`period-unit-select-${p}`}
+                                                value={currentConfig.startLessonId || currentConfig.unitId || ''}
+                                                onChange={e => handleStartLessonChange(p, e.target.value)}
+                                                className={styles.select}
+                                                style={{ fontSize: '0.8rem' }}
+                                              >
+                                                <option value="">-- 開始授業を選択 --</option>
+                                                {lessons.map(l => (
+                                                  <option key={l.id} value={l.id}>
+                                                    {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                            <div>
+                                              <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                                                終了目標授業 (To):
+                                              </label>
+                                              <select
+                                                data-testid={`period-end-lesson-select-${p}`}
+                                                value={currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || ''}
+                                                onChange={e => handleEndLessonChange(p, e.target.value)}
+                                                className={styles.select}
+                                                style={{ fontSize: '0.8rem' }}
+                                              >
+                                                <option value="">-- 終了目標授業を選択 --</option>
+                                                {lessons.map(l => (
+                                                  <option key={l.id} value={l.id}>
+                                                    {l.name}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                          </div>
+                                          {/* 授業範囲プレビューバッジ */}
+                                          {(currentConfig.lessonRange || currentConfig.startLessonName) && (
+                                            <div 
+                                              data-testid={`period-lesson-range-badge-${p}`}
+                                              style={{ 
+                                                fontSize: '0.75rem', 
+                                                padding: '4px 8px', 
+                                                borderRadius: '4px', 
+                                                backgroundColor: '#eff6ff', 
+                                                color: '#1e40af', 
+                                                border: '1px solid #bfdbfe',
+                                                fontWeight: 600
+                                              }}
+                                            >
+                                              📖 授業進捗範囲: {currentConfig.lessonRange || formatLessonRange(currentConfig.startLessonName, currentConfig.endLessonName)}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
 
                                     {/* 「自由記述」が選択された場合：登録済みの自由記述プルダウン ＆ 新規直打ち */}
                                     {currentConfig.subject === '自由記述' && (
@@ -3440,9 +3766,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis'
                                         }}
-                                        title={`${t.period}コマ: ${t.subject || '自由記述'} ${t.custom_unit_name || ''}`}
+                                        title={`${t.period}コマ: ${t.subject || '自由記述'} ${t.lesson_range || t.custom_unit_name || ''}`}
                                       >
-                                        <strong>{t.period}ｺﾏ:</strong> {t.subject || '自由記述'}
+                                        <strong>{t.period}ｺﾏ:</strong> {t.subject || '自由記述'} {t.lesson_range ? `(${t.lesson_range})` : (t.custom_unit_name ? `(${t.custom_unit_name})` : '')}
                                       </div>
                                     ))
                                 ) : isAttendance ? (
@@ -6688,6 +7014,155 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           )}
         </div>
       </div>
+
+      {/* 校舎別 AI自動設定ルール モーダル */}
+      {isBranchAIRulesModalOpen && (
+        <div 
+          data-testid="branch-ai-rules-modal"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div 
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '560px',
+              width: '90%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
+                  ⚙️ 校舎別AI自動設定ルール
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                  対象校舎: {branches.find(b => b.id === (selectedBranchId !== 'all' ? selectedBranchId : selectedStudent?.branch_id))?.name || '全校舎・標準'}
+                </p>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsBranchAIRulesModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  1コマあたりの進捗授業数 (デフォルト授業範囲):
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="number"
+                    min="1"
+                    max="10"
+                    data-testid="branch-ai-lessons-per-slot-input"
+                    value={branchAIRulesForm.lessons_per_slot || 2}
+                    onChange={e => setBranchAIRulesForm({ ...branchAIRulesForm, lessons_per_slot: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className={styles.input}
+                    style={{ width: '80px', textAlign: 'center', fontWeight: 700 }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#475569' }}>授業 / コマ （例: 2授業進む場合は「1〜2」が自動セット）</span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  定期テスト・目標対策開始 (何週間前から):
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="number"
+                    min="1"
+                    max="12"
+                    data-testid="branch-ai-test-prep-weeks-input"
+                    value={branchAIRulesForm.test_prep_lead_weeks || 3}
+                    onChange={e => setBranchAIRulesForm({ ...branchAIRulesForm, test_prep_lead_weeks: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className={styles.input}
+                    style={{ width: '80px', textAlign: 'center', fontWeight: 700 }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#475569' }}>週間前 （テスト前の復習・テストコマへ自動切替）</span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  計画パンク判定の閾値 (許容未完了コマ数):
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="number"
+                    min="1"
+                    max="20"
+                    data-testid="branch-ai-punk-threshold-input"
+                    value={branchAIRulesForm.punk_threshold_slots || 4}
+                    onChange={e => setBranchAIRulesForm({ ...branchAIRulesForm, punk_threshold_slots: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className={styles.input}
+                    style={{ width: '80px', textAlign: 'center', fontWeight: 700 }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#475569' }}>コマ以上の遅れで警告（パンクアラート発火）</span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  復習コマの自動挿入サイクル:
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="number"
+                    min="0"
+                    max="10"
+                    data-testid="branch-ai-review-slot-interval-input"
+                    value={branchAIRulesForm.review_slot_interval ?? 4}
+                    onChange={e => setBranchAIRulesForm({ ...branchAIRulesForm, review_slot_interval: parseInt(e.target.value) || 0 })}
+                    className={styles.input}
+                    style={{ width: '80px', textAlign: 'center', fontWeight: 700 }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#475569' }}>コマごとに1コマ復習枠を自動提案 (0で無効)</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+              <button 
+                type="button" 
+                onClick={() => setIsBranchAIRulesModalOpen(false)}
+                className={styles.btn}
+                style={{ width: 'auto', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}
+              >
+                キャンセル
+              </button>
+              <button 
+                type="button" 
+                data-testid="save-branch-ai-rules-btn"
+                onClick={handleSaveBranchAIRules}
+                className={styles.btn}
+                style={{ width: 'auto', background: '#4f46e5', color: '#ffffff' }}
+              >
+                💾 ルールを保存する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -67,6 +67,29 @@ export interface Student {
 
 export type UserRole = 'admin' | 'branch';
 
+export interface BranchAIRules {
+  lessons_per_slot: number; // 1コマあたりの標準授業進捗数 (例: 1~5, デフォルト: 2)
+  subject_rotation_priority: string[]; // 受講教科の配置優先度 (例: ['算数', '国語', '英語'])
+  review_frequency_units: number; // 復習コマを挟む頻度 (例: 3単元ごとに1コマ復習, 0=なし)
+  test_insert_interval: string; // 小テスト・確認テストの自動挿入タイミング ('unit_completion' | 'every_session' | 'weekly' | 'none')
+  custom_prompt: string; // 校舎固有のプロンプト/カスタム指示
+  test_prep_lead_weeks?: number; // 定期テスト・目標対策開始 (週間前)
+  punk_threshold_slots?: number; // 計画パンク判定の閾値 (コマ)
+  review_slot_interval?: number; // 復習コマの自動挿入サイクル
+  updated_at?: string;
+}
+
+export const DEFAULT_BRANCH_AI_RULES: BranchAIRules = {
+  lessons_per_slot: 2,
+  subject_rotation_priority: ['算数', '数学', '英語', '国語', '理科', '社会'],
+  review_frequency_units: 3,
+  test_insert_interval: 'unit_completion',
+  custom_prompt: '',
+  test_prep_lead_weeks: 3,
+  punk_threshold_slots: 4,
+  review_slot_interval: 4,
+};
+
 export interface Branch {
   id: string;
   name: string;
@@ -78,6 +101,7 @@ export interface Branch {
   phone?: string;
   address?: string;
   student_count?: number;
+  ai_rules?: BranchAIRules;
 }
 
 export interface UserProfile {
@@ -209,6 +233,11 @@ export interface LearningTask {
   subject?: string;
   custom_unit_name?: string;
   passing_line?: string | null;
+  start_lesson_name?: string | null;
+  end_lesson_name?: string | null;
+  start_lesson_id?: string | null;
+  end_lesson_id?: string | null;
+  lesson_range?: string | null;
   created_at: string;
 }
 
@@ -378,7 +407,21 @@ class DatabaseService {
     return initialData;
   }
 
-  private saveMockData<T>(key: string, data: T[]): void {
+  private getMockObject<T>(key: string, initialData: T): T {
+    if (!this.isBrowser()) return initialData;
+    const stored = localStorage.getItem(`tentoru_${key}`);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {
+        console.error(`Error parsing mock object for ${key}`, e);
+      }
+    }
+    this.saveMockData(key, initialData);
+    return initialData;
+  }
+
+  private saveMockData<T>(key: string, data: T): void {
     if (!this.isBrowser()) return;
     localStorage.setItem(`tentoru_${key}`, JSON.stringify(data));
   }
@@ -2651,9 +2694,56 @@ class DatabaseService {
       created_at: new Date().toISOString(),
       last_login_at: null,
       phone: data.phone?.trim() || '',
-      address: data.address?.trim() || ''
+      address: data.address?.trim() || '',
+      ai_rules: { ...DEFAULT_BRANCH_AI_RULES }
     };
     return this.saveBranch(newBranch);
+  }
+
+  // 17.1 Branch AI Rules
+  public getBranchAIRules(branchId?: string | null): BranchAIRules {
+    if (!branchId || branchId === 'all') {
+      const globalRules = this.getMockObject<BranchAIRules>('branch_ai_rules_default', DEFAULT_BRANCH_AI_RULES);
+      return { ...DEFAULT_BRANCH_AI_RULES, ...(globalRules || {}) };
+    }
+    const branch = this.getBranches().find(b => b.id === branchId || b.name === branchId);
+    if (branch?.ai_rules) {
+      return { ...DEFAULT_BRANCH_AI_RULES, ...branch.ai_rules };
+    }
+    const stored = this.getMockObject<BranchAIRules>(`branch_ai_rules_${branchId}`, DEFAULT_BRANCH_AI_RULES);
+    return { ...DEFAULT_BRANCH_AI_RULES, ...(stored || {}) };
+  }
+
+  public async saveBranchAIRules(branchId: string, rules: Partial<BranchAIRules>): Promise<BranchAIRules> {
+    const prevRules = this.getBranchAIRules(branchId);
+    const updatedRules: BranchAIRules = {
+      ...prevRules,
+      ...rules,
+      updated_at: new Date().toISOString()
+    };
+
+    if (!branchId || branchId === 'all') {
+      this.saveMockData('branch_ai_rules_default', updatedRules);
+      return updatedRules;
+    }
+
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase.from('branches').update({ ai_rules: updatedRules }).eq('id', branchId);
+        if (error) console.warn('Supabase saveBranchAIRules warning:', error);
+      } catch (err) {
+        console.warn('saveBranchAIRules error:', err);
+      }
+    }
+
+    this.saveMockData(`branch_ai_rules_${branchId}`, updatedRules);
+    const branches = this.getBranches();
+    const branch = branches.find(b => b.id === branchId || b.name === branchId);
+    if (branch) {
+      branch.ai_rules = updatedRules;
+      await this.saveBranch(branch);
+    }
+    return updatedRules;
   }
 
   public async sendBranchPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
