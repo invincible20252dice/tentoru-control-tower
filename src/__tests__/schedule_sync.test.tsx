@@ -88,7 +88,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     const miniTest: MiniTestResult = {
       id: 'test-sync-1',
       student_id: student.id,
-      schedule_date: targetDate,
+      date: targetDate,
       test_content: '連立方程式 計算小テスト (全10問)',
       score: null,
       created_at: new Date().toISOString()
@@ -98,7 +98,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     const homework: HomeworkResult = {
       id: 'hw-sync-1',
       student_id: student.id,
-      schedule_date: targetDate,
+      date: targetDate,
       homework_content: 'ワークブック P45〜P47',
       homework_deadline: '2026-08-20',
       status: 'incomplete',

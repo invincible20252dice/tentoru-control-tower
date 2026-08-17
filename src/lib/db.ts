@@ -1487,45 +1487,29 @@ class DatabaseService {
   // 4. LearningTasks CRUD
   public async saveLearningTasks(tasks: LearningTask[]): Promise<LearningTask[]> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { data, error } = await this.supabase.from('learning_tasks').upsert(tasks).select();
-        if (error) {
-          console.warn('Supabase saveLearningTasks warning, fallback to local storage:', error);
-        }
-      } catch (e) {
-        console.warn('Supabase saveLearningTasks exception:', e);
-      }
+      const { data, error } = await this.supabase.from('learning_tasks').upsert(tasks).select();
+      if (error) throw error;
+      return (data || tasks) as LearningTask[];
+    } else {
+      const list = this.getLearningTasks();
+      tasks.forEach(t => {
+        const idx = list.findIndex(item => item.id === t.id);
+        if (idx >= 0) list[idx] = t;
+        else list.push(t);
+      });
+      this.saveMockData('learning_tasks', list);
+      return tasks;
     }
-    const list = this.getLearningTasks();
-    tasks.forEach(t => {
-      const idx = list.findIndex(item => item.id === t.id);
-      if (idx >= 0) list[idx] = t;
-      else list.push(t);
-    });
-    this.saveMockData('learning_tasks', list);
-    return tasks;
   }
 
   public async fetchLearningTasks(studentId?: string, date?: string): Promise<LearningTask[]> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        let query = this.supabase.from('learning_tasks').select('*');
-        if (studentId) query = query.eq('student_id', studentId);
-        if (date) query = query.eq('scheduled_date', date);
-        const { data, error } = await query;
-        if (!error && data && data.length > 0) {
-          const currentList = this.getLearningTasks();
-          data.forEach((item: LearningTask) => {
-            const idx = currentList.findIndex(t => t.id === item.id);
-            if (idx >= 0) currentList[idx] = item;
-            else currentList.push(item);
-          });
-          this.saveMockData('learning_tasks', currentList);
-          return data as LearningTask[];
-        }
-      } catch (e) {
-        console.warn('Supabase fetchLearningTasks exception:', e);
-      }
+      let query = this.supabase.from('learning_tasks').select('*');
+      if (studentId) query = query.eq('student_id', studentId);
+      if (date) query = query.eq('scheduled_date', date);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []) as LearningTask[];
     }
     const all = this.getLearningTasks();
     return all.filter(t => {
@@ -1537,16 +1521,14 @@ class DatabaseService {
 
   public async deleteLearningTasksByStudent(studentId: string): Promise<void> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { error } = await this.supabase.from('learning_tasks').delete().eq('student_id', studentId);
-        if (error) throw error;
-      } catch (e) {
-        console.warn('Supabase deleteLearningTasksByStudent exception:', e);
-      }
+      const { error } = await this.supabase.from('learning_tasks').delete().eq('student_id', studentId);
+      if (error) throw error;
+      return;
+    } else {
+      let list = this.getLearningTasks();
+      list = list.filter(t => t.student_id !== studentId);
+      this.saveMockData('learning_tasks', list);
     }
-    let list = this.getLearningTasks();
-    list = list.filter(t => t.student_id !== studentId);
-    this.saveMockData('learning_tasks', list);
   }
 
   // 5. LearningLogs CRUD
@@ -1670,24 +1652,12 @@ class DatabaseService {
 
   public async fetchMiniTestResults(studentId?: string, date?: string): Promise<MiniTestResult[]> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        let query = this.supabase.from('mini_test_results').select('*');
-        if (studentId) query = query.eq('student_id', studentId);
-        if (date) query = query.eq('date', date);
-        const { data, error } = await query;
-        if (!error && data && data.length > 0) {
-          const currentList = this.getMiniTestResults();
-          data.forEach((item: MiniTestResult) => {
-            const idx = currentList.findIndex(t => t.id === item.id);
-            if (idx >= 0) currentList[idx] = item;
-            else currentList.push(item);
-          });
-          this.saveMockData('mini_test_results', currentList);
-          return data as MiniTestResult[];
-        }
-      } catch (e) {
-        console.warn('Supabase fetchMiniTestResults exception:', e);
-      }
+      let query = this.supabase.from('mini_test_results').select('*');
+      if (studentId) query = query.eq('student_id', studentId);
+      if (date) query = query.eq('date', date);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []) as MiniTestResult[];
     }
     const all = this.getMiniTestResults();
     return all.filter(t => {
@@ -1699,35 +1669,29 @@ class DatabaseService {
 
   public async saveMiniTestResult(result: MiniTestResult): Promise<MiniTestResult> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { data, error } = await this.supabase.from('mini_test_results').upsert(result).select().single();
-        if (error) {
-          console.warn('Supabase saveMiniTestResult warning, fallback to local storage:', error);
-        }
-      } catch (e) {
-        console.warn('Supabase saveMiniTestResult exception:', e);
-      }
+      const { data, error } = await this.supabase.from('mini_test_results').upsert(result).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getMiniTestResults();
+      const idx = list.findIndex(r => r.id === result.id);
+      if (idx >= 0) list[idx] = result;
+      else list.push(result);
+      this.saveMockData('mini_test_results', list);
+      return result;
     }
-    const list = this.getMiniTestResults();
-    const idx = list.findIndex(r => r.id === result.id);
-    if (idx >= 0) list[idx] = result;
-    else list.push(result);
-    this.saveMockData('mini_test_results', list);
-    return result;
   }
 
   public async deleteMiniTestResult(id: string): Promise<void> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { error } = await this.supabase.from('mini_test_results').delete().eq('id', id);
-        if (error) throw error;
-      } catch (e) {
-        console.warn('Supabase deleteMiniTestResult exception:', e);
-      }
+      const { error } = await this.supabase.from('mini_test_results').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    } else {
+      let list = this.getMiniTestResults();
+      list = list.filter(r => r.id !== id);
+      this.saveMockData('mini_test_results', list);
     }
-    let list = this.getMiniTestResults();
-    list = list.filter(r => r.id !== id);
-    this.saveMockData('mini_test_results', list);
   }
 
   // 13. HomeworkResults CRUD
@@ -1737,24 +1701,12 @@ class DatabaseService {
 
   public async fetchHomeworkResults(studentId?: string, date?: string): Promise<HomeworkResult[]> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        let query = this.supabase.from('homework_results').select('*');
-        if (studentId) query = query.eq('student_id', studentId);
-        if (date) query = query.eq('date', date);
-        const { data, error } = await query;
-        if (!error && data && data.length > 0) {
-          const currentList = this.getHomeworkResults();
-          data.forEach((item: HomeworkResult) => {
-            const idx = currentList.findIndex(t => t.id === item.id);
-            if (idx >= 0) currentList[idx] = item;
-            else currentList.push(item);
-          });
-          this.saveMockData('homework_results', currentList);
-          return data as HomeworkResult[];
-        }
-      } catch (e) {
-        console.warn('Supabase fetchHomeworkResults exception:', e);
-      }
+      let query = this.supabase.from('homework_results').select('*');
+      if (studentId) query = query.eq('student_id', studentId);
+      if (date) query = query.eq('date', date);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []) as HomeworkResult[];
     }
     const all = this.getHomeworkResults();
     return all.filter(t => {
@@ -1766,56 +1718,46 @@ class DatabaseService {
 
   public async saveHomeworkResult(result: HomeworkResult): Promise<HomeworkResult> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { data, error } = await this.supabase.from('homework_results').upsert(result).select().single();
-        if (error) {
-          console.warn('Supabase saveHomeworkResult warning, fallback to local storage:', error);
-        }
-      } catch (e) {
-        console.warn('Supabase saveHomeworkResult exception:', e);
-      }
+      const { data, error } = await this.supabase.from('homework_results').upsert(result).select().single();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getHomeworkResults();
+      const idx = list.findIndex(r => r.id === result.id);
+      if (idx >= 0) list[idx] = result;
+      else list.push(result);
+      this.saveMockData('homework_results', list);
+      return result;
     }
-    const list = this.getHomeworkResults();
-    const idx = list.findIndex(r => r.id === result.id);
-    if (idx >= 0) list[idx] = result;
-    else list.push(result);
-    this.saveMockData('homework_results', list);
-    return result;
   }
 
   public async saveHomeworkResults(results: HomeworkResult[]): Promise<HomeworkResult[]> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { data, error } = await this.supabase.from('homework_results').upsert(results).select();
-        if (error) {
-          console.warn('Supabase saveHomeworkResults warning, fallback to local storage:', error);
-        }
-      } catch (e) {
-        console.warn('Supabase saveHomeworkResults exception:', e);
-      }
+      const { data, error } = await this.supabase.from('homework_results').upsert(results).select();
+      if (error) throw error;
+      return data;
+    } else {
+      const list = this.getHomeworkResults();
+      results.forEach(result => {
+        const idx = list.findIndex(r => r.id === result.id);
+        if (idx >= 0) list[idx] = result;
+        else list.push(result);
+      });
+      this.saveMockData('homework_results', list);
+      return results;
     }
-    const list = this.getHomeworkResults();
-    results.forEach(result => {
-      const idx = list.findIndex(r => r.id === result.id);
-      if (idx >= 0) list[idx] = result;
-      else list.push(result);
-    });
-    this.saveMockData('homework_results', list);
-    return results;
   }
 
   public async deleteHomeworkResult(id: string): Promise<void> {
     if (!this.isMockMode && this.supabase) {
-      try {
-        const { error } = await this.supabase.from('homework_results').delete().eq('id', id);
-        if (error) throw error;
-      } catch (e) {
-        console.warn('Supabase deleteHomeworkResult exception:', e);
-      }
+      const { error } = await this.supabase.from('homework_results').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    } else {
+      let list = this.getHomeworkResults();
+      list = list.filter(r => r.id !== id);
+      this.saveMockData('homework_results', list);
     }
-    let list = this.getHomeworkResults();
-    list = list.filter(r => r.id !== id);
-    this.saveMockData('homework_results', list);
   }
 
   // MilestonePlans CRUD
