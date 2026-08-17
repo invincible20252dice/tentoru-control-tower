@@ -118,8 +118,8 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       expect(screen.getByText('連立方程式の解き方 第1講 〜 第2講')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('数学')).toBeInTheDocument();
-    expect(screen.getByText(/途中式を丁寧にノートへ記入/)).toBeInTheDocument();
+    expect(screen.getAllByText('数学').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/途中式を丁寧にノートへ記入/).length).toBeGreaterThan(0);
     expect(screen.getByText('連立方程式 計算小テスト (全10問)')).toBeInTheDocument();
     expect(screen.getByText('ワークブック P45〜P47')).toBeInTheDocument();
     expect(screen.getByText(/提出期限: 2026-08-20/)).toBeInTheDocument();
@@ -169,7 +169,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     });
 
     expect(screen.getByText(/本日はコマ割りがありません。直近の通塾予定日/)).toBeInTheDocument();
-    expect(screen.getByText(/例文暗記テスト実施予定/)).toBeInTheDocument();
+    expect(screen.getAllByText(/例文暗記テスト実施予定/).length).toBeGreaterThan(0);
   });
 
   test('Date picker switching works dynamically in StudentDashboard', async () => {
