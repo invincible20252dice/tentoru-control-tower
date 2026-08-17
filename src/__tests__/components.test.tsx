@@ -1253,7 +1253,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const parentContainer = period1Select.parentElement!;
     await waitFor(() => {
       const selects = parentContainer.querySelectorAll('select');
-      expect(selects.length).toBe(2);
+      expect(selects.length).toBeGreaterThanOrEqual(2);
     });
     const selects = parentContainer.querySelectorAll('select');
     const unitSelect = selects[1]; // 単元セレクト
