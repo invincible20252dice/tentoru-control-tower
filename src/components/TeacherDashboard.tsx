@@ -1645,6 +1645,22 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       (selectedStudent?.grade?.includes('年') && !selectedStudent?.grade?.startsWith('中'))
     );
 
+    const matchingSchoolUnits = allCurriculumUnits.filter(u => 
+      (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
+      (isElem ? (u.subject === '算数' || u.subject === '数学') : (u.subject === subj))
+    );
+
+    if (matchingSchoolUnits.length > 0) {
+      return matchingSchoolUnits
+        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .map(u => ({
+          id: u.id,
+          name: u.name,
+          sort_order: u.sequence_order ?? 0,
+          isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+        }));
+    }
+
     let masters = curriculumMastersList.filter(m => {
       if (subj === '数学' || subj === '算数') {
         if (isElem) {
@@ -1667,19 +1683,12 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         }));
     }
 
-    const matchingSchoolUnits = allCurriculumUnits.filter(u => 
-      (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : true) &&
-      (isElem ? (u.subject === '算数' || u.subject === '数学') : (u.subject === subj))
+    const fallbackUnits = allCurriculumUnits.filter(u => 
+      (u.school_id === selectedStudent?.school_id || !u.school_id) && 
+      (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
     );
 
-    const unitsToUse = matchingSchoolUnits.length > 0 
-      ? matchingSchoolUnits 
-      : allCurriculumUnits.filter(u => 
-          (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-          (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
-        );
-
-    return unitsToUse
+    return fallbackUnits
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,

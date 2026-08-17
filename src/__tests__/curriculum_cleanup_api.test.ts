@@ -2,6 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { POST, DELETE } from '../app/api/admin/curriculum-masters/cleanup/route';
 import { NextRequest } from 'next/server';
 
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => ({
+    from: vi.fn(() => ({
+      delete: vi.fn(() => ({
+        in: vi.fn(() => Promise.resolve({ error: null }))
+      }))
+    }))
+  }))
+}));
+
 describe('Curriculum Masters Cleanup API Route Tests', () => {
   const originalEnv = process.env;
 
