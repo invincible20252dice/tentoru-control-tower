@@ -1665,11 +1665,19 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         }));
     }
 
-    return allCurriculumUnits
-      .filter(u => 
-        (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-        (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
-      )
+    const matchingSchoolUnits = allCurriculumUnits.filter(u => 
+      (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : true) &&
+      (isElem ? (u.subject === '算数' || u.subject === '数学') : (u.subject === subj))
+    );
+
+    const unitsToUse = matchingSchoolUnits.length > 0 
+      ? matchingSchoolUnits 
+      : allCurriculumUnits.filter(u => 
+          (u.school_id === selectedStudent?.school_id || !u.school_id) && 
+          (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
+        );
+
+    return unitsToUse
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,
