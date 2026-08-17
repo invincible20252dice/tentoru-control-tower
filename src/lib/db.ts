@@ -28,6 +28,8 @@ export interface Student {
   // 新規追加
   name_kana?: string;
   birthday?: string;
+  enrollment_date?: string | null;
+  withdrawal_date?: string | null;
   club_activities?: string;
   hobbies?: string;
   parent_name?: string;
@@ -37,6 +39,7 @@ export interface Student {
   contact_time?: string;
   image_url?: string;
   personalities?: string[];
+  personality_tags?: string[];
   target_school?: string;
   target_schools?: TargetSchoolItem[];
   classroom?: string;
@@ -2284,19 +2287,49 @@ class DatabaseService {
     return this.getMockData<string>('personality_options', seed);
   }
 
-  public async addPersonalityOption(name: string): Promise<string> {
+  public async fetchPersonalityOptions(): Promise<string[]> {
     if (!this.isMockMode && this.supabase) {
-      const { error } = await this.supabase.from('personality_options').insert({ name });
-      if (error && error.code !== '23505') throw error;
-      return name;
-    } else {
-      const list = this.getPersonalityOptions();
-      if (!list.includes(name)) {
-        list.push(name);
-        this.saveMockData('personality_options', list);
+      try {
+        const { data, error } = await this.supabase.from('personality_options').select('name');
+        if (!error && data && data.length > 0) {
+          const names = data.map((d: any) => d.name).filter(Boolean);
+          this.saveMockData('personality_options', names);
+          return names;
+        }
+      } catch (e) {
+        console.warn('fetchPersonalityOptions warning:', e);
       }
-      return name;
     }
+    return this.getPersonalityOptions();
+  }
+
+  public async addPersonalityOption(name: string): Promise<string> {
+    if (!name || !name.trim()) return '';
+    const trimmed = name.trim();
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('personality_options').insert({ name: trimmed });
+      if (error && error.code !== '23505') throw error;
+    }
+    const list = this.getPersonalityOptions();
+    if (!list.includes(trimmed)) {
+      list.push(trimmed);
+      this.saveMockData('personality_options', list);
+    }
+    return trimmed;
+  }
+
+  public async removePersonalityOption(name: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('personality_options').delete().eq('name', name);
+      if (error) console.warn('Supabase removePersonalityOption warning:', error);
+    }
+    let list = this.getPersonalityOptions();
+    list = list.filter(item => item !== name);
+    this.saveMockData('personality_options', list);
+  }
+
+  public async deletePersonalityOption(name: string): Promise<void> {
+    return this.removePersonalityOption(name);
   }
 
   // 16. TeacherOptions CRUD

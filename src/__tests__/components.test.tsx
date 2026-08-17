@@ -4725,6 +4725,109 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmount();
   });
+
+  it('should support enrollment and withdrawal dates, calculate duration badge, allow adding/removing personality tags and deleting master personality', async () => {
+    // 1. Setup student
+    const testStudent: Student = {
+      id: 'std-enrollment-test',
+      student_id: 'S99001',
+      name: '期間管理 太郎',
+      name_kana: 'キカンカンリ タロウ',
+      grade: '中2',
+      school_id: 'sch-1',
+      status: 'normal',
+      enrollment_date: '2025-04-01',
+      withdrawal_date: '2026-07-01',
+      personalities: ['負けず嫌い'],
+      personality_tags: ['負けず嫌い'],
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(testStudent);
+    await db.addPersonalityOption('負けず嫌い');
+    await db.addPersonalityOption('集中力がある');
+
+    const { unmount } = render(
+      <TeacherDashboard onBackToPortal={vi.fn()} onLogout={vi.fn()} />
+    );
+
+    // 2. Select student via edit button
+    await waitFor(() => {
+      expect(screen.getByTestId('edit-student-btn-std-enrollment-test')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('edit-student-btn-std-enrollment-test'));
+    });
+
+    // 3. Verify enrollment duration badge
+    await waitFor(() => {
+      expect(screen.getByText(/在籍期間: 1年3ヶ月/)).toBeInTheDocument();
+    });
+
+    // 4. Change withdrawal date to empty -> shows active duration badge
+    const withdrawalInput = screen.getByTestId('student-withdrawal-date-input');
+    await act(async () => {
+      fireEvent.change(withdrawalInput, { target: { value: '' } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/在籍中:/)).toBeInTheDocument();
+    });
+
+    // 5. Check personality tags
+    expect(screen.getAllByText('負けず嫌い').length).toBeGreaterThanOrEqual(1);
+
+    // 6. Add new personality via "新しく書いて追加"
+    const newPersonalityInput = screen.getByTestId('new-personality-input');
+    const addPersonalityBtn = screen.getByTestId('add-personality-btn');
+
+    await act(async () => {
+      fireEvent.change(newPersonalityInput, { target: { value: 'しっかりもの' } });
+    });
+    await act(async () => {
+      fireEvent.click(addPersonalityBtn);
+    });
+
+    // Verified: tag added immediately, master options updated, input cleared
+    expect(screen.getAllByText('しっかりもの').length).toBeGreaterThanOrEqual(1);
+    expect((newPersonalityInput as HTMLInputElement).value).toBe('');
+    expect(db.getPersonalityOptions()).toContain('しっかりもの');
+
+    // 7. Remove tag from student via "×" button
+    const removeTagBtn = screen.getByRole('button', { name: '個性を解除: 負けず嫌い' });
+    await act(async () => {
+      fireEvent.click(removeTagBtn);
+    });
+    expect(screen.queryByRole('button', { name: '個性を解除: 負けず嫌い' })).not.toBeInTheDocument();
+
+    // 8. Delete option from master list via delete button
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const masterSelect = screen.getByTestId('personality-master-select');
+    await act(async () => {
+      fireEvent.change(masterSelect, { target: { value: '集中力がある' } });
+    });
+
+    const deleteMasterBtn = screen.getByTestId('delete-personality-master-btn');
+    await act(async () => {
+      fireEvent.click(deleteMasterBtn);
+    });
+    expect(db.getPersonalityOptions()).not.toContain('集中力がある');
+    expect(screen.queryByRole('option', { name: '集中力がある' })).not.toBeInTheDocument();
+
+    // 9. Save changes
+    const saveBtn = screen.getByRole('button', { name: '変更を保存する' });
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // 10. Check saved state in DB
+    const savedStudent = db.getStudents().find(s => s.id === 'std-enrollment-test');
+    expect(savedStudent?.enrollment_date).toBe('2025-04-01');
+    expect(savedStudent?.withdrawal_date).toBeNull();
+    expect(savedStudent?.personalities).toEqual(['しっかりもの']);
+
+    unmount();
+  });
 });
 
 

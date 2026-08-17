@@ -659,5 +659,76 @@ describe('Scheduler and Core Logic Tests', () => {
         expect(activeTasks.map(t => t.unit_id)).toEqual(['m-3', 'm-4']);
       });
     });
+
+    describe('Enrollment Duration and Attendance Date Scheduling', () => {
+      it('should accurately calculate enrollment duration between start date and withdrawal date', async () => {
+        const { calculateEnrollmentPeriod } = await import('../lib/scheduler');
+        expect(calculateEnrollmentPeriod('2025-04-01', '2026-07-01')?.text).toBe('在籍期間: 1年3ヶ月');
+        expect(calculateEnrollmentPeriod('2025-04-01', '2025-04-15')?.text).toBe('在籍期間: 1ヶ月未満');
+        expect(calculateEnrollmentPeriod('2024-04-01', '2026-04-01')?.text).toBe('在籍期間: 2年');
+        expect(calculateEnrollmentPeriod('2025-01-01', '2025-06-01')?.text).toBe('在籍期間: 5ヶ月');
+        expect(calculateEnrollmentPeriod('', '2026-07-01')).toBeNull();
+        expect(calculateEnrollmentPeriod('2026-07-01', '2025-04-01')?.text).toContain('開始日以降の日付を指定してください');
+      });
+
+      it('should identify the earliest attendance date on or after enrollment date and generate schedule dates', async () => {
+        const { getFirstAttendanceDate, generateAttendanceDates, applyStartPositionsToTasks } = await import('../lib/scheduler');
+        
+        // 2026-09-01 is a Tuesday
+        const firstDay1 = getFirstAttendanceDate('2026-09-01', ['tuesday', 'friday']);
+        expect(firstDay1).toBe('2026-09-01');
+
+        // 2026-09-02 is a Wednesday, so next attendance date is Friday (2026-09-04)
+        const firstDay2 = getFirstAttendanceDate('2026-09-02', ['tuesday', 'friday']);
+        expect(firstDay2).toBe('2026-09-04');
+
+        // 2026-09-05 is a Saturday, so next attendance date is Tuesday (2026-09-08)
+        const firstDay3 = getFirstAttendanceDate('2026-09-05', ['tuesday', 'friday']);
+        expect(firstDay3).toBe('2026-09-08');
+
+        // Generate 4 attendance dates
+        const dates = generateAttendanceDates('2026-09-01', ['tuesday', 'friday'], 4);
+        expect(dates).toEqual(['2026-09-01', '2026-09-04', '2026-09-08', '2026-09-11']);
+
+        // Test applyStartPositionsToTasks with enrollment_date
+        const testStudent: Student = {
+          id: 'std-enroll-1',
+          name: '通塾テスト生',
+          grade: '中1',
+          school_id: 'sch-1',
+          status: 'normal',
+          enrollment_date: '2026-09-02', // Wednesday -> earliest is 2026-09-04 (Friday)
+          selected_days: ['tuesday', 'friday'],
+          start_unit_math: 'm-2',
+          created_at: ''
+        };
+
+        const units: CurriculumUnit[] = [
+          { id: 'm-1', school_id: 'sch-1', subject: '数学', name: '正の数・負の数', sequence_order: 1, created_at: '' },
+          { id: 'm-2', school_id: 'sch-1', subject: '数学', name: '文字と式', sequence_order: 2, created_at: '' },
+          { id: 'm-3', school_id: 'sch-1', subject: '数学', name: '一次方程式', sequence_order: 3, created_at: '' }
+        ];
+
+        const tasks: LearningTask[] = [
+          { id: 't-1', student_id: 'std-enroll-1', unit_id: 'm-1', scheduled_date: '2026-08-01', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-2', student_id: 'std-enroll-1', unit_id: 'm-2', scheduled_date: '2026-08-02', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+          { id: 't-3', student_id: 'std-enroll-1', unit_id: 'm-3', scheduled_date: '2026-08-03', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+        ];
+
+        const recalculated = applyStartPositionsToTasks(testStudent, tasks, units);
+        const task1 = recalculated.find(t => t.id === 't-1');
+        const task2 = recalculated.find(t => t.id === 't-2');
+        const task3 = recalculated.find(t => t.id === 't-3');
+
+        // m-1 is before start unit m-2, so skipped
+        expect(task1?.status).toBe('skipped');
+        // m-2 is start unit, scheduled on 2026-09-04 (first attendance day on/after enrollment date)
+        expect(task2?.status).toBe('unstarted');
+        expect(task2?.scheduled_date).toBe('2026-09-04');
+        // m-3 is next unit, scheduled on 2026-09-08 (next Tuesday)
+        expect(task3?.status).toBe('unstarted');
+        expect(task3?.scheduled_date).toBe('2026-09-08');
+      });
+    });
   });
 });

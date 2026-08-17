@@ -36,7 +36,7 @@ export function calculateDefaultSlots(
 }
 
 // -------------------------------------------------------------
-// 0. 日付・進捗ギャップユーティリティ
+// 0. 日付・進捗ギャップ・通塾開始連動ユーティリティ
 // -------------------------------------------------------------
 export function getYearMonthWeek(dateStr: string): { month: number; week_number: number } {
   const date = new Date(dateStr);
@@ -54,6 +54,137 @@ export function getYearMonthWeek(dateStr: string): { month: number; week_number:
     month,
     week_number: Math.min(4, weekNum)
   };
+}
+
+/**
+ * 通塾開始日・退塾日から在籍期間を自動算出する
+ */
+export function calculateEnrollmentPeriod(
+  startDateStr?: string | null,
+  endDateStr?: string | null
+): { text: string; isWithdrawn: boolean } | null {
+  if (!startDateStr) return null;
+  const start = new Date(startDateStr);
+  if (isNaN(start.getTime())) return null;
+
+  const isWithdrawn = Boolean(endDateStr);
+  const end = endDateStr ? new Date(endDateStr) : new Date();
+  if (isNaN(end.getTime())) return null;
+
+  if (end < start) {
+    return { text: '在籍期間: 開始日以降の日付を指定してください', isWithdrawn };
+  }
+
+  let years = end.getFullYear() - start.getFullYear();
+  let months = end.getMonth() - start.getMonth();
+  let days = end.getDate() - start.getDate();
+
+  if (days < 0) {
+    months -= 1;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  let periodStr = '';
+  if (years > 0 && months > 0) {
+    periodStr = `${years}年${months}ヶ月`;
+  } else if (years > 0) {
+    periodStr = `${years}年`;
+  } else if (months > 0) {
+    periodStr = `${months}ヶ月`;
+  } else {
+    periodStr = '1ヶ月未満';
+  }
+
+  const prefix = isWithdrawn ? '在籍期間' : '在籍中';
+  return {
+    text: `${prefix}: ${periodStr}`,
+    isWithdrawn
+  };
+}
+
+/**
+ * 通塾開始日以降で最も早い通塾曜日（Day 1）を特定する
+ */
+export function getFirstAttendanceDate(
+  enrollmentDateStr?: string | null,
+  selectedDays?: string[] | null
+): string {
+  const baseDate = enrollmentDateStr ? new Date(enrollmentDateStr) : new Date();
+  if (isNaN(baseDate.getTime())) {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  const days = (selectedDays && selectedDays.length > 0) ? selectedDays : ['tuesday', 'friday'];
+  
+  const dayMap: Record<string, number> = {
+    'sunday': 0, 'sun': 0, '日': 0, '0': 0,
+    'monday': 1, 'mon': 1, '月': 1, '1': 1,
+    'tuesday': 2, 'tue': 2, '火': 2, '2': 2,
+    'wednesday': 3, 'wed': 3, '水': 3, '3': 3,
+    'thursday': 4, 'thu': 4, '木': 4, '4': 4,
+    'friday': 5, 'fri': 5, '金': 5, '5': 5,
+    'saturday': 6, 'sat': 6, '土': 6, '6': 6,
+  };
+
+  const targetDayNums = new Set(
+    days.map(d => dayMap[d.toLowerCase()] ?? -1).filter(n => n !== -1)
+  );
+
+  if (targetDayNums.size === 0) {
+    return baseDate.toISOString().split('T')[0];
+  }
+
+  const check = new Date(baseDate.getTime());
+  for (let i = 0; i < 14; i++) {
+    if (targetDayNums.has(check.getDay())) {
+      return check.toISOString().split('T')[0];
+    }
+    check.setDate(check.getDate() + 1);
+  }
+
+  return baseDate.toISOString().split('T')[0];
+}
+
+/**
+ * 通塾開始日（Day 1）から始まる通塾日の日付リストを生成する
+ */
+export function generateAttendanceDates(
+  startDateStr: string,
+  selectedDays: string[] | null | undefined,
+  count: number
+): string[] {
+  const dates: string[] = [];
+  if (count <= 0) return dates;
+
+  const dayMap: Record<string, number> = {
+    'sunday': 0, 'sun': 0, '日': 0, '0': 0,
+    'monday': 1, 'mon': 1, '月': 1, '1': 1,
+    'tuesday': 2, 'tue': 2, '火': 2, '2': 2,
+    'wednesday': 3, 'wed': 3, '水': 3, '3': 3,
+    'thursday': 4, 'thu': 4, '木': 4, '4': 4,
+    'friday': 5, 'fri': 5, '金': 5, '5': 5,
+    'saturday': 6, 'sat': 6, '土': 6, '6': 6,
+  };
+  const targetDayNums = new Set(
+    (selectedDays && selectedDays.length > 0 ? selectedDays : ['tuesday', 'friday'])
+      .map(d => dayMap[d.toLowerCase()] ?? -1)
+      .filter(n => n !== -1)
+  );
+
+  const cur = new Date(startDateStr);
+  let attempts = 0;
+  while (dates.length < count && attempts < 1000) {
+    if (targetDayNums.size === 0 || targetDayNums.has(cur.getDay())) {
+      dates.push(cur.toISOString().split('T')[0]);
+    }
+    cur.setDate(cur.getDate() + 1);
+    attempts++;
+  }
+
+  return dates;
 }
 
 /**
@@ -82,7 +213,7 @@ export function getStudentStartUnitIdForSubject(student: Student, subject: strin
 }
 
 /**
- * 生徒の教科別スタート位置に基づき、未完了タスクのスキップ／未着手状態を再配置・再計算する
+ * 生徒の教科別スタート位置に基づき、未完了タスクのスキップ／未着手状態および通塾開始日スケジュールを再配置・再計算する
  */
 export function applyStartPositionsToTasks(
   student: Student,
@@ -103,7 +234,7 @@ export function applyStartPositionsToTasks(
   const studentTasks = allTasks.filter(t => t.student_id === student.id);
   const otherTasks = allTasks.filter(t => t.student_id !== student.id);
 
-  const updatedStudentTasks = studentTasks.map(task => {
+  let updatedStudentTasks = studentTasks.map(task => {
     // 既に完了したタスクは変更しない
     if (task.status === 'completed') return task;
 
@@ -145,6 +276,26 @@ export function applyStartPositionsToTasks(
     }
     return task;
   });
+
+  // 通塾開始日 (enrollment_date) が設定されている場合、初回通塾曜日（Day 1）から順にスケジュール日を再割り振り
+  if (student.enrollment_date) {
+    const firstDay = getFirstAttendanceDate(student.enrollment_date, student.selected_days);
+    const activeTasks = updatedStudentTasks.filter(t => t.status === 'unstarted');
+    if (activeTasks.length > 0) {
+      const attendanceDates = generateAttendanceDates(firstDay, student.selected_days, activeTasks.length);
+      let dateIdx = 0;
+      updatedStudentTasks = updatedStudentTasks.map(t => {
+        if (t.status === 'unstarted' && dateIdx < attendanceDates.length) {
+          const newDate = attendanceDates[dateIdx++];
+          return {
+            ...t,
+            scheduled_date: newDate
+          };
+        }
+        return t;
+      });
+    }
+  }
 
   return [...otherTasks, ...updatedStudentTasks];
 }

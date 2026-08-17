@@ -42,7 +42,10 @@ import {
   calculateProgressGap,
   getYearMonthWeek,
   getStudentStartUnitIdForSubject,
-  applyStartPositionsToTasks
+  applyStartPositionsToTasks,
+  calculateEnrollmentPeriod,
+  getFirstAttendanceDate,
+  generateAttendanceDates
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -333,6 +336,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         setPersonalityOptions(listPersonalities);
         const listTeachers = db.getTeacherOptions();
         setTeacherOptions(listTeachers);
+        db.fetchPersonalityOptions().then(res => setPersonalityOptions(res)).catch(console.error);
+        db.fetchTeacherOptions().then(res => setTeacherOptions(res)).catch(console.error);
 
         let initialTargetSchools: TargetSchoolItem[] = [];
         if (freshSt.target_schools && Array.isArray(freshSt.target_schools) && freshSt.target_schools.length > 0) {
@@ -372,6 +377,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
           name: freshSt.name,
           name_kana: freshSt.name_kana || '',
           birthday: freshSt.birthday || '',
+          enrollment_date: freshSt.enrollment_date || null,
+          withdrawal_date: freshSt.withdrawal_date || null,
           grade: freshSt.grade,
           school_id: freshSt.school_id,
           school_name: freshSt.school_name || listSch.find(s => s.id === freshSt.school_id)?.name || '',
@@ -797,6 +804,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       const updated = {
         ...selectedStudent,
         ...editForm,
+        enrollment_date: editForm.enrollment_date || null,
+        withdrawal_date: editForm.withdrawal_date || null,
+        personalities: editForm.personalities || [],
+        personality_tags: editForm.personalities || [],
         school_name: finalizedSchoolName,
         school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
@@ -815,6 +826,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       setPeriodCount(saved.default_slots || saved.period_count || newSlots);
       setEditForm({
         ...saved,
+        enrollment_date: saved.enrollment_date || null,
+        withdrawal_date: saved.withdrawal_date || null,
+        personalities: saved.personalities || saved.personality_tags || [],
+        personality_tags: saved.personalities || saved.personality_tags || [],
         school_name: saved.school_name || finalizedSchoolName,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
@@ -910,27 +925,29 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     } as any);
   };
 
-  // 個性の追加
+  // 個性の追加（自由入力時は個性マスタにも自動登録＆即時反映）
   const handleAddPersonality = async () => {
     if (!selectedStudent) return;
     const tagToAdd = newPersonalityInput.trim() || selectedPersonalityFromMaster;
     if (!tagToAdd) return;
     
-    const currentTags = editForm.personalities!;
+    const currentTags = editForm.personalities || [];
     if (currentTags.includes(tagToAdd)) {
       alert('この個性は既に登録されています。');
+      setNewPersonalityInput('');
+      setSelectedPersonalityFromMaster('');
       return;
     }
 
     try {
       if (newPersonalityInput.trim()) {
         await db.addPersonalityOption(tagToAdd);
-        const listPersonalities = db.getPersonalityOptions();
+        const listPersonalities = await db.fetchPersonalityOptions();
         setPersonalityOptions(listPersonalities);
       }
       
       const updatedTags = [...currentTags, tagToAdd];
-      setEditForm({ ...editForm, personalities: updatedTags });
+      setEditForm({ ...editForm, personalities: updatedTags, personality_tags: updatedTags });
       setNewPersonalityInput('');
       setSelectedPersonalityFromMaster('');
     } catch (err) {
@@ -938,11 +955,28 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     }
   };
 
-  // 個性の削除
+  // 個性マスタからの削除
+  const handleDeletePersonalityOption = async () => {
+    if (!selectedPersonalityFromMaster) return;
+    const targetTag = selectedPersonalityFromMaster;
+    const confirmed = window.confirm(`マスタから個性タグ「${targetTag}」を削除しますか？\n※この操作は元に戻せません。`);
+    if (!confirmed) return;
+
+    try {
+      await db.deletePersonalityOption(targetTag);
+      const list = await db.fetchPersonalityOptions();
+      setPersonalityOptions(list);
+      setSelectedPersonalityFromMaster('');
+    } catch (err) {
+      console.error('handleDeletePersonalityOption error:', err);
+    }
+  };
+
+  // 個性の削除・生徒割り当て解除
   const handleRemovePersonality = (tagToRemove: string) => {
-    const currentTags = editForm.personalities!;
+    const currentTags = editForm.personalities || [];
     const updatedTags = currentTags.filter(t => t !== tagToRemove);
-    setEditForm({ ...editForm, personalities: updatedTags });
+    setEditForm({ ...editForm, personalities: updatedTags, personality_tags: updatedTags });
   };
 
   // 対応履歴の登録
@@ -5401,6 +5435,63 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         </div>
                       </div>
 
+                      {/* 通塾開始日 & 退塾日 & 在籍期間バッジ */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                          <label htmlFor="edit-student-enrollment-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            📅 通塾開始日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（初回通塾日）</span>
+                          </label>
+                          <input 
+                            id="edit-student-enrollment-date"
+                            data-testid="student-enrollment-date-input"
+                            type="date" 
+                            value={editForm.enrollment_date || ''} 
+                            onChange={e => setEditForm({ ...editForm, enrollment_date: e.target.value || null } as any)}
+                            className={styles.input}
+                          />
+                        </div>
+                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                          <label htmlFor="edit-student-withdrawal-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            🚪 退塾日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（任意・退塾時のみ）</span>
+                          </label>
+                          <input 
+                            id="edit-student-withdrawal-date"
+                            data-testid="student-withdrawal-date-input"
+                            type="date" 
+                            value={editForm.withdrawal_date || ''} 
+                            onChange={e => setEditForm({ ...editForm, withdrawal_date: e.target.value || null } as any)}
+                            className={styles.input}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 通塾期間・在籍期間の自動計算バッジ */}
+                      {(() => {
+                        const periodInfo = calculateEnrollmentPeriod(editForm.enrollment_date, editForm.withdrawal_date);
+                        if (!periodInfo) return null;
+                        return (
+                          <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span
+                              data-testid="enrollment-period-badge"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '4px 12px',
+                                borderRadius: '16px',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                backgroundColor: periodInfo.isWithdrawn ? '#fef2f2' : '#f0fdf4',
+                                color: periodInfo.isWithdrawn ? '#dc2626' : '#166534',
+                                border: `1px solid ${periodInfo.isWithdrawn ? '#fecaca' : '#bbf7d0'}`
+                              }}
+                            >
+                              {periodInfo.isWithdrawn ? '🚪' : '🎓'} {periodInfo.text}
+                            </span>
+                          </div>
+                        );
+                      })()}
+
                       {/* Detail Form Fields */}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
@@ -6254,10 +6345,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         
                         {/* Selected Tags list */}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px' }}>
-                          {editForm.personalities!.length === 0 ? (
+                          {(!editForm.personalities || editForm.personalities.length === 0) ? (
                             <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>個性タグが登録されていません。</span>
                           ) : (
-                            editForm.personalities!.map((tag, i) => {
+                            (editForm.personalities || []).map((tag, i) => {
                               const colors = [
                                 { bg: '#e0e7ff', text: '#3730a3', border: '#4338ca' },
                                 { bg: '#dcfce7', text: '#166534', border: '#15803d' },
@@ -6285,6 +6376,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                   {tag}
                                   <button 
                                     type="button"
+                                    data-testid={`remove-personality-tag-${tag}`}
+                                    aria-label={`個性を解除: ${tag}`}
                                     onClick={() => handleRemovePersonality(tag)}
                                     style={{
                                       background: 'none',
@@ -6307,28 +6400,57 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         </div>
 
                         {/* Add tags interface */}
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                          <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '1 1 200px' }}>
                             <label htmlFor="personality-master" style={{ fontSize: '0.75rem', color: '#475569', display: 'block', marginBottom: '4px' }}>マスタから選ぶ</label>
-                            <select 
-                              id="personality-master"
-                              value={selectedPersonalityFromMaster} 
-                              onChange={e => {
-                                setSelectedPersonalityFromMaster(e.target.value);
-                                setNewPersonalityInput('');
-                              }}
-                              className={styles.select}
-                              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                            >
-                              <option value="">-- 選択肢から選ぶ --</option>
-                              {personalityOptions.map(p => (
-                                <option key={p} value={p}>{p}</option>
-                              ))}
-                            </select>
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              <select 
+                                id="personality-master"
+                                data-testid="personality-master-select"
+                                value={selectedPersonalityFromMaster} 
+                                onChange={e => {
+                                  setSelectedPersonalityFromMaster(e.target.value);
+                                  setNewPersonalityInput('');
+                                }}
+                                className={styles.select}
+                                style={{ padding: '4px 8px', fontSize: '0.8rem', flex: 1 }}
+                              >
+                                <option value="">-- 選択肢から選ぶ --</option>
+                                {personalityOptions.map(p => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
+                              </select>
+                              {selectedPersonalityFromMaster && (
+                                <button
+                                  type="button"
+                                  data-testid="delete-personality-master-btn"
+                                  onClick={handleDeletePersonalityOption}
+                                  title="選択中の個性をマスタから削除"
+                                  style={{
+                                    padding: '4px 8px',
+                                    background: '#fee2e2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '2px',
+                                    height: '32px',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  🗑️ 削除
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ fontSize: '0.75rem', color: '#475569', display: 'block', marginBottom: '4px' }}>新しく書いて追加</label>
+                          <div style={{ flex: '1 1 200px' }}>
+                            <label htmlFor="new-personality-input" style={{ fontSize: '0.75rem', color: '#475569', display: 'block', marginBottom: '4px' }}>新しく書いて追加</label>
                             <input 
+                              id="new-personality-input"
+                              data-testid="new-personality-input"
                               type="text" 
                               value={newPersonalityInput} 
                               onChange={e => {
@@ -6342,9 +6464,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                           </div>
                           <button 
                             type="button" 
+                            data-testid="add-personality-btn"
                             onClick={handleAddPersonality}
                             className={styles.btn}
-                            style={{ width: 'auto', padding: '6px 12px', background: '#3b82f6', height: '34px', display: 'flex', alignItems: 'center' }}
+                            style={{ width: 'auto', padding: '6px 14px', background: '#3b82f6', height: '34px', display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}
                           >
                             ＋ 追加
                           </button>
