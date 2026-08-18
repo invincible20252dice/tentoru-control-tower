@@ -31,7 +31,10 @@ import {
   Branch,
   UserRole,
   BranchAIRules,
-  DEFAULT_BRANCH_AI_RULES
+  DEFAULT_BRANCH_AI_RULES,
+  sanitizeLearningTask,
+  sanitizeMiniTestResult,
+  sanitizeHomeworkResult
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 

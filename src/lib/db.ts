@@ -357,6 +357,198 @@ export interface CustomApplyScope {
 }
 
 // -------------------------------------------------------------
+// Payload Sanitization Utilities for Safe Database Operations
+// -------------------------------------------------------------
+
+/**
+ * Safely sanitize a LearningTask object for memory, state, and database operations.
+ * - Guarantees ID fields (id, student_id, unit_id, start_lesson_id, end_lesson_id) are safe strings (TEXT).
+ * - Converts undefined or empty values safely.
+ * - Ensures valid status enum, booleans, and valid period.
+ */
+export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string, any>): LearningTask {
+  const student_id = task.student_id != null ? String(task.student_id).trim() : '';
+  const id = task.id != null && String(task.id).trim() !== ''
+    ? String(task.id).trim()
+    : `task-${student_id || 'st'}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+  // Safe string conversion for unit_id
+  let unit_id = '';
+  if (task.unit_id != null && String(task.unit_id).trim() !== '') {
+    unit_id = String(task.unit_id).trim();
+  } else if (task.start_lesson_id != null && String(task.start_lesson_id).trim() !== '') {
+    unit_id = String(task.start_lesson_id).trim();
+  } else if (task.custom_unit_name != null && String(task.custom_unit_name).trim() !== '') {
+    unit_id = `custom-${String(task.custom_unit_name).trim()}`;
+  } else {
+    unit_id = 'default-unit';
+  }
+
+  // Safe string conversion for scheduled_date (YYYY-MM-DD)
+  let scheduled_date = task.scheduled_date ? String(task.scheduled_date).trim() : new Date().toISOString().split('T')[0];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduled_date)) {
+    try {
+      const parsed = new Date(scheduled_date);
+      if (!isNaN(parsed.getTime())) {
+        scheduled_date = parsed.toISOString().split('T')[0];
+      } else {
+        scheduled_date = new Date().toISOString().split('T')[0];
+      }
+    } catch {
+      scheduled_date = new Date().toISOString().split('T')[0];
+    }
+  }
+
+  // Period: number | null
+  let period: number | null = null;
+  if (task.period !== undefined && task.period !== null && (task.period as any) !== '') {
+    const num = parseInt(String(task.period), 10);
+    if (!isNaN(num)) {
+      period = num;
+    }
+  }
+
+  // Status
+  const validStatuses: LearningTask['status'][] = ['unstarted', 'skipped', 'completed', 'failed'];
+  const status: LearningTask['status'] = validStatuses.includes(task.status as any) ? (task.status as LearningTask['status']) : 'unstarted';
+
+  // Boolean flags
+  const video_watched = Boolean(task.video_watched);
+  const test_passed = Boolean(task.test_passed);
+
+  // Helper for safe text or null
+  const toSafeTextOrNull = (val: any): string | null => {
+    if (val === undefined || val === null) return null;
+    const str = String(val).trim();
+    return str.length > 0 ? str : null;
+  };
+
+  const subject = toSafeTextOrNull(task.subject);
+  const custom_unit_name = toSafeTextOrNull(task.custom_unit_name);
+  const lesson_range = toSafeTextOrNull(task.lesson_range);
+  const start_lesson_name = toSafeTextOrNull(task.start_lesson_name);
+  const end_lesson_name = toSafeTextOrNull(task.end_lesson_name);
+  const start_lesson_id = toSafeTextOrNull(task.start_lesson_id);
+  const end_lesson_id = toSafeTextOrNull(task.end_lesson_id);
+  const office_note = toSafeTextOrNull(task.office_note);
+  const passing_line = toSafeTextOrNull(task.passing_line);
+  const actual_completed_date = toSafeTextOrNull(task.actual_completed_date);
+  const created_at = task.created_at ? String(task.created_at) : new Date().toISOString();
+
+  return {
+    id,
+    student_id,
+    unit_id,
+    scheduled_date,
+    period,
+    status,
+    video_watched,
+    test_passed,
+    ...(subject != null ? { subject } : {}),
+    ...(custom_unit_name != null ? { custom_unit_name } : {}),
+    ...(lesson_range != null ? { lesson_range } : {}),
+    ...(start_lesson_name != null ? { start_lesson_name } : {}),
+    ...(end_lesson_name != null ? { end_lesson_name } : {}),
+    ...(start_lesson_id != null ? { start_lesson_id } : {}),
+    ...(end_lesson_id != null ? { end_lesson_id } : {}),
+    ...(office_note != null ? { office_note } : {}),
+    ...(passing_line != null ? { passing_line } : {}),
+    ...(actual_completed_date != null ? { actual_completed_date } : {}),
+    created_at
+  };
+}
+
+/**
+ * Returns a strictly normalized DB payload object without undefined values (replacing undefined with null or default values)
+ * Suitable for Supabase / PostgREST upsert
+ */
+export function sanitizeLearningTaskForDB(task: Partial<LearningTask> & Record<string, any>): Record<string, any> {
+  const sanitized = sanitizeLearningTask(task);
+  return {
+    id: sanitized.id,
+    student_id: sanitized.student_id,
+    unit_id: sanitized.unit_id,
+    scheduled_date: sanitized.scheduled_date,
+    period: sanitized.period ?? null,
+    status: sanitized.status,
+    video_watched: sanitized.video_watched,
+    test_passed: sanitized.test_passed,
+    subject: sanitized.subject ?? null,
+    custom_unit_name: sanitized.custom_unit_name ?? null,
+    lesson_range: sanitized.lesson_range ?? null,
+    start_lesson_name: sanitized.start_lesson_name ?? null,
+    end_lesson_name: sanitized.end_lesson_name ?? null,
+    start_lesson_id: sanitized.start_lesson_id ?? null,
+    end_lesson_id: sanitized.end_lesson_id ?? null,
+    office_note: sanitized.office_note ?? null,
+    passing_line: sanitized.passing_line ?? null,
+    actual_completed_date: sanitized.actual_completed_date ?? null,
+    created_at: sanitized.created_at
+  };
+}
+
+export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<string, any>): MiniTestResult {
+  const student_id = test.student_id != null ? String(test.student_id).trim() : '';
+  const id = test.id != null && String(test.id).trim() !== ''
+    ? String(test.id).trim()
+    : `mini-${student_id || 'st'}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const date = test.date ? String(test.date).trim() : new Date().toISOString().split('T')[0];
+  const test_content = test.test_content ? String(test.test_content).trim() : '';
+  let score: number | null = null;
+  if (test.score !== undefined && test.score !== null && (test.score as any) !== '') {
+    const parsed = Number(test.score);
+    if (!isNaN(parsed)) {
+      score = parsed;
+    }
+  }
+  const passed = test.passed !== undefined && test.passed !== null ? Boolean(test.passed) : null;
+  const passing_line = test.passing_line ? String(test.passing_line).trim() : null;
+  const target_scope = test.target_scope ? String(test.target_scope).trim() : 'individual';
+  const subject = test.subject ? String(test.subject).trim() : undefined;
+  const created_at = test.created_at ? String(test.created_at) : new Date().toISOString();
+
+  return {
+    id,
+    student_id,
+    date,
+    test_content,
+    score,
+    passed,
+    passing_line,
+    target_scope,
+    ...(subject ? { subject } : {}),
+    created_at
+  };
+}
+
+export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<string, any>): HomeworkResult {
+  const student_id = hw.student_id != null ? String(hw.student_id).trim() : '';
+  const id = hw.id != null && String(hw.id).trim() !== ''
+    ? String(hw.id).trim()
+    : `hw-${student_id || 'st'}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const date = hw.date ? String(hw.date).trim() : new Date().toISOString().split('T')[0];
+  const homework_content = hw.homework_content ? String(hw.homework_content).trim() : '';
+  const homework_deadline = hw.homework_deadline ? String(hw.homework_deadline).trim() : date;
+  const validStatuses: HomeworkResult['status'][] = ['incomplete', 'completed', 'skipped'];
+  const status: HomeworkResult['status'] = validStatuses.includes(hw.status as any) ? (hw.status as HomeworkResult['status']) : 'incomplete';
+  const target_scope = hw.target_scope ? String(hw.target_scope).trim() : 'individual';
+  const subject = hw.subject ? String(hw.subject).trim() : undefined;
+  const created_at = hw.created_at ? String(hw.created_at) : new Date().toISOString();
+
+  return {
+    id,
+    student_id,
+    date,
+    homework_content,
+    homework_deadline,
+    status,
+    target_scope,
+    ...(subject ? { subject } : {}),
+    created_at
+  };
+}
+
+// -------------------------------------------------------------
 // Hybrid DB Access Class
 // -------------------------------------------------------------
 class DatabaseService {
@@ -1486,20 +1678,25 @@ class DatabaseService {
 
   // 4. LearningTasks CRUD
   public async saveLearningTasks(tasks: LearningTask[]): Promise<LearningTask[]> {
+    if (!tasks || tasks.length === 0) return [];
+    const sanitizedTasks = tasks.map(t => sanitizeLearningTask(t));
+
+    // Update local cache regardless of mock mode so synchronous getLearningTasks() is immediately updated
+    const list = this.getLearningTasks();
+    sanitizedTasks.forEach(t => {
+      const idx = list.findIndex(item => item.id === t.id);
+      if (idx >= 0) list[idx] = t;
+      else list.push(t);
+    });
+    this.saveMockData('learning_tasks', list);
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('learning_tasks').upsert(tasks).select();
+      const dbPayloads = tasks.map(t => sanitizeLearningTaskForDB(t));
+      const { data, error } = await this.supabase.from('learning_tasks').upsert(dbPayloads).select();
       if (error) throw error;
-      return (data || tasks) as LearningTask[];
-    } else {
-      const list = this.getLearningTasks();
-      tasks.forEach(t => {
-        const idx = list.findIndex(item => item.id === t.id);
-        if (idx >= 0) list[idx] = t;
-        else list.push(t);
-      });
-      this.saveMockData('learning_tasks', list);
-      return tasks;
+      return (data || sanitizedTasks) as LearningTask[];
     }
+    return sanitizedTasks;
   }
 
   public async fetchLearningTasks(studentId?: string, date?: string): Promise<LearningTask[]> {
@@ -1668,18 +1865,31 @@ class DatabaseService {
   }
 
   public async saveMiniTestResult(result: MiniTestResult): Promise<MiniTestResult> {
+    const sanitized = sanitizeMiniTestResult(result);
+    const list = this.getMiniTestResults();
+    const idx = list.findIndex(r => r.id === sanitized.id);
+    if (idx >= 0) list[idx] = sanitized;
+    else list.push(sanitized);
+    this.saveMockData('mini_test_results', list);
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('mini_test_results').upsert(result).select().single();
+      const dbPayload = {
+        id: sanitized.id,
+        student_id: sanitized.student_id,
+        date: sanitized.date,
+        subject: sanitized.subject ?? null,
+        test_content: sanitized.test_content,
+        score: sanitized.score,
+        passed: sanitized.passed ?? null,
+        passing_line: sanitized.passing_line ?? null,
+        target_scope: sanitized.target_scope ?? 'individual',
+        created_at: sanitized.created_at
+      };
+      const { data, error } = await this.supabase.from('mini_test_results').upsert(dbPayload).select().single();
       if (error) throw error;
-      return data;
-    } else {
-      const list = this.getMiniTestResults();
-      const idx = list.findIndex(r => r.id === result.id);
-      if (idx >= 0) list[idx] = result;
-      else list.push(result);
-      this.saveMockData('mini_test_results', list);
-      return result;
+      return (data || sanitized) as MiniTestResult;
     }
+    return sanitized;
   }
 
   public async deleteMiniTestResult(id: string): Promise<void> {
@@ -1717,35 +1927,60 @@ class DatabaseService {
   }
 
   public async saveHomeworkResult(result: HomeworkResult): Promise<HomeworkResult> {
+    const sanitized = sanitizeHomeworkResult(result);
+    const list = this.getHomeworkResults();
+    const idx = list.findIndex(r => r.id === sanitized.id);
+    if (idx >= 0) list[idx] = sanitized;
+    else list.push(sanitized);
+    this.saveMockData('homework_results', list);
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('homework_results').upsert(result).select().single();
+      const dbPayload = {
+        id: sanitized.id,
+        student_id: sanitized.student_id,
+        date: sanitized.date,
+        subject: sanitized.subject ?? null,
+        homework_content: sanitized.homework_content,
+        homework_deadline: sanitized.homework_deadline,
+        status: sanitized.status,
+        target_scope: sanitized.target_scope ?? 'individual',
+        created_at: sanitized.created_at
+      };
+      const { data, error } = await this.supabase.from('homework_results').upsert(dbPayload).select().single();
       if (error) throw error;
-      return data;
-    } else {
-      const list = this.getHomeworkResults();
-      const idx = list.findIndex(r => r.id === result.id);
-      if (idx >= 0) list[idx] = result;
-      else list.push(result);
-      this.saveMockData('homework_results', list);
-      return result;
+      return (data || sanitized) as HomeworkResult;
     }
+    return sanitized;
   }
 
   public async saveHomeworkResults(results: HomeworkResult[]): Promise<HomeworkResult[]> {
+    if (!results || results.length === 0) return [];
+    const sanitizedList = results.map(r => sanitizeHomeworkResult(r));
+    const list = this.getHomeworkResults();
+    sanitizedList.forEach(result => {
+      const idx = list.findIndex(r => r.id === result.id);
+      if (idx >= 0) list[idx] = result;
+      else list.push(result);
+    });
+    this.saveMockData('homework_results', list);
+
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('homework_results').upsert(results).select();
+      const dbPayloads = sanitizedList.map(sanitized => ({
+        id: sanitized.id,
+        student_id: sanitized.student_id,
+        date: sanitized.date,
+        subject: sanitized.subject ?? null,
+        homework_content: sanitized.homework_content,
+        homework_deadline: sanitized.homework_deadline,
+        status: sanitized.status,
+        target_scope: sanitized.target_scope ?? 'individual',
+        created_at: sanitized.created_at
+      }));
+      const { data, error } = await this.supabase.from('homework_results').upsert(dbPayloads).select();
       if (error) throw error;
-      return data;
-    } else {
-      const list = this.getHomeworkResults();
-      results.forEach(result => {
-        const idx = list.findIndex(r => r.id === result.id);
-        if (idx >= 0) list[idx] = result;
-        else list.push(result);
-      });
-      this.saveMockData('homework_results', list);
-      return results;
+      return (data || sanitizedList) as HomeworkResult[];
     }
+    return sanitizedList;
   }
 
   public async deleteHomeworkResult(id: string): Promise<void> {
