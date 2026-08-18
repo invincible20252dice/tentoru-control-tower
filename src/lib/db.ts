@@ -1677,6 +1677,14 @@ class DatabaseService {
     return this.getStudents().find(s => s.id === id) || null;
   }
 
+  public getStudent(id: string): Student | null {
+    return this.getStudents().find(s => s.id === id) || null;
+  }
+
+  public getStudentById(id: string): Student | null {
+    return this.getStudent(id);
+  }
+
   // 3. Curriculum CRUD
   public async saveCurriculumUnits(units: CurriculumUnit[]): Promise<CurriculumUnit[]> {
     if (!this.isMockMode && this.supabase) {

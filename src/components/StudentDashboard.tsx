@@ -34,6 +34,29 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return todayStr;
   };
 
+  const getLatestStudent = (): Student => {
+    const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
+    return {
+      ...(dbSt || {}),
+      ...student,
+      completed_lesson_ids: dbSt?.completed_lesson_ids || student.completed_lesson_ids
+    };
+  };
+
+  const [currentStudent, setCurrentStudent] = useState<Student>(getLatestStudent);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(prev => (prev === msg ? null : prev));
+    }, 3500);
+  };
+
+  useEffect(() => {
+    setCurrentStudent(getLatestStudent());
+  }, [student]);
+
   const [currentDateStr, setCurrentDateStr] = useState<string>(determineInitialDate);
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
   const [tasks, setTasks] = useState<LearningTask[]>(() => db.getLearningTasks().filter(t => t.student_id === student.id));
@@ -59,6 +82,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
 
   const loadData = async () => {
+    const latestStudent = getLatestStudent();
+    setCurrentStudent(latestStudent);
+
     let studentTasks: LearningTask[] = [];
     try {
       studentTasks = await db.fetchLearningTasks(student.id);
@@ -151,9 +177,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
   const getTaskStepLessons = (task: LearningTask): Array<{ id: string; name: string; fullTitle: string }> => {
-    const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || '数学';
+    const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || (student.grade.startsWith('小') ? '算数' : '数学');
     const masterLessons = curriculumMasters
-      .filter(m => m.subject === taskSubject || (taskSubject === '算数' && m.subject === '数学') || (taskSubject === '数学' && m.subject === '算数'))
+      .filter(m => m.subject === taskSubject)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map(m => ({
         id: m.id,
@@ -206,76 +232,96 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     stepIndex: number,
     allSteps: Array<{ id: string; name: string; fullTitle: string }>
   ) => {
-    const currentCompletedIds = new Set<string>(task.completed_lesson_ids || []);
-    currentCompletedIds.add(step.id);
+    const stepIdStr = String(step.id);
+    
+    // 既存の完了済みIDセット
+    const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
+    currentTaskCompletedIds.add(stepIdStr);
 
-    const studentCompletedIds = new Set<string>(student.completed_lesson_ids || []);
-    studentCompletedIds.add(step.id);
+    const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
+    studentCompletedIds.add(stepIdStr);
 
-    const isAllStepsCompleted = allSteps.every(s => currentCompletedIds.has(s.id));
+    const isAllStepsCompleted = allSteps.length > 0 && allSteps.every(s => currentTaskCompletedIds.has(String(s.id)));
 
     const updatedTask: LearningTask = {
       ...task,
-      completed_lesson_ids: Array.from(currentCompletedIds),
+      completed_lesson_ids: Array.from(currentTaskCompletedIds),
       video_watched: true,
       ...(isAllStepsCompleted ? {
         status: 'completed' as const,
         test_passed: true,
         actual_completed_date: currentDateStr
       } : {
-        status: task.status === 'completed' ? 'completed' : 'unstarted'
+        status: task.status === 'completed' ? 'completed' : 'unstarted',
+        test_passed: task.test_passed || false
       })
     };
 
     const updatedStudent: Student = {
-      ...student,
+      ...currentStudent,
       completed_lesson_ids: Array.from(studentCompletedIds),
-      last_completed_lesson_id: step.id,
+      last_completed_lesson_id: stepIdStr,
       last_completed_at: new Date().toISOString()
     };
 
-    // 1. レッスン進捗を保存
-    await db.saveStudentLessonProgress({
-      id: `slp-${student.id}-${step.id}-${Date.now()}`,
-      student_id: student.id,
-      subject: task.subject || 'その他',
-      lesson_id: step.id,
-      lesson_name: step.name || step.fullTitle,
-      task_id: task.id,
-      date: currentDateStr,
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    });
+    // 1. レッスン進捗 (student_lesson_progress) を保存
+    try {
+      await db.saveStudentLessonProgress({
+        id: `slp-${student.id}-${stepIdStr}`,
+        student_id: student.id,
+        subject: task.subject || 'その他',
+        lesson_id: stepIdStr,
+        lesson_name: step.name || step.fullTitle,
+        task_id: task.id,
+        date: currentDateStr,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('saveStudentLessonProgress error:', e);
+    }
 
-    // 2. タスクと生徒情報を保存
+    // 2. タスクと生徒情報を保存 (Supabase + LocalStorage)
     await db.saveLearningTasks([updatedTask]);
     await db.saveStudent(updatedStudent);
 
     // 3. ログ記録
-    await db.addLearningLog({
-      id: `log-step-${Date.now()}`,
-      student_id: student.id,
-      unit_id: task.unit_id || step.id,
-      log_type: 'video_view',
-      duration_seconds: 600,
-      created_at: new Date().toISOString()
-    });
-
-    if (isAllStepsCompleted) {
+    try {
       await db.addLearningLog({
-        id: `log-pass-${Date.now()}`,
+        id: `log-step-${Date.now()}`,
         student_id: student.id,
-        unit_id: task.unit_id || step.id,
-        log_type: 'test_result',
-        score: 100,
-        total_questions: 10,
-        incorrect_genres: [],
+        unit_id: task.unit_id || stepIdStr,
+        log_type: 'video_view',
+        duration_seconds: 600,
         created_at: new Date().toISOString()
       });
-      alert(`🎉 【第${task.period}コマ 完了！】\n「${step.name || step.fullTitle}」を完了し、このコマの全目標を達成しました！\n右のすごろくマップも進捗しました！`);
+
+      if (isAllStepsCompleted) {
+        await db.addLearningLog({
+          id: `log-pass-${Date.now()}`,
+          student_id: student.id,
+          unit_id: task.unit_id || stepIdStr,
+          log_type: 'test_result',
+          score: 100,
+          total_questions: 10,
+          incorrect_genres: [],
+          created_at: new Date().toISOString()
+        });
+      }
+    } catch (e) {
+      console.warn('addLearningLog error:', e);
+    }
+
+    // 即時State更新
+    setCurrentStudent(updatedStudent);
+    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+
+    if (isAllStepsCompleted) {
+      showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
     } else {
-      alert(`🎉 「${step.name || step.fullTitle}」を完了しました！\n次の授業ステップへ進みましょう！`);
+      showToast(`🎉 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講完了にしました！`);
     }
 
     await loadData();
@@ -296,20 +342,86 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       score: scoreVal
     };
     await db.saveMiniTestResult(updated);
-    alert('小テスト点数を送信しました！');
+    if (typeof window !== 'undefined') {
+      window.alert('小テスト点数を送信しました！');
+    }
+    showToast('小テスト点数を送信しました！');
     loadData();
   };
 
-  // カリキュラム外タスクを完了にする
+  // カリキュラム外タスク または 全ステップを一括完了にする
   const handleCompleteCustomTask = async (task: LearningTask) => {
-    const updated: LearningTask = {
+    const stepLessons = getTaskStepLessons(task);
+    const stepIds = stepLessons.map(s => String(s.id));
+
+    const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
+    stepIds.forEach(id => currentTaskCompletedIds.add(id));
+
+    const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
+    stepIds.forEach(id => studentCompletedIds.add(id));
+
+    const updatedTask: LearningTask = {
       ...task,
+      completed_lesson_ids: Array.from(currentTaskCompletedIds),
       status: 'completed',
+      video_watched: true,
+      test_passed: true,
       actual_completed_date: currentDateStr
     };
-    await db.saveLearningTasks([updated]);
-    alert('授業を完了にしました！');
-    loadData();
+
+    const updatedStudent: Student = {
+      ...currentStudent,
+      completed_lesson_ids: Array.from(studentCompletedIds),
+      last_completed_lesson_id: stepIds[stepIds.length - 1] || currentStudent.last_completed_lesson_id,
+      last_completed_at: new Date().toISOString()
+    };
+
+    for (const step of stepLessons) {
+      try {
+        await db.saveStudentLessonProgress({
+          id: `slp-${student.id}-${String(step.id)}`,
+          student_id: student.id,
+          subject: task.subject || 'その他',
+          lesson_id: String(step.id),
+          lesson_name: step.name || step.fullTitle,
+          task_id: task.id,
+          date: currentDateStr,
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('saveStudentLessonProgress error:', e);
+      }
+    }
+
+    await db.saveLearningTasks([updatedTask]);
+    await db.saveStudent(updatedStudent);
+
+    try {
+      await db.addLearningLog({
+        id: `log-pass-${Date.now()}`,
+        student_id: student.id,
+        unit_id: task.unit_id || task.id,
+        log_type: 'test_result',
+        score: 100,
+        total_questions: 10,
+        incorrect_genres: [],
+        created_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('addLearningLog error:', e);
+    }
+
+    setCurrentStudent(updatedStudent);
+    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    if (typeof window !== 'undefined') {
+      window.alert('授業を完了にしました！');
+    }
+    showToast(`🎉 【第${task.period}コマ 完了！】授業の全ステップを完了にしました！`);
+
+    await loadData();
   };
 
   // 1. 動画視聴ボタンのアクション
@@ -317,19 +429,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const updated: LearningTask = {
       ...task,
       video_watched: true,
-      status: task.status === 'unstarted' ? 'unstarted' : task.status // video_watchedだけでステータスは即時完了にはならない
+      status: task.status === 'unstarted' ? 'unstarted' : task.status
     };
     
-    // DB (LocalStorage) に保存
     await db.saveLearningTasks([updated]);
     
-    // ログを追加
     const log: LearningLog = {
       id: `log-${Date.now()}`,
       student_id: student.id,
       unit_id: task.unit_id,
       log_type: 'video_view',
-      duration_seconds: 600, // 10分動画を見た
+      duration_seconds: 600,
       created_at: new Date().toISOString()
     };
     await db.addLearningLog(log);
@@ -339,17 +449,53 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 2. テスト受験ボタンのアクション (合格)
   const handlePassTest = async (task: LearningTask) => {
+    const stepLessons = getTaskStepLessons(task);
+    const stepIds = stepLessons.map(s => String(s.id));
+
+    const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
+    stepIds.forEach(id => currentTaskCompletedIds.add(id));
+
+    const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
+    stepIds.forEach(id => studentCompletedIds.add(id));
+
     const updated: LearningTask = {
       ...task,
-      video_watched: true, // テスト合格時は自動で動画も見たとみなすか、前提
+      completed_lesson_ids: Array.from(currentTaskCompletedIds),
+      video_watched: true,
       test_passed: true,
       status: 'completed',
       actual_completed_date: currentDateStr
     };
-    
-    await db.saveLearningTasks([updated]);
 
-    // ログを追加
+    const updatedStudent: Student = {
+      ...currentStudent,
+      completed_lesson_ids: Array.from(studentCompletedIds),
+      last_completed_lesson_id: stepIds[stepIds.length - 1] || currentStudent.last_completed_lesson_id,
+      last_completed_at: new Date().toISOString()
+    };
+
+    for (const step of stepLessons) {
+      try {
+        await db.saveStudentLessonProgress({
+          id: `slp-${student.id}-${String(step.id)}`,
+          student_id: student.id,
+          subject: task.subject || 'その他',
+          lesson_id: String(step.id),
+          lesson_name: step.name || step.fullTitle,
+          task_id: task.id,
+          date: currentDateStr,
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('saveStudentLessonProgress error:', e);
+      }
+    }
+
+    await db.saveLearningTasks([updated]);
+    await db.saveStudent(updatedStudent);
+
     const log: LearningLog = {
       id: `log-${Date.now()}`,
       student_id: student.id,
@@ -362,12 +508,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     };
     await db.addLearningLog(log);
 
-    // 爆速判定を自動で呼び出す (もし今週の目標をクリアしたか？)
-    // テントルの講師ダッシュボード等で更新されるが、ここでも体験のために呼び出す
+    // 爆速判定を自動で呼び出す
     const allCurrentTasks = db.getLearningTasks();
     const studentTasks = allCurrentTasks.filter(t => t.student_id === student.id);
     
-    // 今週期限 (日曜日) を動的に算出
     const curDate = new Date(currentDateStr);
     const dayOfWeek = isNaN(curDate.getTime()) ? 0 : curDate.getDay();
     const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
@@ -383,7 +527,6 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     const allCompletedThisWeek = thisWeekTasks.length > 0 && thisWeekTasks.every(t => t.status === 'completed');
     if (allCompletedThisWeek) {
-      // 来週以降の未完了タスクを探す
       const futureTasks = studentTasks
         .filter(t => new Date(t.scheduled_date).getTime() > new Date(weekEndDate).getTime() && t.status !== 'completed' && t.status !== 'skipped')
         .sort((a, b) => new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime());
@@ -487,6 +630,31 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   return (
     <div className={dashboardClass}>
+      {toastMessage && (
+        <div 
+          data-testid="student-toast"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            background: 'linear-gradient(135deg, #10b981, #059669)',
+            color: '#ffffff',
+            padding: '12px 20px',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.35)',
+            fontSize: '0.9rem',
+            fontWeight: 700,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            animation: 'fadeIn 0.3s ease-out'
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
+
       <div className={styles.header}>
         <div className={styles.studentInfo}>
           <h1>
@@ -495,12 +663,12 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
-            {student.name} さんの学習画面
+            {currentStudent.name} さんの学習画面
           </h1>
           <div className={styles.studentMeta}>
-            <span>学年: <strong className={styles.badge}>{student.grade}</strong></span>
-            <span>ログインID: <code>{student.student_id}</code></span>
-            <span>アカウント状況: {getStatusBadge(student.status)}</span>
+            <span>学年: <strong className={styles.badge}>{currentStudent.grade}</strong></span>
+            <span>ログインID: <code>{currentStudent.student_id}</code></span>
+            <span>アカウント状況: {getStatusBadge(currentStudent.status)}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -690,22 +858,23 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                 const isCustomTask = !unit;
 
                 const stepLessons = getTaskStepLessons(task);
-                const completedStepIds = new Set<string>(task.completed_lesson_ids || []);
-                if (student.completed_lesson_ids) {
-                  student.completed_lesson_ids.forEach(id => completedStepIds.add(id));
-                }
+                const completedStepIds = new Set<string>();
+                (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
                 if (task.status === 'completed' || task.test_passed) {
-                  stepLessons.forEach(s => completedStepIds.add(s.id));
+                  stepLessons.forEach(s => completedStepIds.add(String(s.id)));
                 }
 
+                const completedCount = stepLessons.filter(s => completedStepIds.has(String(s.id))).length;
+
                 return (
-                  <div key={task.id} className={styles.periodRow}>
+                  <div key={task.id} className={styles.periodRow} data-testid={`period-row-${task.period}`}>
                     <div className={styles.periodNumber}>{task.period}</div>
                     <div className={styles.periodContent}>
                       <div className={styles.periodHeader}>
                         <span className={styles.subjectName}>{subjectName}</span>
                         <div>
-                          {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`}>合格完了！</span>}
+                          {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`} data-testid={`task-completed-badge-${task.period}`}>合格完了！</span>}
                           {task.status === 'failed' && <span className={`${styles.badge} ${styles.statusWarning}`}>不合格 (再挑戦)</span>}
                         </div>
                       </div>
@@ -716,14 +885,15 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         <div className={styles.stepCardContainer}>
                           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span>進捗ステップ</span>
-                            <span>{stepLessons.filter(s => completedStepIds.has(s.id)).length} / {stepLessons.length} 完了</span>
+                            <span data-testid={`step-progress-count-${task.period}`}>{completedCount} / {stepLessons.length} 完了</span>
                           </div>
                           {stepLessons.map((step, sIdx) => {
-                            const isStepDone = completedStepIds.has(step.id);
+                            const isStepDone = completedStepIds.has(String(step.id));
                             return (
                               <div 
                                 key={step.id || sIdx} 
                                 className={`${styles.stepCard} ${isStepDone ? styles.stepCardCompleted : ''}`}
+                                data-testid={`step-card-${task.period}-${sIdx}`}
                               >
                                 <div className={styles.stepTitle}>
                                   <span style={{ color: '#4f46e5', fontWeight: 700 }}>STEP {sIdx + 1}:</span>
@@ -731,7 +901,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                 </div>
                                 <div>
                                   {isStepDone ? (
-                                    <span className={styles.stepCompletedBadge}>
+                                    <span className={styles.stepCompletedBadge} data-testid={`step-done-badge-${task.period}-${sIdx}`}>
                                       ✅ 受講完了
                                     </span>
                                   ) : (
@@ -739,6 +909,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                       type="button"
                                       onClick={() => handleCompleteLessonStep(task, step, sIdx, stepLessons)}
                                       className={styles.stepCompleteBtn}
+                                      data-testid={`step-complete-btn-${task.period}-${sIdx}`}
                                     >
                                       🎯 完了にする
                                     </button>
@@ -786,8 +957,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                             <button 
                               onClick={() => handleCompleteCustomTask(task)} 
                               className={`${styles.btn} ${styles.btnSuccess}`}
+                              data-testid={`complete-task-btn-${task.period}`}
                             >
-                              この授業を完了にする
+                              {stepLessons.length > 1 ? 'このコマの全ステップを一括完了にする' : 'この授業を完了にする'}
                             </button>
                           )
                         ) : (
@@ -812,6 +984,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                 <button 
                                   onClick={() => handlePassTest(task)} 
                                   className={`${styles.btn} ${styles.btnSuccess}`}
+                                  data-testid={`complete-task-btn-${task.period}`}
                                 >
                                   単元テストを受ける (合格)
                                 </button>
@@ -843,11 +1016,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         {/* Right Side: Sugoroku Maps */}
         <div>
           <SugorokuMap
-            student={student}
-            subjects={student.selected_subjects && student.selected_subjects.length > 0 
-              ? student.selected_subjects 
-              : (student.grade.startsWith('小') ? ['算数', '国語', '英語', '理科', '社会'] : ['数学', '英語', '国語', '理科', '社会'])}
-            subject={student.grade.startsWith('小') ? '算数' : '数学'}
+            student={currentStudent}
+            subjects={currentStudent.selected_subjects && currentStudent.selected_subjects.length > 0 
+              ? currentStudent.selected_subjects 
+              : (currentStudent.grade.startsWith('小') ? ['算数', '国語', '英語', '理科', '社会'] : ['数学', '英語', '国語', '理科', '社会'])}
+            subject={currentStudent.grade.startsWith('小') ? '算数' : '数学'}
             units={units}
             tasks={tasks}
             todayTasks={todayTasks}

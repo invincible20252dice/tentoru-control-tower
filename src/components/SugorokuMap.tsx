@@ -102,13 +102,35 @@ export default function SugorokuMap({
     const node = nodes[i];
     const task = taskMap.get(node.id) || tasks.find(t => 
       (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
-      (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
+      (t.unit_id === node.id || t.start_lesson_id === node.id || t.end_lesson_id === node.id ||
+       String(t.unit_id) === String(node.id) || String(t.start_lesson_id) === String(node.id) || String(t.end_lesson_id) === String(node.id) ||
+       t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
     );
     
     const isNodeCompleted = task?.status === 'completed' || 
       task?.test_passed === true || 
-      (student?.completed_lesson_ids && student.completed_lesson_ids.includes(node.id)) ||
-      tasks.some(t => t.completed_lesson_ids && t.completed_lesson_ids.includes(node.id));
+      Boolean(student?.completed_lesson_ids && (
+        student.completed_lesson_ids.includes(node.id) || 
+        student.completed_lesson_ids.includes(String(node.id)) ||
+        student.completed_lesson_ids.includes(node.name)
+      )) ||
+      tasks.some(t => t.completed_lesson_ids && (
+        t.completed_lesson_ids.includes(node.id) || 
+        t.completed_lesson_ids.includes(String(node.id)) ||
+        t.completed_lesson_ids.includes(node.name)
+      )) ||
+      tasks.some(t => (t.status === 'completed' || t.test_passed) && (
+        t.unit_id === node.id || 
+        t.start_lesson_id === node.id || 
+        t.end_lesson_id === node.id ||
+        String(t.unit_id) === String(node.id) || 
+        String(t.start_lesson_id) === String(node.id) || 
+        String(t.end_lesson_id) === String(node.id) ||
+        t.custom_unit_name?.includes(node.name) || 
+        t.lesson_range?.includes(node.name) || 
+        t.start_lesson_name === node.name || 
+        t.end_lesson_name === node.name
+      ));
 
     if (isNodeCompleted || task?.status === 'skipped') {
       continue;
@@ -198,20 +220,43 @@ export default function SugorokuMap({
           {nodes.map((node, index) => {
             const task = taskMap.get(node.id) || tasks.find(t => 
               (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
-              (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
+              (t.unit_id === node.id || t.start_lesson_id === node.id || t.end_lesson_id === node.id ||
+               String(t.unit_id) === String(node.id) || String(t.start_lesson_id) === String(node.id) || String(t.end_lesson_id) === String(node.id) ||
+               t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
             );
 
             const isSkipped = task?.status === 'skipped';
             const isCompleted = task?.status === 'completed' || 
               task?.test_passed === true || 
-              (student?.completed_lesson_ids && student.completed_lesson_ids.includes(node.id)) ||
-              tasks.some(t => t.completed_lesson_ids && t.completed_lesson_ids.includes(node.id));
+              Boolean(student?.completed_lesson_ids && (
+                student.completed_lesson_ids.includes(node.id) || 
+                student.completed_lesson_ids.includes(String(node.id)) ||
+                student.completed_lesson_ids.includes(node.name)
+              )) ||
+              tasks.some(t => t.completed_lesson_ids && (
+                t.completed_lesson_ids.includes(node.id) || 
+                t.completed_lesson_ids.includes(String(node.id)) ||
+                t.completed_lesson_ids.includes(node.name)
+              )) ||
+              tasks.some(t => (t.status === 'completed' || t.test_passed) && (
+                t.unit_id === node.id || 
+                t.start_lesson_id === node.id || 
+                t.end_lesson_id === node.id ||
+                String(t.unit_id) === String(node.id) || 
+                String(t.start_lesson_id) === String(node.id) || 
+                String(t.end_lesson_id) === String(node.id) ||
+                t.custom_unit_name?.includes(node.name) || 
+                t.lesson_range?.includes(node.name) || 
+                t.start_lesson_name === node.name || 
+                t.end_lesson_name === node.name
+              ));
             const isVideoWatched = task?.video_watched || isCompleted;
             const isTestPassed = task?.test_passed || isCompleted;
 
             // Check if this node is in today's task range
             const isTodayTask = subjectTodayTasks.some(tt => {
               if (tt.unit_id === node.id || tt.start_lesson_id === node.id || tt.end_lesson_id === node.id) return true;
+              if (String(tt.unit_id) === String(node.id) || String(tt.start_lesson_id) === String(node.id) || String(tt.end_lesson_id) === String(node.id)) return true;
               if (tt.lesson_range?.includes(node.name) || tt.custom_unit_name?.includes(node.name) || tt.start_lesson_name === node.name || tt.end_lesson_name === node.name) return true;
               return false;
             });
@@ -253,22 +298,31 @@ export default function SugorokuMap({
               <div 
                 key={node.id} 
                 className={`${styles.nodeCard} ${isCurrentNode ? styles.activeNode : ''}`}
+                data-testid={`sugoroku-node-${node.id}`}
               >
                 <div className={styles.nodeSteps}>
                   {/* Video Node */}
-                  <div className={videoClass} title={`${node.fullTitle} - 動画視聴`}>
+                  <div 
+                    className={videoClass} 
+                    title={`${node.fullTitle} - 動画視聴`}
+                    data-testid={`sugoroku-video-${node.id}`}
+                  >
                     影
                     <span className={styles.stepLabel}>動画</span>
-                    {isCurrentNode && playerSubStep === 'video' && (
+                    {isCurrentNode && playerSubStep === 'video' && !isCompleted && (
                       <div className={styles.activePlayer} />
                     )}
                   </div>
 
                   {/* Test Node */}
-                  <div className={testClass} title={`${node.fullTitle} - テスト合格`}>
+                  <div 
+                    className={testClass} 
+                    title={`${node.fullTitle} - テスト合格`}
+                    data-testid={`sugoroku-test-${node.id}`}
+                  >
                     試
                     <span className={styles.stepLabel}>テスト</span>
-                    {isCurrentNode && (playerSubStep === 'test' || isTodayTask) && (
+                    {isCurrentNode && (playerSubStep === 'test' || isTodayTask) && !isCompleted && (
                       <div className={styles.activePlayer} />
                     )}
                   </div>
