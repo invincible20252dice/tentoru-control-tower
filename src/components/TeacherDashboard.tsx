@@ -211,6 +211,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   });
   const [periodCount, setPeriodCount] = useState<number>(2);
   const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
+  const [isSavingTimetable, setIsSavingTimetable] = useState(false);
+  const [timetableToast, setTimetableToast] = useState<string | null>(null);
 
   // 校舎別 AI授業自動設定ルール State
   const [isBranchAIRulesModalOpen, setIsBranchAIRulesModalOpen] = useState(false);
@@ -1241,111 +1243,156 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const handleSaveTimetable = async () => {
     if (!selectedStudent) return;
 
-    let targetStudents: any[] = [];
-    if (applyScope === 'individual') {
-      targetStudents = [selectedStudent];
-    } else if (applyScope === 'school') {
-      targetStudents = students.filter(s => s.school_id === selectedStudent.school_id);
-    } else if (applyScope === 'grade') {
-      targetStudents = students.filter(s => s.grade === selectedStudent.grade);
-    } else if (applyScope === 'level') {
-      targetStudents = students.filter(s => s.level === selectedStudent.level);
-    }
+    setIsSavingTimetable(true);
+    setTimetableToast(null);
 
-    // すべてのタスク、ミニテスト結果、宿題結果をDBからロード
-    let currentLearningTasks = db.getLearningTasks();
-    const allMiniTestResults = db.getMiniTestResults();
-    const allHomeworkResults = db.getHomeworkResults();
+    try {
+      let targetStudents: any[] = [];
+      if (applyScope === 'individual') {
+        targetStudents = [selectedStudent];
+      } else if (applyScope === 'school') {
+        targetStudents = students.filter(s => s.school_id === selectedStudent.school_id);
+      } else if (applyScope === 'grade') {
+        targetStudents = students.filter(s => s.grade === selectedStudent.grade);
+      } else if (applyScope === 'level') {
+        targetStudents = students.filter(s => s.level === selectedStudent.level);
+      }
 
-    for (const student of targetStudents) {
-      // 本日の既存のタスクの period を一旦クリア
-      let clearedTasks = currentLearningTasks.filter(t => t.student_id === student.id);
-      clearedTasks = clearedTasks.map(t => {
-        if (t.scheduled_date === scheduleDate) {
-          return { ...t, period: null, office_note: '' };
-        }
-        return t;
-      });
+      // すべてのタスク、ミニテスト結果、宿題結果をDBからロード
+      let currentLearningTasks = db.getLearningTasks();
+      const allMiniTestResults = db.getMiniTestResults();
+      const allHomeworkResults = db.getHomeworkResults();
 
-      const newCustomTasks: LearningTask[] = [];
-      let hasCustomTimetableUnit = false; // カリキュラム以外の授業がコマ割りに入ったかどうか
+      for (const student of targetStudents) {
+        // 本日の既存のタスクの period を一旦クリア
+        let clearedTasks = currentLearningTasks.filter(t => t.student_id === student.id);
+        clearedTasks = clearedTasks.map(t => {
+          if (t.scheduled_date === scheduleDate) {
+            return { ...t, period: null, office_note: '' };
+          }
+          return t;
+        });
 
-      // periodSelections の設定を反映
-      for (let p = 1; p <= periodCount; p++) {
-        const config = periodSelections[p];
-        if (!config || !config.subject) {
-          continue;
-        }
+        const newCustomTasks: LearningTask[] = [];
+        let hasCustomTimetableUnit = false; // カリキュラム以外の授業がコマ割りに入ったかどうか
 
-        if (config.subject === 'その他' || config.subject === '自由記述') {
-          hasCustomTimetableUnit = true;
-        }
-
-        if (config.unitId || config.startLessonId) {
-          const effectiveUnitId = config.unitId || config.startLessonId || '';
-          const selectedUnit = allCurriculumUnits.find(u => u.id === effectiveUnitId);
-          const selectedMaster = curriculumMastersList.find(m => m.id === effectiveUnitId || String(m.sort_order) === String(effectiveUnitId));
-          let targetUnitId = effectiveUnitId;
-
-          // 学校が異なる場合、適用先の学校のカリキュラム単元から同じものを探す
-          if (selectedUnit && selectedUnit.school_id !== student.school_id) {
-            const matchingUnit = allCurriculumUnits.find(
-              u => u.school_id === student.school_id &&
-                   u.subject === selectedUnit.subject &&
-                   u.name === selectedUnit.name
-            );
-            if (matchingUnit) {
-              targetUnitId = matchingUnit.id;
-            } else {
-              targetUnitId = '';
-            }
+        // periodSelections の設定を反映
+        for (let p = 1; p <= periodCount; p++) {
+          const config = periodSelections[p];
+          if (!config || !config.subject) {
+            continue;
           }
 
-          const startLessonName = config.startLessonName || (selectedUnit ? selectedUnit.name : (selectedMaster ? (selectedMaster.unit_name ? `${selectedMaster.unit_name} - ${selectedMaster.lesson_name}` : selectedMaster.lesson_name) : ''));
-          const endLessonName = config.endLessonName || startLessonName;
-          const rangeString = config.lessonRange || formatLessonRange(startLessonName, endLessonName);
+          if (config.subject === 'その他' || config.subject === '自由記述') {
+            hasCustomTimetableUnit = true;
+          }
 
-          if (targetUnitId) {
-            const existingTaskIdx = clearedTasks.findIndex(task => task.unit_id === targetUnitId);
-            if (existingTaskIdx >= 0) {
-              clearedTasks[existingTaskIdx] = {
-                ...clearedTasks[existingTaskIdx],
-                scheduled_date: scheduleDate,
-                period: p,
-                subject: config.subject,
-                custom_unit_name: rangeString || startLessonName || config.customTheme || clearedTasks[existingTaskIdx].custom_unit_name || (selectedUnit ? selectedUnit.name : ''),
-                start_lesson_id: config.startLessonId || targetUnitId,
-                end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
-                start_lesson_name: startLessonName,
-                end_lesson_name: endLessonName,
-                lesson_range: rangeString,
-                office_note: commonOfficeNote
-              };
+          if (config.unitId || config.startLessonId) {
+            const effectiveUnitId = config.unitId || config.startLessonId || '';
+            const selectedUnit = allCurriculumUnits.find(u => u.id === effectiveUnitId);
+            const selectedMaster = curriculumMastersList.find(m => m.id === effectiveUnitId || String(m.sort_order) === String(effectiveUnitId));
+            let targetUnitId = effectiveUnitId;
+
+            // 学校が異なる場合、適用先の学校のカリキュラム単元から同じものを探す
+            if (selectedUnit && selectedUnit.school_id !== student.school_id) {
+              const matchingUnit = allCurriculumUnits.find(
+                u => u.school_id === student.school_id &&
+                     u.subject === selectedUnit.subject &&
+                     u.name === selectedUnit.name
+              );
+              if (matchingUnit) {
+                targetUnitId = matchingUnit.id;
+              } else {
+                targetUnitId = '';
+              }
+            }
+
+            const startLessonName = config.startLessonName || (selectedUnit ? selectedUnit.name : (selectedMaster ? (selectedMaster.unit_name ? `${selectedMaster.unit_name} - ${selectedMaster.lesson_name}` : selectedMaster.lesson_name) : ''));
+            const endLessonName = config.endLessonName || startLessonName;
+            const rangeString = config.lessonRange || formatLessonRange(startLessonName, endLessonName);
+
+            if (targetUnitId) {
+              const existingTaskIdx = clearedTasks.findIndex(task => task.unit_id === targetUnitId);
+              if (existingTaskIdx >= 0) {
+                clearedTasks[existingTaskIdx] = {
+                  ...clearedTasks[existingTaskIdx],
+                  scheduled_date: scheduleDate,
+                  period: p,
+                  subject: config.subject,
+                  custom_unit_name: rangeString || startLessonName || config.customTheme || clearedTasks[existingTaskIdx].custom_unit_name || (selectedUnit ? selectedUnit.name : ''),
+                  start_lesson_id: config.startLessonId || targetUnitId,
+                  end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
+                  start_lesson_name: startLessonName,
+                  end_lesson_name: endLessonName,
+                  lesson_range: rangeString,
+                  office_note: commonOfficeNote
+                };
+              } else {
+                newCustomTasks.push({
+                  id: `task-${student.id}-${targetUnitId}-${Date.now()}-${p}`,
+                  student_id: student.id,
+                  unit_id: targetUnitId,
+                  scheduled_date: scheduleDate,
+                  period: p,
+                  status: 'unstarted',
+                  video_watched: false,
+                  test_passed: false,
+                  subject: config.subject,
+                  custom_unit_name: rangeString || startLessonName || config.customTheme || (selectedUnit ? selectedUnit.name : ''),
+                  start_lesson_id: config.startLessonId || targetUnitId,
+                  end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
+                  start_lesson_name: startLessonName,
+                  end_lesson_name: endLessonName,
+                  lesson_range: rangeString,
+                  office_note: commonOfficeNote,
+                  created_at: new Date().toISOString()
+                });
+              }
             } else {
-              newCustomTasks.push({
-                id: `task-${student.id}-${targetUnitId}-${Date.now()}-${p}`,
-                student_id: student.id,
-                unit_id: targetUnitId,
-                scheduled_date: scheduleDate,
-                period: p,
-                status: 'unstarted',
-                video_watched: false,
-                test_passed: false,
-                subject: config.subject,
-                custom_unit_name: rangeString || startLessonName || config.customTheme || (selectedUnit ? selectedUnit.name : ''),
-                start_lesson_id: config.startLessonId || targetUnitId,
-                end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
-                start_lesson_name: startLessonName,
-                end_lesson_name: endLessonName,
-                lesson_range: rangeString,
-                office_note: commonOfficeNote,
-                created_at: new Date().toISOString()
-              });
+              const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
+              const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
+              const customThemeName = selectedUnit ? selectedUnit.name : (config.customTheme || '');
+
+              if (existingCustomTaskIdx >= 0) {
+                clearedTasks[existingCustomTaskIdx] = {
+                  ...clearedTasks[existingCustomTaskIdx],
+                  scheduled_date: scheduleDate,
+                  period: p,
+                  subject: config.subject,
+                  custom_unit_name: customThemeName,
+                  start_lesson_id: config.startLessonId || '',
+                  end_lesson_id: config.endLessonId || '',
+                  start_lesson_name: startLessonName || customThemeName,
+                  end_lesson_name: endLessonName || customThemeName,
+                  lesson_range: rangeString || customThemeName,
+                  office_note: commonOfficeNote
+                };
+              } else {
+                newCustomTasks.push({
+                  id: `task-custom-${Date.now()}-${p}-${student.id}`,
+                  student_id: student.id,
+                  unit_id: customUnitId,
+                  scheduled_date: scheduleDate,
+                  period: p,
+                  status: 'unstarted',
+                  video_watched: false,
+                  test_passed: false,
+                  subject: config.subject,
+                  custom_unit_name: customThemeName,
+                  start_lesson_id: config.startLessonId || '',
+                  end_lesson_id: config.endLessonId || '',
+                  start_lesson_name: startLessonName || customThemeName,
+                  end_lesson_name: endLessonName || customThemeName,
+                  lesson_range: rangeString || customThemeName,
+                  office_note: commonOfficeNote,
+                  created_at: new Date().toISOString()
+                });
+              }
             }
           } else {
+            // 最初からカスタムテーマ指定の場合
             const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
             const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
-            const customThemeName = selectedUnit ? selectedUnit.name : (config.customTheme || '');
 
             if (existingCustomTaskIdx >= 0) {
               clearedTasks[existingCustomTaskIdx] = {
@@ -1353,12 +1400,12 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 scheduled_date: scheduleDate,
                 period: p,
                 subject: config.subject,
-                custom_unit_name: customThemeName,
+                custom_unit_name: config.customTheme,
                 start_lesson_id: config.startLessonId || '',
                 end_lesson_id: config.endLessonId || '',
-                start_lesson_name: startLessonName || customThemeName,
-                end_lesson_name: endLessonName || customThemeName,
-                lesson_range: rangeString || customThemeName,
+                start_lesson_name: config.startLessonName || config.customTheme,
+                end_lesson_name: config.endLessonName || config.customTheme,
+                lesson_range: config.lessonRange || config.customTheme,
                 office_note: commonOfficeNote
               };
             } else {
@@ -1372,188 +1419,157 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                 video_watched: false,
                 test_passed: false,
                 subject: config.subject,
-                custom_unit_name: customThemeName,
+                custom_unit_name: config.customTheme,
                 start_lesson_id: config.startLessonId || '',
                 end_lesson_id: config.endLessonId || '',
-                start_lesson_name: startLessonName || customThemeName,
-                end_lesson_name: endLessonName || customThemeName,
-                lesson_range: rangeString || customThemeName,
+                start_lesson_name: config.startLessonName || config.customTheme,
+                end_lesson_name: config.endLessonName || config.customTheme,
+                lesson_range: config.lessonRange || config.customTheme,
                 office_note: commonOfficeNote,
                 created_at: new Date().toISOString()
               });
             }
           }
-        } else {
-          // 最初からカスタムテーマ指定の場合
-          const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
-          const existingCustomTaskIdx = clearedTasks.findIndex(t => t.unit_id === customUnitId);
+        }
 
-          if (existingCustomTaskIdx >= 0) {
-            clearedTasks[existingCustomTaskIdx] = {
-              ...clearedTasks[existingCustomTaskIdx],
-              scheduled_date: scheduleDate,
-              period: p,
-              subject: config.subject,
-              custom_unit_name: config.customTheme,
-              start_lesson_id: config.startLessonId || '',
-              end_lesson_id: config.endLessonId || '',
-              start_lesson_name: config.startLessonName || config.customTheme,
-              end_lesson_name: config.endLessonName || config.customTheme,
-              lesson_range: config.lessonRange || config.customTheme,
-              office_note: commonOfficeNote
+        // メモリ上の全タスクリストをこの生徒向けに更新する
+        const studentOtherTasks = currentLearningTasks.filter(t => t.student_id !== student.id);
+        let updatedStudentTasks = [...studentOtherTasks, ...clearedTasks, ...newCustomTasks];
+
+        // 【後ろ倒し/リスケジュールの適用】
+        // もしカリキュラム以外の授業がコマ割りに入っていたら、本来予定されていた未完了タスクを明日以降に後ろ倒しする
+        if (hasCustomTimetableUnit) {
+          const tomorrowStr = new Date(new Date(scheduleDate).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const futureDates: string[] = [];
+          const baseDate = new Date(scheduleDate);
+          for (let i = 1; i <= 90; i++) {
+            const nextDate = new Date(baseDate.getTime() + i * 24 * 60 * 60 * 1000);
+            futureDates.push(nextDate.toISOString().split('T')[0]);
+          }
+          const allUnits = db.getCurriculumUnits();
+          
+          updatedStudentTasks = rescheduleFutureUncompletedTasks(
+            student.id,
+            updatedStudentTasks,
+            allUnits,
+            tomorrowStr,
+            futureDates
+          );
+        }
+
+        currentLearningTasks = updatedStudentTasks;
+
+        // 複数のテスト結果 (MiniTestResult) を一括同期保存 (対象スコープ一括複製対応)
+        const existingMiniResultsForToday = allMiniTestResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
+        const savedTestIds = new Set<string>();
+        for (const test of todayTests) {
+          if (!test.content.trim()) continue;
+
+          let relStudents = [student];
+          if (test.targetScope === 'grade') {
+            relStudents = students.filter(s => s.grade === student.grade);
+          } else if (test.targetScope === 'school') {
+            relStudents = students.filter(s => s.school_id === student.school_id);
+          } else if (test.targetScope === 'level') {
+            relStudents = students.filter(s => s.level === student.level);
+          }
+
+          for (const relSt of relStudents) {
+            const relExisting = allMiniTestResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.test_content === test.content);
+            const testData: MiniTestResult = {
+              id: relExisting?.id || `mini-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              student_id: relSt.id,
+              date: scheduleDate,
+              test_content: test.content,
+              score: relExisting ? relExisting.score : null,
+              passing_line: test.passingLine || null,
+              target_scope: test.targetScope || 'individual',
+              created_at: relExisting?.created_at || new Date().toISOString()
             };
-          } else {
-            newCustomTasks.push({
-              id: `task-custom-${Date.now()}-${p}-${student.id}`,
-              student_id: student.id,
-              unit_id: customUnitId,
-              scheduled_date: scheduleDate,
-              period: p,
-              status: 'unstarted',
-              video_watched: false,
-              test_passed: false,
-              subject: config.subject,
-              custom_unit_name: config.customTheme,
-              start_lesson_id: config.startLessonId || '',
-              end_lesson_id: config.endLessonId || '',
-              start_lesson_name: config.startLessonName || config.customTheme,
-              end_lesson_name: config.endLessonName || config.customTheme,
-              lesson_range: config.lessonRange || config.customTheme,
-              office_note: commonOfficeNote,
-              created_at: new Date().toISOString()
-            });
+            await db.saveMiniTestResult(testData);
+            if (relSt.id === student.id) {
+              savedTestIds.add(testData.id);
+            }
           }
         }
-      }
 
-      // メモリ上の全タスクリストをこの生徒向けに更新する
-      const studentOtherTasks = currentLearningTasks.filter(t => t.student_id !== student.id);
-      let updatedStudentTasks = [...studentOtherTasks, ...clearedTasks, ...newCustomTasks];
-
-      // 【後ろ倒し/リスケジュールの適用】
-      // もしカリキュラム以外の授業がコマ割りに入っていたら、本来予定されていた未完了タスクを明日以降に後ろ倒しする
-      if (hasCustomTimetableUnit) {
-        const tomorrowStr = new Date(new Date(scheduleDate).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const futureDates: string[] = [];
-        const baseDate = new Date(scheduleDate);
-        for (let i = 1; i <= 90; i++) {
-          const nextDate = new Date(baseDate.getTime() + i * 24 * 60 * 60 * 1000);
-          futureDates.push(nextDate.toISOString().split('T')[0]);
-        }
-        const allUnits = db.getCurriculumUnits();
-        
-        updatedStudentTasks = rescheduleFutureUncompletedTasks(
-          student.id,
-          updatedStudentTasks,
-          allUnits,
-          tomorrowStr,
-          futureDates
-        );
-      }
-
-      currentLearningTasks = updatedStudentTasks;
-
-      // 複数のテスト結果 (MiniTestResult) を一括同期保存 (対象スコープ一括複製対応)
-      const existingMiniResultsForToday = allMiniTestResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
-      const savedTestIds = new Set<string>();
-      for (const test of todayTests) {
-        if (!test.content.trim()) continue;
-
-        let relStudents = [student];
-        if (test.targetScope === 'grade') {
-          relStudents = students.filter(s => s.grade === student.grade);
-        } else if (test.targetScope === 'school') {
-          relStudents = students.filter(s => s.school_id === student.school_id);
-        } else if (test.targetScope === 'level') {
-          relStudents = students.filter(s => s.level === student.level);
-        }
-
-        for (const relSt of relStudents) {
-          const relExisting = allMiniTestResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.test_content === test.content);
-          const testData: MiniTestResult = {
-            id: relExisting?.id || `mini-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            student_id: relSt.id,
-            date: scheduleDate,
-            test_content: test.content,
-            score: relExisting ? relExisting.score : null,
-            passing_line: test.passingLine || null,
-            target_scope: test.targetScope || 'individual',
-            created_at: relExisting?.created_at || new Date().toISOString()
-          };
-          await db.saveMiniTestResult(testData);
-          if (relSt.id === student.id) {
-            savedTestIds.add(testData.id);
+        for (const existing of existingMiniResultsForToday) {
+          if (!savedTestIds.has(existing.id)) {
+            await db.deleteMiniTestResult(existing.id);
           }
         }
-      }
 
-      for (const existing of existingMiniResultsForToday) {
-        if (!savedTestIds.has(existing.id)) {
-          await db.deleteMiniTestResult(existing.id);
-        }
-      }
+        // 複数の宿題結果 (HomeworkResult) を一括同期保存 (対象スコープ一括複製対応)
+        const existingHwResultsForToday = allHomeworkResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
+        const savedHwIds = new Set<string>();
+        for (const hw of todayHomeworks) {
+          if (!hw.content.trim()) continue;
 
-      // 複数の宿題結果 (HomeworkResult) を一括同期保存 (対象スコープ一括複製対応)
-      const existingHwResultsForToday = allHomeworkResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
-      const savedHwIds = new Set<string>();
-      for (const hw of todayHomeworks) {
-        if (!hw.content.trim()) continue;
+          let relStudents = [student];
+          if (hw.targetScope === 'grade') {
+            relStudents = students.filter(s => s.grade === student.grade);
+          } else if (hw.targetScope === 'school') {
+            relStudents = students.filter(s => s.school_id === student.school_id);
+          } else if (hw.targetScope === 'level') {
+            relStudents = students.filter(s => s.level === student.level);
+          }
 
-        let relStudents = [student];
-        if (hw.targetScope === 'grade') {
-          relStudents = students.filter(s => s.grade === student.grade);
-        } else if (hw.targetScope === 'school') {
-          relStudents = students.filter(s => s.school_id === student.school_id);
-        } else if (hw.targetScope === 'level') {
-          relStudents = students.filter(s => s.level === student.level);
-        }
-
-        for (const relSt of relStudents) {
-          const relExisting = allHomeworkResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.homework_content === hw.content);
-          const hwData: HomeworkResult = {
-            id: relExisting?.id || `hw-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            student_id: relSt.id,
-            date: scheduleDate,
-            homework_content: hw.content,
-            homework_deadline: hw.deadline,
-            status: relExisting ? relExisting.status : 'incomplete',
-            target_scope: hw.targetScope || 'individual',
-            created_at: relExisting?.created_at || new Date().toISOString()
-          };
-          await db.saveHomeworkResult(hwData);
-          if (relSt.id === student.id) {
-            savedHwIds.add(hwData.id);
+          for (const relSt of relStudents) {
+            const relExisting = allHomeworkResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.homework_content === hw.content);
+            const hwData: HomeworkResult = {
+              id: relExisting?.id || `hw-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              student_id: relSt.id,
+              date: scheduleDate,
+              homework_content: hw.content,
+              homework_deadline: hw.deadline,
+              status: relExisting ? relExisting.status : 'incomplete',
+              target_scope: hw.targetScope || 'individual',
+              created_at: relExisting?.created_at || new Date().toISOString()
+            };
+            await db.saveHomeworkResult(hwData);
+            if (relSt.id === student.id) {
+              savedHwIds.add(hwData.id);
+            }
           }
         }
-      }
 
-      for (const existing of existingHwResultsForToday) {
-        if (!savedHwIds.has(existing.id)) {
-          await db.deleteHomeworkResult(existing.id);
+        for (const existing of existingHwResultsForToday) {
+          if (!savedHwIds.has(existing.id)) {
+            await db.deleteHomeworkResult(existing.id);
+          }
+        }
+
+        // 生徒情報の period_count / default_slots も更新して保存
+        const updatedStudent = {
+          ...student,
+          default_slots: periodCount,
+          period_count: periodCount
+        };
+        await db.saveStudent(updatedStudent);
+        if (student.id === selectedStudent.id) {
+          setSelectedStudent(updatedStudent);
         }
       }
 
-      // 生徒情報の period_count / default_slots も更新して保存
-      const updatedStudent = {
-        ...student,
-        default_slots: periodCount,
-        period_count: periodCount
-      };
-      await db.saveStudent(updatedStudent);
-      if (student.id === selectedStudent.id) {
-        setSelectedStudent(updatedStudent);
-      }
+      // すべての生徒のタスクをマージしたタスクリストを一括保存
+      await db.saveLearningTasks(currentLearningTasks);
+
+      // トースト通知を表示
+      setTimetableToast('✅ 時間割を保存しました');
+      setTimeout(() => setTimetableToast(null), 4000);
+
+      alert(
+        applyScope === 'individual'
+          ? '今日の時間割コマ割りを保存しました！'
+          : '今日の時間割コマ割りを対象生徒全員に一括保存しました！'
+      );
+      await loadData();
+    } catch (err: any) {
+      console.error('handleSaveTimetable error:', err);
+      alert(`時間割の保存中にエラーが発生しました: ${err?.message || err}`);
+    } finally {
+      setIsSavingTimetable(false);
     }
-
-    // すべての生徒のタスクをマージしたタスクリストを一括保存
-    await db.saveLearningTasks(currentLearningTasks);
-
-    alert(
-      applyScope === 'individual'
-        ? '今日の時間割コマ割りを保存しました！'
-        : '今日の時間割コマ割りを対象生徒全員に一括保存しました！'
-    );
-    loadData();
   };
 
   // 小テスト結果の保存
@@ -3705,8 +3721,39 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                         </p>
                       </div>
                       
-                      <button onClick={handleSaveTimetable} className={styles.btn} style={{ marginTop: '16px' }}>
-                        時間割コマ割りを保存
+                      {timetableToast && (
+                        <div 
+                          data-testid="timetable-toast"
+                          style={{
+                            marginTop: '14px',
+                            padding: '10px 14px',
+                            background: '#dcfce7',
+                            color: '#166534',
+                            borderRadius: '8px',
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            border: '1px solid #86efac',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            boxShadow: '0 2px 8px rgba(22, 101, 52, 0.15)'
+                          }}
+                        >
+                          <span>{timetableToast}</span>
+                        </div>
+                      )}
+
+                      <button 
+                        onClick={handleSaveTimetable} 
+                        disabled={isSavingTimetable}
+                        className={styles.btn} 
+                        style={{ 
+                          marginTop: '16px',
+                          opacity: isSavingTimetable ? 0.7 : 1,
+                          cursor: isSavingTimetable ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {isSavingTimetable ? '時間割コマ割りを保存中...' : '時間割コマ割りを保存'}
                       </button>
                     </div>
                   </div>

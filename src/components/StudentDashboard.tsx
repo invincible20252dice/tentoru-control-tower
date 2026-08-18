@@ -654,14 +654,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
         {/* Right Side: Sugoroku Maps */}
         <div>
-          {student.grade.startsWith('中') ? (
-            <>
-              <SugorokuMap subject="数学" units={units} tasks={tasks} theme={theme} />
-              <SugorokuMap subject="英語" units={units} tasks={tasks} theme={theme} />
-            </>
-          ) : (
-            <SugorokuMap subject="算数" units={units} tasks={tasks} theme={theme} />
-          )}
+          <SugorokuMap
+            student={student}
+            subjects={student.selected_subjects && student.selected_subjects.length > 0 
+              ? student.selected_subjects 
+              : (student.grade.startsWith('小') ? ['算数', '国語', '英語', '理科', '社会'] : ['数学', '英語', '国語', '理科', '社会'])}
+            subject={student.grade.startsWith('小') ? '算数' : '数学'}
+            units={units}
+            tasks={tasks}
+            todayTasks={todayTasks}
+            theme={theme}
+          />
         </div>
 
         {/* 週間スケジュール・仮予定表示ビュー */}

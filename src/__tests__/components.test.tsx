@@ -114,7 +114,7 @@ describe('UI Components Render & Interaction Tests', () => {
       />
     );
     expect(screen.getByText(/数学の学習マップ/)).toBeInTheDocument();
-    expect(screen.getByText(/単元1/)).toBeInTheDocument();
+    expect(screen.getByText(/多項式の乗法と公式①|単元1/)).toBeInTheDocument();
 
     // Edge Case: empty tasks (no tasks matching unit)
     const { container: container1 } = render(
