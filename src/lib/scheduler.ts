@@ -1,4 +1,4 @@
-import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES } from './db';
+import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES, StudentLessonProgress } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
@@ -16,6 +16,194 @@ export function formatLessonRange(startName?: string | null, endName?: string | 
 }
 
 /**
+ * 生徒の前回までの完了状況に基づき、次回授業日の開始授業 (From: 直近の未完了授業) を特定する
+ */
+export function findNextUncompletedLessonForSubject(params: {
+  student?: Student | null;
+  subject: string;
+  tasks?: LearningTask[];
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  schoolId?: string;
+  lessonProgressList?: StudentLessonProgress[];
+}): {
+  lessonId: string | null;
+  lessonName: string | null;
+  masterIndex: number;
+} {
+  const {
+    student,
+    subject,
+    tasks = [],
+    curriculumMasters = [],
+    curriculumUnits = [],
+    schoolId = student?.school_id,
+    lessonProgressList = []
+  } = params;
+
+  // 1. 対象教科の全授業リストを抽出
+  let masterLessons = curriculumMasters
+    .filter(m => m.subject === subject || (subject === '算数' && m.subject === '数学') || (subject === '数学' && m.subject === '算数'))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map(m => ({
+      id: m.id,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+      sort_order: m.sort_order ?? 0
+    }));
+
+  if (masterLessons.length === 0) {
+    const unitLessons = curriculumUnits
+      .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
+                   (u.subject === subject || (subject === '数学' && u.subject === '算数') || (subject === '算数' && u.subject === '数学')))
+      .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        sort_order: u.sequence_order ?? 0
+      }));
+    if (unitLessons.length > 0) {
+      masterLessons = unitLessons;
+    }
+  }
+
+  if (masterLessons.length === 0) {
+    return { lessonId: null, lessonName: null, masterIndex: -1 };
+  }
+
+  if (!student) {
+    return {
+      lessonId: masterLessons[0].id,
+      lessonName: masterLessons[0].name,
+      masterIndex: 0
+    };
+  }
+
+  // 2. 完了した授業IDを収集
+  const completedIds = new Set<string>();
+  if (student.completed_lesson_ids) {
+    student.completed_lesson_ids.forEach(id => completedIds.add(id));
+  }
+  lessonProgressList
+    .filter(p => p.student_id === student.id && p.status === 'completed')
+    .forEach(p => completedIds.add(p.lesson_id));
+
+  // 完了したタスク内の completed_lesson_ids や unit_id
+  const studentCompletedTasks = tasks.filter(t => t.student_id === student.id && (t.status === 'completed' || t.test_passed));
+  studentCompletedTasks.forEach(t => {
+    if (t.completed_lesson_ids) {
+      t.completed_lesson_ids.forEach(id => completedIds.add(id));
+    }
+    if (t.unit_id) completedIds.add(t.unit_id);
+    if (t.start_lesson_id) completedIds.add(t.start_lesson_id);
+    if (t.end_lesson_id) completedIds.add(t.end_lesson_id);
+  });
+
+  // 3. スタート位置設定があれば、その位置より前の授業はスキップ扱い（探索開始位置とする）
+  const startUnitId = getStudentStartUnitIdForSubject(student, subject);
+  let startThresholdIdx = 0;
+  if (startUnitId) {
+    const sIdx = masterLessons.findIndex(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId));
+    if (sIdx >= 0) startThresholdIdx = sIdx;
+  }
+
+  // 4. masterLessons の中で、startThresholdIdx 以降でまだ完了していない最初の授業を探す
+  for (let i = startThresholdIdx; i < masterLessons.length; i++) {
+    const l = masterLessons[i];
+    if (!completedIds.has(l.id)) {
+      return {
+        lessonId: l.id,
+        lessonName: l.name,
+        masterIndex: i
+      };
+    }
+  }
+
+  // 全て完了している場合は最後の授業
+  const lastLesson = masterLessons[masterLessons.length - 1];
+  return {
+    lessonId: lastLesson.id,
+    lessonName: lastLesson.name,
+    masterIndex: masterLessons.length - 1
+  };
+}
+
+/**
+ * 生徒のこれまでの消化ペース（1コマあたりの授業数）と校舎ルールを参照し、
+ * 次回授業の適切な目標授業（To）をAI/ロジックが自動推論する
+ */
+export function inferStudentSubjectPace(params: {
+  student?: Student | null;
+  subject: string;
+  tasks?: LearningTask[];
+  branchRules?: BranchAIRules | null;
+  lessonProgressList?: StudentLessonProgress[];
+}): {
+  estimatedLessonsPerSlot: number;
+  reason: string;
+} {
+  const { student, subject, tasks = [], branchRules, lessonProgressList = [] } = params;
+  const basePace = branchRules?.lessons_per_slot || 2;
+
+  if (!student) {
+    return { estimatedLessonsPerSlot: basePace, reason: `校舎標準ペース (${basePace}授業/コマ)` };
+  }
+
+  // 1. 直近の完了タスクから消化スピードを算出
+  const completedSubjectTasks = tasks.filter(t => 
+    t.student_id === student.id &&
+    t.status === 'completed' &&
+    (t.subject === subject || (!t.subject && (subject === '数学' || subject === '算数')))
+  );
+
+  let totalLessonsCompleted = 0;
+  let countOfSessions = 0;
+
+  completedSubjectTasks.forEach(task => {
+    if (task.completed_lesson_ids && task.completed_lesson_ids.length > 0) {
+      totalLessonsCompleted += task.completed_lesson_ids.length;
+      countOfSessions++;
+    } else if (task.lesson_range && task.lesson_range.includes('〜')) {
+      totalLessonsCompleted += basePace + 0.5;
+      countOfSessions++;
+    } else {
+      totalLessonsCompleted += basePace;
+      countOfSessions++;
+    }
+  });
+
+  // もし過去の実績がある場合、その平均値
+  let dynamicPace = countOfSessions > 0 ? (totalLessonsCompleted / countOfSessions) : basePace;
+
+  // 2. 生徒のステータスによる補正
+  let reason = '';
+  if (student.status === 'fast') {
+    dynamicPace = Math.max(dynamicPace, basePace + 1);
+    reason = `🚀 爆速進行モード: 直近実績 (${dynamicPace.toFixed(1)}授業) に基づき先取り目標を設定`;
+  } else if (student.status === 'warning') {
+    dynamicPace = Math.min(dynamicPace, Math.max(1, basePace - 1));
+    reason = `⚠️ 計画パンク防止: 確実な定着のためペースを調整 (${Math.round(dynamicPace)}授業/コマ)`;
+  } else if (countOfSessions > 0) {
+    reason = `🤖 AI推論: 過去${countOfSessions}回の平均消化ペース (${dynamicPace.toFixed(1)}授業/コマ) を適用`;
+  } else {
+    reason = `校舎設定ルール: 標準${basePace}授業/コマ`;
+  }
+
+  // 3. レベル補正
+  if (student.level === 'A') {
+    dynamicPace = Math.max(dynamicPace, 2);
+  } else if (student.level === 'C') {
+    dynamicPace = Math.min(dynamicPace, 2);
+  }
+
+  const roundedPace = Math.max(1, Math.min(5, Math.round(dynamicPace)));
+
+  return {
+    estimatedLessonsPerSlot: roundedPace,
+    reason
+  };
+}
+
+/**
  * 1コマあたりの進捗授業範囲（From 〜 To）を算出する
  */
 export function calculateLessonRangeForSlot(params: {
@@ -25,18 +213,35 @@ export function calculateLessonRangeForSlot(params: {
   curriculumMasters?: CurriculumMaster[];
   curriculumUnits?: CurriculumUnit[];
   schoolId?: string;
+  student?: Student | null;
+  tasks?: LearningTask[];
+  branchRules?: BranchAIRules | null;
+  lessonProgressList?: StudentLessonProgress[];
 }): {
   start_lesson_id: string | null;
   end_lesson_id: string | null;
   start_lesson_name: string | null;
   end_lesson_name: string | null;
   lesson_range: string | null;
+  inferred_pace?: number;
+  pace_reason?: string;
 } {
-  const { subject, startLessonId, lessonsPerSlot = 2, curriculumMasters = [], curriculumUnits = [], schoolId } = params;
+  const {
+    subject,
+    startLessonId,
+    lessonsPerSlot,
+    curriculumMasters = [],
+    curriculumUnits = [],
+    schoolId = params.student?.school_id,
+    student,
+    tasks = [],
+    branchRules,
+    lessonProgressList = []
+  } = params;
 
   // 1. 対象教科の授業リストを抽出
   let masterLessons = curriculumMasters
-    .filter(m => m.subject === subject)
+    .filter(m => m.subject === subject || (subject === '算数' && m.subject === '数学') || (subject === '数学' && m.subject === '算数'))
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map(m => ({
       id: m.id,
@@ -68,16 +273,44 @@ export function calculateLessonRangeForSlot(params: {
     };
   }
 
-  // 2. 開始授業の特定
+  // 2. 開始授業の特定 (startLessonId がなければ直近の未完了授業を自動特定)
   let startIdx = 0;
   if (startLessonId) {
     const foundIdx = masterLessons.findIndex(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId));
     if (foundIdx >= 0) {
       startIdx = foundIdx;
     }
+  } else if (student) {
+    const nextUncompleted = findNextUncompletedLessonForSubject({
+      student,
+      subject,
+      tasks,
+      curriculumMasters,
+      curriculumUnits,
+      schoolId,
+      lessonProgressList
+    });
+    if (nextUncompleted.masterIndex >= 0) {
+      startIdx = nextUncompleted.masterIndex;
+    }
   }
 
-  const endIdx = Math.min(startIdx + Math.max(1, lessonsPerSlot) - 1, masterLessons.length - 1);
+  // 3. ペース推論 (lessonsPerSlot が未指定なら AI 推論)
+  let effectivePace = lessonsPerSlot;
+  let paceReason = '';
+  if (!effectivePace) {
+    const inference = inferStudentSubjectPace({
+      student,
+      subject,
+      tasks,
+      branchRules,
+      lessonProgressList
+    });
+    effectivePace = inference.estimatedLessonsPerSlot;
+    paceReason = inference.reason;
+  }
+
+  const endIdx = Math.min(startIdx + Math.max(1, effectivePace) - 1, masterLessons.length - 1);
   const startItem = masterLessons[startIdx];
   const endItem = masterLessons[endIdx];
 
@@ -90,7 +323,9 @@ export function calculateLessonRangeForSlot(params: {
     end_lesson_id: endItem?.id || startItem?.id || null,
     start_lesson_name: startName,
     end_lesson_name: endName,
-    lesson_range: rangeStr || null
+    lesson_range: rangeStr || null,
+    inferred_pace: effectivePace,
+    pace_reason: paceReason
   };
 }
 

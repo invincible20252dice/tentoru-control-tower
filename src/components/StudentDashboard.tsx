@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
-import { db, Student, LearningTask, CurriculumUnit, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
+import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
 import SugorokuMap from './SugorokuMap';
 import { TestScoreRadarChart } from './TestScoreRadarChart';
 import { WeeklyScheduleViewer } from './WeeklyScheduleViewer';
@@ -38,6 +38,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
   const [tasks, setTasks] = useState<LearningTask[]>(() => db.getLearningTasks().filter(t => t.student_id === student.id));
   const [units, setUnits] = useState<CurriculumUnit[]>(() => db.getCurriculumUnits());
+  const [curriculumMasters, setCurriculumMasters] = useState<CurriculumMaster[]>(() => db.getCurriculumMasters());
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>(() => {
     const d = determineInitialDate();
     const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
@@ -65,10 +66,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       studentTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
     }
     const allUnits = db.getCurriculumUnits();
+    let allMasters: CurriculumMaster[] = [];
+    try {
+      allMasters = await db.fetchCurriculumMasters();
+    } catch {
+      allMasters = db.getCurriculumMasters();
+    }
     const config = db.getStudentScheduleConfig(student.id);
     setScheduleConfig(config);
     setTasks(studentTasks);
     setUnits(allUnits);
+    setCurriculumMasters(allMasters);
 
     // 日付の決定ロジック
     let targetDate = currentDateStr;
@@ -140,6 +148,138 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   useEffect(() => {
     loadData();
   }, [student.id, student.level, currentDateStr]);
+
+  // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
+  const getTaskStepLessons = (task: LearningTask): Array<{ id: string; name: string; fullTitle: string }> => {
+    const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || '数学';
+    const masterLessons = curriculumMasters
+      .filter(m => m.subject === taskSubject || (taskSubject === '算数' && m.subject === '数学') || (taskSubject === '数学' && m.subject === '算数'))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(m => ({
+        id: m.id,
+        name: m.lesson_name || m.unit_name || '',
+        fullTitle: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : (m.lesson_name || '')
+      }));
+
+    if (masterLessons.length > 0) {
+      let startIdx = -1;
+      let endIdx = -1;
+
+      if (task.start_lesson_id) {
+        startIdx = masterLessons.findIndex(m => m.id === task.start_lesson_id || String(m.id) === String(task.start_lesson_id));
+      }
+      if (startIdx < 0 && task.start_lesson_name) {
+        startIdx = masterLessons.findIndex(m => m.name === task.start_lesson_name || m.fullTitle === task.start_lesson_name || task.start_lesson_name?.includes(m.name));
+      }
+
+      if (task.end_lesson_id) {
+        endIdx = masterLessons.findIndex(m => m.id === task.end_lesson_id || String(m.id) === String(task.end_lesson_id));
+      }
+      if (endIdx < 0 && task.end_lesson_name) {
+        endIdx = masterLessons.findIndex(m => m.name === task.end_lesson_name || m.fullTitle === task.end_lesson_name || task.end_lesson_name?.includes(m.name));
+      }
+
+      if (startIdx >= 0) {
+        if (endIdx >= startIdx) {
+          return masterLessons.slice(startIdx, endIdx + 1);
+        }
+        return [masterLessons[startIdx]];
+      }
+    }
+
+    // fallback to curriculumUnits
+    if (task.unit_id) {
+      const unit = units.find(u => u.id === task.unit_id);
+      if (unit) {
+        return [{ id: unit.id, name: unit.name, fullTitle: unit.name }];
+      }
+    }
+
+    const defaultName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '授業';
+    return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
+  };
+
+  // 各授業ステップの受講完了アクション
+  const handleCompleteLessonStep = async (
+    task: LearningTask,
+    step: { id: string; name: string; fullTitle: string },
+    stepIndex: number,
+    allSteps: Array<{ id: string; name: string; fullTitle: string }>
+  ) => {
+    const currentCompletedIds = new Set<string>(task.completed_lesson_ids || []);
+    currentCompletedIds.add(step.id);
+
+    const studentCompletedIds = new Set<string>(student.completed_lesson_ids || []);
+    studentCompletedIds.add(step.id);
+
+    const isAllStepsCompleted = allSteps.every(s => currentCompletedIds.has(s.id));
+
+    const updatedTask: LearningTask = {
+      ...task,
+      completed_lesson_ids: Array.from(currentCompletedIds),
+      video_watched: true,
+      ...(isAllStepsCompleted ? {
+        status: 'completed' as const,
+        test_passed: true,
+        actual_completed_date: currentDateStr
+      } : {
+        status: task.status === 'completed' ? 'completed' : 'unstarted'
+      })
+    };
+
+    const updatedStudent: Student = {
+      ...student,
+      completed_lesson_ids: Array.from(studentCompletedIds),
+      last_completed_lesson_id: step.id,
+      last_completed_at: new Date().toISOString()
+    };
+
+    // 1. レッスン進捗を保存
+    await db.saveStudentLessonProgress({
+      id: `slp-${student.id}-${step.id}-${Date.now()}`,
+      student_id: student.id,
+      subject: task.subject || 'その他',
+      lesson_id: step.id,
+      lesson_name: step.name || step.fullTitle,
+      task_id: task.id,
+      date: currentDateStr,
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    });
+
+    // 2. タスクと生徒情報を保存
+    await db.saveLearningTasks([updatedTask]);
+    await db.saveStudent(updatedStudent);
+
+    // 3. ログ記録
+    await db.addLearningLog({
+      id: `log-step-${Date.now()}`,
+      student_id: student.id,
+      unit_id: task.unit_id || step.id,
+      log_type: 'video_view',
+      duration_seconds: 600,
+      created_at: new Date().toISOString()
+    });
+
+    if (isAllStepsCompleted) {
+      await db.addLearningLog({
+        id: `log-pass-${Date.now()}`,
+        student_id: student.id,
+        unit_id: task.unit_id || step.id,
+        log_type: 'test_result',
+        score: 100,
+        total_questions: 10,
+        incorrect_genres: [],
+        created_at: new Date().toISOString()
+      });
+      alert(`🎉 【第${task.period}コマ 完了！】\n「${step.name || step.fullTitle}」を完了し、このコマの全目標を達成しました！\n右のすごろくマップも進捗しました！`);
+    } else {
+      alert(`🎉 「${step.name || step.fullTitle}」を完了しました！\n次の授業ステップへ進みましょう！`);
+    }
+
+    await loadData();
+  };
 
   // 生徒による小テスト結果の送信
   const handleSaveStudentScore = async (testId: string, scoreInput: string) => {
@@ -549,6 +689,15 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                 const googleDriveUrl = unit?.google_drive_url;
                 const isCustomTask = !unit;
 
+                const stepLessons = getTaskStepLessons(task);
+                const completedStepIds = new Set<string>(task.completed_lesson_ids || []);
+                if (student.completed_lesson_ids) {
+                  student.completed_lesson_ids.forEach(id => completedStepIds.add(id));
+                }
+                if (task.status === 'completed' || task.test_passed) {
+                  stepLessons.forEach(s => completedStepIds.add(s.id));
+                }
+
                 return (
                   <div key={task.id} className={styles.periodRow}>
                     <div className={styles.periodNumber}>{task.period}</div>
@@ -561,6 +710,45 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         </div>
                       </div>
                       <div className={styles.unitName}>{themeName}</div>
+
+                      {/* Step-by-Step Lesson Progress Cards */}
+                      {stepLessons.length > 0 && (
+                        <div className={styles.stepCardContainer}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>進捗ステップ</span>
+                            <span>{stepLessons.filter(s => completedStepIds.has(s.id)).length} / {stepLessons.length} 完了</span>
+                          </div>
+                          {stepLessons.map((step, sIdx) => {
+                            const isStepDone = completedStepIds.has(step.id);
+                            return (
+                              <div 
+                                key={step.id || sIdx} 
+                                className={`${styles.stepCard} ${isStepDone ? styles.stepCardCompleted : ''}`}
+                              >
+                                <div className={styles.stepTitle}>
+                                  <span style={{ color: '#4f46e5', fontWeight: 700 }}>STEP {sIdx + 1}:</span>
+                                  <span>{step.name || step.fullTitle}</span>
+                                </div>
+                                <div>
+                                  {isStepDone ? (
+                                    <span className={styles.stepCompletedBadge}>
+                                      ✅ 受講完了
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCompleteLessonStep(task, step, sIdx, stepLessons)}
+                                      className={styles.stepCompleteBtn}
+                                    >
+                                      🎯 完了にする
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {/* Period-specific office note */}
                       {task.office_note && (

@@ -115,7 +115,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
 
     // Wait for data load
     await waitFor(() => {
-      expect(screen.getByText('連立方程式の解き方 第1講 〜 第2講')).toBeInTheDocument();
+      expect(screen.getAllByText('連立方程式の解き方 第1講 〜 第2講').length).toBeGreaterThan(0);
     });
 
     expect(screen.getAllByText('数学').length).toBeGreaterThan(0);
@@ -165,7 +165,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
 
     // Should automatically navigate or find the closest schedule date
     await waitFor(() => {
-      expect(screen.getByText('関係代名詞 主格')).toBeInTheDocument();
+      expect(screen.getAllByText('関係代名詞 主格').length).toBeGreaterThan(0);
     });
 
     expect(screen.getByText(/本日はコマ割りがありません。直近の通塾予定日/)).toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('光の反射と屈折')).toBeInTheDocument();
+      expect(screen.getAllByText('光の反射と屈折').length).toBeGreaterThan(0);
     });
 
     // Switch date with date picker
@@ -232,7 +232,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     fireEvent.change(datePicker, { target: { value: dateB } });
 
     await waitFor(() => {
-      expect(screen.getByText('古代文明の起こり')).toBeInTheDocument();
+      expect(screen.getAllByText('古代文明の起こり').length).toBeGreaterThan(0);
     });
   });
 });

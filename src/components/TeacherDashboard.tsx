@@ -52,7 +52,9 @@ import {
   getFirstAttendanceDate,
   generateAttendanceDates,
   calculateLessonRangeForSlot,
-  formatLessonRange
+  formatLessonRange,
+  findNextUncompletedLessonForSubject,
+  inferStudentSubjectPace
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -1753,28 +1755,30 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     if (sub === 'テスト' && todayTests.length === 1) {
       initialTheme = todayTests[0].content;
     } else if (selectedStudent && ['数学', '算数', '英語', '理科', '社会', '国語', '歴史', '地理', '物理', '化学', '生物', '日本史', '世界史', '現代社会'].includes(sub)) {
-      // 該当教科のスタート位置を取得
-      const startUnitId = getStudentStartUnitIdForSubject(selectedStudent, sub);
-      const schoolUnits = allCurriculumUnits.filter(u => 
-        (u.school_id === selectedStudent.school_id || !u.school_id) && 
-        (u.subject === sub || (sub === '数学' && u.subject === '算数') || (sub === '算数' && u.subject === '数学'))
-      ).sort((a, b) => a.sequence_order - b.sequence_order);
+      // 1. 未受講の次回授業を自動検索
+      const nextUncompleted = findNextUncompletedLessonForSubject({
+        student: selectedStudent,
+        subject: sub,
+        tasks: studentTasks,
+        curriculumMasters: curriculumMastersList,
+        curriculumUnits: allCurriculumUnits,
+        schoolId: selectedStudent.school_id
+      });
+      if (nextUncompleted.lessonId) {
+        initialUnitId = nextUncompleted.lessonId;
+      } else {
+        // 該当教科のスタート位置を取得
+        const startUnitId = getStudentStartUnitIdForSubject(selectedStudent, sub);
+        const schoolUnits = allCurriculumUnits.filter(u => 
+          (u.school_id === selectedStudent.school_id || !u.school_id) && 
+          (u.subject === sub || (sub === '数学' && u.subject === '算数') || (sub === '算数' && u.subject === '数学'))
+        ).sort((a, b) => a.sequence_order - b.sequence_order);
 
-      // 生徒の未完了タスクで最も若い sequence_order の単元、またはスタート位置単元を自動選択
-      const uncompletedTasksForSub = studentTasks.filter(t => 
-        t.status !== 'completed' && t.status !== 'skipped' &&
-        schoolUnits.some(u => u.id === t.unit_id)
-      );
-
-      if (uncompletedTasksForSub.length > 0) {
-        const firstUncompletedUnit = schoolUnits.find(u => uncompletedTasksForSub.some(t => t.unit_id === u.id));
-        if (firstUncompletedUnit) {
-          initialUnitId = firstUncompletedUnit.id;
+        if (startUnitId && schoolUnits.some(u => u.id === startUnitId)) {
+          initialUnitId = startUnitId;
+        } else if (schoolUnits.length > 0) {
+          initialUnitId = schoolUnits[0].id;
         }
-      } else if (startUnitId && schoolUnits.some(u => u.id === startUnitId)) {
-        initialUnitId = startUnitId;
-      } else if (schoolUnits.length > 0) {
-        initialUnitId = schoolUnits[0].id;
       }
     }
 
@@ -1782,7 +1786,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     const range = calculateLessonRangeForSlot({
       subject: sub,
       startLessonId: initialUnitId,
-      lessonsPerSlot: branchRules?.lessons_per_slot || 2,
+      student: selectedStudent,
+      tasks: studentTasks,
+      branchRules,
       curriculumMasters: curriculumMastersList,
       curriculumUnits: allCurriculumUnits,
       schoolId: selectedStudent?.school_id
@@ -1833,7 +1839,14 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     let endIdx = lessonsForSubj.findIndex(l => l.id === endId);
 
     if (!endId || endIdx < startIdx) {
-      const step = Math.max(0, (branchRules?.lessons_per_slot || 2) - 1);
+      const paceInfo = inferStudentSubjectPace({
+        student: selectedStudent,
+        subject: currentConfig.subject,
+        tasks: studentTasks,
+        branchRules: branchRules
+      });
+      const pace = paceInfo?.estimatedLessonsPerSlot || branchRules?.lessons_per_slot || 2;
+      const step = Math.max(0, pace - 1);
       const targetIdx = Math.min(startIdx + step, lessonsForSubj.length - 1);
       endId = lessonsForSubj[targetIdx]?.id || startId;
     }

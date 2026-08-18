@@ -101,18 +101,23 @@ export default function SugorokuMap({
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const task = taskMap.get(node.id) || tasks.find(t => 
-      t.subject === activeSubject && 
-      (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name)
+      (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
+      (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
     );
     
+    const isNodeCompleted = task?.status === 'completed' || 
+      task?.test_passed === true || 
+      (student?.completed_lesson_ids && student.completed_lesson_ids.includes(node.id)) ||
+      tasks.some(t => t.completed_lesson_ids && t.completed_lesson_ids.includes(node.id));
+
+    if (isNodeCompleted || task?.status === 'skipped') {
+      continue;
+    }
+
     if (!task) {
       playerNodeId = node.id;
       playerSubStep = 'video';
       break;
-    }
-
-    if (task.status === 'skipped') {
-      continue;
     }
 
     if (!task.video_watched && task.status !== 'completed') {
@@ -192,12 +197,15 @@ export default function SugorokuMap({
         <div className={styles.nodesContainer}>
           {nodes.map((node, index) => {
             const task = taskMap.get(node.id) || tasks.find(t => 
-              t.subject === activeSubject && 
-              (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name)
+              (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
+              (t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
             );
 
             const isSkipped = task?.status === 'skipped';
-            const isCompleted = task?.status === 'completed' || task?.test_passed === true;
+            const isCompleted = task?.status === 'completed' || 
+              task?.test_passed === true || 
+              (student?.completed_lesson_ids && student.completed_lesson_ids.includes(node.id)) ||
+              tasks.some(t => t.completed_lesson_ids && t.completed_lesson_ids.includes(node.id));
             const isVideoWatched = task?.video_watched || isCompleted;
             const isTestPassed = task?.test_passed || isCompleted;
 

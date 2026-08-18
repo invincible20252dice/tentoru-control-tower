@@ -57,6 +57,9 @@ export interface Student {
   start_unit_basic_kanji?: string | null;
   start_unit_basic_calculation?: string | null;
   subject_start_positions?: Record<string, string>;
+  last_completed_lesson_id?: string | null;
+  last_completed_at?: string | null;
+  completed_lesson_ids?: string[];
   weekly_sessions_count?: string | null;
   weekly_duration_minutes?: string | null;
   selected_days?: string[];
@@ -238,6 +241,20 @@ export interface LearningTask {
   start_lesson_id?: string | null;
   end_lesson_id?: string | null;
   lesson_range?: string | null;
+  completed_lesson_ids?: string[];
+  created_at: string;
+}
+
+export interface StudentLessonProgress {
+  id: string;
+  student_id: string;
+  subject: string;
+  lesson_id: string;
+  lesson_name: string;
+  task_id?: string;
+  date: string; // YYYY-MM-DD
+  status: 'completed' | 'unstarted' | 'in_progress';
+  completed_at?: string;
   created_at: string;
 }
 
@@ -433,6 +450,7 @@ export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string
   const office_note = toSafeTextOrNull(task.office_note);
   const passing_line = toSafeTextOrNull(task.passing_line);
   const actual_completed_date = toSafeTextOrNull(task.actual_completed_date);
+  const completed_lesson_ids = Array.isArray(task.completed_lesson_ids) ? task.completed_lesson_ids : undefined;
   const created_at = task.created_at ? String(task.created_at) : new Date().toISOString();
 
   return {
@@ -454,6 +472,7 @@ export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string
     ...(office_note != null ? { office_note } : {}),
     ...(passing_line != null ? { passing_line } : {}),
     ...(actual_completed_date != null ? { actual_completed_date } : {}),
+    ...(completed_lesson_ids ? { completed_lesson_ids } : {}),
     created_at
   };
 }
@@ -483,6 +502,7 @@ export function sanitizeLearningTaskForDB(task: Partial<LearningTask> & Record<s
     office_note: sanitized.office_note ?? null,
     passing_line: sanitized.passing_line ?? null,
     actual_completed_date: sanitized.actual_completed_date ?? null,
+    ...(sanitized.completed_lesson_ids ? { completed_lesson_ids: sanitized.completed_lesson_ids } : {}),
     created_at: sanitized.created_at
   };
 }
@@ -2547,6 +2567,61 @@ class DatabaseService {
     localStorage.removeItem('tentoru_milestone_templates');
     localStorage.removeItem('tentoru_student_interactions');
     localStorage.removeItem('tentoru_personality_options');
+    localStorage.removeItem('tentoru_student_lesson_progress');
+  }
+
+  // 14.5. StudentLessonProgress CRUD
+  public getStudentLessonProgressList(studentId?: string): StudentLessonProgress[] {
+    const list = this.getMockData<StudentLessonProgress>('student_lesson_progress', []);
+    if (studentId) {
+      return list.filter(p => p.student_id === studentId);
+    }
+    return list;
+  }
+
+  public async fetchStudentLessonProgressList(studentId?: string): Promise<StudentLessonProgress[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        let query = this.supabase.from('student_lesson_progress').select('*');
+        if (studentId) query = query.eq('student_id', studentId);
+        const { data, error } = await query;
+        if (!error && data) {
+          const currentList = this.getStudentLessonProgressList();
+          data.forEach((item: StudentLessonProgress) => {
+            const idx = currentList.findIndex(c => c.id === item.id);
+            if (idx >= 0) currentList[idx] = item;
+            else currentList.push(item);
+          });
+          this.saveMockData('student_lesson_progress', currentList);
+          return (studentId ? currentList.filter(p => p.student_id === studentId) : currentList);
+        }
+      } catch (e) {
+        console.warn('fetchStudentLessonProgressList warning:', e);
+      }
+    }
+    return this.getStudentLessonProgressList(studentId);
+  }
+
+  public async saveStudentLessonProgress(progress: StudentLessonProgress): Promise<StudentLessonProgress> {
+    const list = this.getStudentLessonProgressList();
+    const idx = list.findIndex(p => p.id === progress.id || (p.student_id === progress.student_id && p.lesson_id === progress.lesson_id));
+    if (idx >= 0) list[idx] = progress;
+    else list.push(progress);
+    this.saveMockData('student_lesson_progress', list);
+
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('student_lesson_progress').upsert(progress).select().single();
+        if (error) {
+          console.warn('saveStudentLessonProgress supabase warning:', error);
+        } else if (data) {
+          return data as StudentLessonProgress;
+        }
+      } catch (e) {
+        console.warn('saveStudentLessonProgress supabase exception:', e);
+      }
+    }
+    return progress;
   }
 
   // 14. StudentInteractions CRUD

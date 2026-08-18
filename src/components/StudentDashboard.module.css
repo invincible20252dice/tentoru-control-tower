@@ -351,3 +351,100 @@
 .darkTheme .simBtnDesc {
   color: #a1a1aa;
 }
+
+/* Step-by-Step Progress within Period */
+.stepCardContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 8px 0;
+  padding: 10px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.darkTheme .stepCardContainer {
+  background: #18181b;
+  border-color: #3f3f46;
+}
+
+.stepCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s;
+}
+
+.darkTheme .stepCard {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+.stepCardCompleted {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.darkTheme .stepCardCompleted {
+  background: #064e3b22;
+  border-color: #059669;
+}
+
+.stepTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.darkTheme .stepTitle {
+  color: #f1f5f9;
+}
+
+.stepCompleteBtn {
+  background: #10b981;
+  color: #ffffff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+  transition: all 0.15s ease-in-out;
+}
+
+.stepCompleteBtn:hover {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
+.stepCompletedBadge {
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.darkTheme .stepCompletedBadge {
+  background: #065f46;
+  color: #a7f3d0;
+  border-color: #047857;
+}
