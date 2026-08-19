@@ -478,45 +478,81 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         let loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || 2;
         let foundCommonNote = '';
         
-        today.forEach(t => {
-          if (t.period) {
-            const units = db.getCurriculumUnits();
-            const unit = units.find(u => u.id === t.unit_id);
-            const master = curriculumMastersList.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
-            const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
-            const endName = t.end_lesson_name || startName;
+        if (today.length > 0) {
+          today.forEach(t => {
+            if (t.period) {
+              const units = db.getCurriculumUnits();
+              const unit = units.find(u => u.id === t.unit_id);
+              const master = curriculumMastersList.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+              const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
+              const endName = t.end_lesson_name || startName;
 
-            if (unit || master) {
-              newPeriods[t.period] = {
-                subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
-                unitId: t.unit_id,
+              if (unit || master) {
+                newPeriods[t.period] = {
+                  subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
+                  unitId: t.unit_id,
+                  customTheme: '',
+                  startLessonId: t.start_lesson_id || t.unit_id,
+                  endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
+                  startLessonName: startName,
+                  endLessonName: endName,
+                  lessonRange: t.lesson_range || formatLessonRange(startName, endName)
+                };
+              } else {
+                newPeriods[t.period] = {
+                  subject: t.subject || 'テスト',
+                  unitId: '',
+                  customTheme: t.custom_unit_name || '',
+                  startLessonId: t.start_lesson_id || '',
+                  endLessonId: t.end_lesson_id || '',
+                  startLessonName: t.start_lesson_name || t.custom_unit_name || '',
+                  endLessonName: t.end_lesson_name || t.custom_unit_name || '',
+                  lessonRange: t.lesson_range || t.custom_unit_name || ''
+                };
+              }
+              if (t.period > loadedPeriodCount) {
+                loadedPeriodCount = t.period;
+              }
+            }
+            if (t.office_note) {
+              foundCommonNote = t.office_note;
+            }
+          });
+        } else {
+          // 新規通塾日や未設定日の場合、生徒の受講教科と次回来受講レッスン（From）を自動プリセット
+          const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
+          const selectedSubjs = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
+            ? freshSt.selected_subjects
+            : (freshSt.grade.startsWith('小') ? ['算数', '国語'] : ['数学', '英語']);
+          
+          for (let p = 1; p <= loadedPeriodCount; p++) {
+            const sub = selectedSubjs[(p - 1) % selectedSubjs.length] || selectedSubjs[0] || (freshSt.grade.startsWith('小') ? '算数' : '数学');
+            const range = calculateLessonRangeForSlot({
+              subject: sub,
+              startLessonId: null,
+              student: freshSt,
+              tasks: freshTasks,
+              branchRules,
+              curriculumMasters: curriculumMastersList,
+              curriculumUnits: allCurriculumUnits,
+              schoolId: freshSt.school_id,
+              lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+            });
+
+            if (range.start_lesson_id) {
+              newPeriods[p] = {
+                subject: sub,
+                unitId: range.start_lesson_id,
                 customTheme: '',
-                startLessonId: t.start_lesson_id || t.unit_id,
-                endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
-                startLessonName: startName,
-                endLessonName: endName,
-                lessonRange: t.lesson_range || formatLessonRange(startName, endName)
-              };
-            } else {
-              newPeriods[t.period] = {
-                subject: t.subject || 'テスト',
-                unitId: '',
-                customTheme: t.custom_unit_name || '',
-                startLessonId: t.start_lesson_id || '',
-                endLessonId: t.end_lesson_id || '',
-                startLessonName: t.start_lesson_name || t.custom_unit_name || '',
-                endLessonName: t.end_lesson_name || t.custom_unit_name || '',
-                lessonRange: t.lesson_range || t.custom_unit_name || ''
+                startLessonId: range.start_lesson_id,
+                endLessonId: range.end_lesson_id || range.start_lesson_id,
+                startLessonName: range.start_lesson_name || '',
+                endLessonName: range.end_lesson_name || range.start_lesson_name || '',
+                lessonRange: range.lesson_range || ''
               };
             }
-            if (t.period > loadedPeriodCount) {
-              loadedPeriodCount = t.period;
-            }
           }
-          if (t.office_note) {
-            foundCommonNote = t.office_note;
-          }
-        });
+        }
         setPeriodSelections(newPeriods);
         setPeriodCount(loadedPeriodCount);
         setCommonOfficeNote(foundCommonNote);
@@ -1755,6 +1791,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
     if (sub === 'テスト' && todayTests.length === 1) {
       initialTheme = todayTests[0].content;
     } else if (selectedStudent && ['数学', '算数', '英語', '理科', '社会', '国語', '歴史', '地理', '物理', '化学', '生物', '日本史', '世界史', '現代社会'].includes(sub)) {
+      const lessonProgress = db.getStudentLessonProgressList(selectedStudent.id);
       // 1. 未受講の次回授業を自動検索
       const nextUncompleted = findNextUncompletedLessonForSubject({
         student: selectedStudent,
@@ -1762,7 +1799,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         tasks: studentTasks,
         curriculumMasters: curriculumMastersList,
         curriculumUnits: allCurriculumUnits,
-        schoolId: selectedStudent.school_id
+        schoolId: selectedStudent.school_id,
+        lessonProgressList: lessonProgress
       });
       if (nextUncompleted.lessonId) {
         initialUnitId = nextUncompleted.lessonId;
@@ -1791,7 +1829,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
       branchRules,
       curriculumMasters: curriculumMastersList,
       curriculumUnits: allCurriculumUnits,
-      schoolId: selectedStudent?.school_id
+      schoolId: selectedStudent?.school_id,
+      lessonProgressList: selectedStudent ? db.getStudentLessonProgressList(selectedStudent.id) : []
     });
 
     setPeriodSelections({
@@ -5024,18 +5063,83 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                   
                   const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
                   
-                  const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
-                  const unitIds = new Set(timelineUnits.map(u => u.id));
-                  const completedSubjectTasks = studentCompletedTasks.filter(t => unitIds.has(t.unit_id));
-                  
+                  const studentCompletedIds = new Set(
+                    (selectedStudent.completed_lesson_ids || []).map(id => String(id).trim())
+                  );
+                  const lessonProgressMap = new Map(
+                    db.getStudentLessonProgressList(selectedStudent.id).map(p => [String(p.lesson_id), p.status])
+                  );
+
+                  // 完了済みタスク（task.status === 'completed'）から完了したレッスンIDを収集
+                  const completedTaskLessonIds = new Set<string>();
+                  studentTasks.filter(t => t.status === 'completed' || t.test_passed).forEach(t => {
+                    if (t.unit_id) completedTaskLessonIds.add(String(t.unit_id));
+                    if (t.start_lesson_id) completedTaskLessonIds.add(String(t.start_lesson_id));
+                    if (t.end_lesson_id) completedTaskLessonIds.add(String(t.end_lesson_id));
+                    if (Array.isArray(t.completed_lesson_ids)) {
+                      t.completed_lesson_ids.forEach(cid => completedTaskLessonIds.add(String(cid)));
+                    }
+                    if (t.start_lesson_id && t.end_lesson_id) {
+                      const sIdx = timelineUnits.findIndex(u => String(u.id) === String(t.start_lesson_id) || String((u as any).sort_order) === String(t.start_lesson_id));
+                      const eIdx = timelineUnits.findIndex(u => String(u.id) === String(t.end_lesson_id) || String((u as any).sort_order) === String(t.end_lesson_id));
+                      if (sIdx !== -1 && eIdx !== -1) {
+                        const fromI = Math.min(sIdx, eIdx);
+                        const toI = Math.max(sIdx, eIdx);
+                        for (let i = fromI; i <= toI; i++) {
+                          completedTaskLessonIds.add(String(timelineUnits[i].id));
+                        }
+                      }
+                    }
+                    if (t.start_lesson_name || t.end_lesson_name || t.lesson_range) {
+                      const rangeStr = t.lesson_range || t.custom_unit_name || '';
+                      const sName = t.start_lesson_name || (rangeStr.includes('〜') || rangeStr.includes('~') || rangeStr.includes('～') ? rangeStr.split(/〜|~|～/)[0]?.trim() : '');
+                      const eName = t.end_lesson_name || (rangeStr.includes('〜') || rangeStr.includes('~') || rangeStr.includes('～') ? rangeStr.split(/〜|~|～/)[1]?.trim() : '');
+                      let sIdx = -1;
+                      let eIdx = -1;
+                      if (sName) {
+                        sIdx = timelineUnits.findIndex(u => u.name === sName || (u as any).lesson_name === sName || u.name.includes(sName) || sName.includes(u.name));
+                      }
+                      if (eName) {
+                        eIdx = timelineUnits.findIndex(u => u.name === eName || (u as any).lesson_name === eName || u.name.includes(eName) || eName.includes(u.name));
+                      }
+                      if (sIdx !== -1 && eIdx !== -1) {
+                        const fromI = Math.min(sIdx, eIdx);
+                        const toI = Math.max(sIdx, eIdx);
+                        for (let i = fromI; i <= toI; i++) {
+                          completedTaskLessonIds.add(String(timelineUnits[i].id));
+                        }
+                      }
+                    }
+                  });
+
                   let startSeq = 0;
                   const subjectStartUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
                   if (selectedStudent && subjectStartUnitId) {
-                    const su = timelineUnits.find(u => u.id === subjectStartUnitId);
+                    const su = timelineUnits.find(u => String(u.id) === String(subjectStartUnitId));
                     if (su) startSeq = su.sequence_order - 1;
                   }
-                  
-                  const completedCount = Math.max(completedSubjectTasks.length, startSeq);
+
+                  const isUnitDone = (u: any, idx: number) => {
+                    const uid = String(u.id);
+                    const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+                    if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort))) return true;
+                    if (lessonProgressMap.get(uid) === 'completed') return true;
+                    if (completedTaskLessonIds.has(uid)) return true;
+                    if (startSeq > 0 && (idx + 1) <= startSeq) return true;
+                    return false;
+                  };
+
+                  let maxCompletedIdx = -1;
+                  timelineUnits.forEach((u, idx) => {
+                    if (isUnitDone(u, idx)) {
+                      if (idx > maxCompletedIdx) {
+                        maxCompletedIdx = idx;
+                      }
+                    }
+                  });
+
+                  const currentIdx = maxCompletedIdx + 1;
+                  const completedCount = Math.max(0, maxCompletedIdx + 1);
                   const progressPercent = Math.min(100, Math.round((completedCount / totalCount) * 100));
                   
                   const studentDays = (selectedStudent.selected_days?.length || 2);
@@ -5417,12 +5521,13 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {timelineUnits.map((unit, idx) => {
                                 const stepNum = idx + 1;
-                                const isCompleted = stepNum <= completedCount;
-                                const isCurrent = stepNum === completedCount + 1;
+                                const isCompleted = idx <= maxCompletedIdx || isUnitDone(unit, idx);
+                                const isCurrent = idx === currentIdx && currentIdx < timelineUnits.length;
 
                                 return (
                                   <div
                                     key={unit.id}
+                                    data-testid={`timeline-item-${unit.id}`}
                                     style={{
                                       display: 'flex',
                                       alignItems: 'center',
@@ -5531,9 +5636,10 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
                                   // 生徒の現在進捗を取得
                                   const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
+                                  const completedSubjectTasks = studentCompletedTasks.filter(t => t.subject === selectedSubject || (!t.subject && (selectedSubject === '数学' || selectedSubject === '算数')));
  
-                            let studentSeq = 0;
-                            if (completedSubjectTasks.length > 0) {
+                                  let studentSeq = 0;
+                                  if (completedSubjectTasks.length > 0) {
                               const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
                               const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
                               studentSeq = Math.max(0, ...completedUnits.map(u => u.sequence_order));

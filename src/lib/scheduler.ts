@@ -81,21 +81,53 @@ export function findNextUncompletedLessonForSubject(params: {
   // 2. 完了した授業IDを収集
   const completedIds = new Set<string>();
   if (student.completed_lesson_ids) {
-    student.completed_lesson_ids.forEach(id => completedIds.add(id));
+    student.completed_lesson_ids.forEach(id => {
+      completedIds.add(id);
+      completedIds.add(String(id));
+    });
   }
   lessonProgressList
     .filter(p => p.student_id === student.id && p.status === 'completed')
-    .forEach(p => completedIds.add(p.lesson_id));
+    .forEach(p => {
+      completedIds.add(p.lesson_id);
+      completedIds.add(String(p.lesson_id));
+      if (p.lesson_name) completedIds.add(p.lesson_name);
+    });
 
-  // 完了したタスク内の completed_lesson_ids や unit_id
+  // 完了したタスク内の completed_lesson_ids や unit_id, 範囲内の全レッスン
   const studentCompletedTasks = tasks.filter(t => t.student_id === student.id && (t.status === 'completed' || t.test_passed));
   studentCompletedTasks.forEach(t => {
     if (t.completed_lesson_ids) {
-      t.completed_lesson_ids.forEach(id => completedIds.add(id));
+      t.completed_lesson_ids.forEach(id => {
+        completedIds.add(id);
+        completedIds.add(String(id));
+      });
     }
-    if (t.unit_id) completedIds.add(t.unit_id);
-    if (t.start_lesson_id) completedIds.add(t.start_lesson_id);
-    if (t.end_lesson_id) completedIds.add(t.end_lesson_id);
+    if (t.unit_id) {
+      completedIds.add(t.unit_id);
+      completedIds.add(String(t.unit_id));
+    }
+    if (t.start_lesson_id && t.end_lesson_id) {
+      const sIdx = masterLessons.findIndex(m => m.id === t.start_lesson_id || String(m.id) === String(t.start_lesson_id));
+      const eIdx = masterLessons.findIndex(m => m.id === t.end_lesson_id || String(m.id) === String(t.end_lesson_id));
+      if (sIdx >= 0 && eIdx >= sIdx) {
+        for (let idx = sIdx; idx <= eIdx; idx++) {
+          completedIds.add(masterLessons[idx].id);
+          completedIds.add(String(masterLessons[idx].id));
+          completedIds.add(masterLessons[idx].name);
+        }
+      }
+    }
+    if (t.start_lesson_id) {
+      completedIds.add(t.start_lesson_id);
+      completedIds.add(String(t.start_lesson_id));
+    }
+    if (t.end_lesson_id) {
+      completedIds.add(t.end_lesson_id);
+      completedIds.add(String(t.end_lesson_id));
+    }
+    if (t.start_lesson_name) completedIds.add(t.start_lesson_name);
+    if (t.end_lesson_name) completedIds.add(t.end_lesson_name);
   });
 
   // 3. スタート位置設定があれば、その位置より前の授業はスキップ扱い（探索開始位置とする）
@@ -109,7 +141,7 @@ export function findNextUncompletedLessonForSubject(params: {
   // 4. masterLessons の中で、startThresholdIdx 以降でまだ完了していない最初の授業を探す
   for (let i = startThresholdIdx; i < masterLessons.length; i++) {
     const l = masterLessons[i];
-    if (!completedIds.has(l.id)) {
+    if (!completedIds.has(l.id) && !completedIds.has(String(l.id)) && !completedIds.has(l.name)) {
       return {
         lessonId: l.id,
         lessonName: l.name,

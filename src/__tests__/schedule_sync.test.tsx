@@ -462,4 +462,268 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     spyError.mockRestore();
     db.saveStudentLessonProgress = origSave;
   });
+
+  test('Multi-step task expansion: 4-lesson range (e.g. cm-elem-1 to cm-elem-4) renders all 4 steps (0/4 completed) and individual/batch completion tracks completed_lesson_ids', async () => {
+    const student: Student = {
+      id: 'st-multi-step-elem',
+      student_id: 'ST0105',
+      name: '小学生算数4ステップ検証生徒',
+      grade: '小5',
+      status: 'normal',
+      branch_id: 'b-1',
+      selected_subjects: ['算数'],
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+    db.saveStudent(student);
+
+    const testDate = '2026-08-19';
+    // Task with 4 steps from cm-elem-1 to cm-elem-4
+    const fourStepTask: LearningTask = {
+      id: 'task-4steps-1',
+      student_id: student.id,
+      unit_id: 'cm-elem-1',
+      scheduled_date: testDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      start_lesson_id: 'cm-elem-1',
+      start_lesson_name: '小数と10倍・100倍・1/10',
+      end_lesson_id: 'cm-elem-4',
+      end_lesson_name: '小数÷整数の計算',
+      lesson_range: '小数と10倍・100倍・1/10 〜 小数÷整数の計算',
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+    await db.saveLearningTasks([fourStepTask]);
+
+    render(
+      <StudentDashboard
+        student={student}
+        initialDate={testDate}
+      />
+    );
+
+    // Should display 0 / 4 完了
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 4 完了');
+    });
+
+    // Check that all 4 step complete buttons exist
+    expect(screen.getByTestId('step-complete-btn-1-0')).toBeInTheDocument();
+    expect(screen.getByTestId('step-complete-btn-1-1')).toBeInTheDocument();
+    expect(screen.getByTestId('step-complete-btn-1-2')).toBeInTheDocument();
+    expect(screen.getByTestId('step-complete-btn-1-3')).toBeInTheDocument();
+
+    // Click step 1
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-0'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 4 完了');
+      expect(screen.getByTestId('step-done-badge-1-0')).toBeInTheDocument();
+    });
+
+    // Click step 2
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('2 / 4 完了');
+      expect(screen.getByTestId('step-done-badge-1-1')).toBeInTheDocument();
+    });
+
+    // Click step 3
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-2'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('3 / 4 完了');
+      expect(screen.getByTestId('step-done-badge-1-2')).toBeInTheDocument();
+    });
+
+    // Click step 4
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-3'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('4 / 4 完了');
+      expect(screen.getByTestId('step-done-badge-1-3')).toBeInTheDocument();
+      expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
+    });
+
+    // Verify all 4 lesson IDs are registered in student's completed lessons
+    const updatedStudent = db.getStudents().find(s => s.id === student.id);
+    expect(updatedStudent?.completed_lesson_ids).toContain('cm-elem-1');
+    expect(updatedStudent?.completed_lesson_ids).toContain('cm-elem-2');
+    expect(updatedStudent?.completed_lesson_ids).toContain('cm-elem-3');
+    expect(updatedStudent?.completed_lesson_ids).toContain('cm-elem-4');
+  });
+
+  test('Next uncompleted lesson (From) auto-presetting accurately finds next step after completed lessons', async () => {
+    const { findNextUncompletedLessonForSubject, calculateLessonRangeForSlot } = await import('../lib/scheduler');
+
+    const student: Student = {
+      id: 'st-next-lesson-test',
+      student_id: 'ST0106',
+      name: '次回開始授業自動特定生徒',
+      grade: '小1',
+      status: 'normal',
+      branch_id: 'b-1',
+      selected_subjects: ['算数'],
+      // Completed lessons 1 through 3
+      completed_lesson_ids: ['cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3'],
+      created_at: new Date().toISOString()
+    };
+    db.saveStudent(student);
+
+    const masters = db.getCurriculumMasters('算数');
+    const nextLesson = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      tasks: [],
+      curriculumMasters: masters,
+      curriculumUnits: []
+    });
+
+    // cm-p1-m1, cm-p1-m2, cm-p1-m3 are done, so next should be cm-p1-m4 (sort_order: 4)
+    expect(nextLesson.lessonId).toBe('cm-p1-m4');
+    expect(nextLesson.lessonName).toContain('のこりはいくつ');
+
+    // calculateLessonRangeForSlot should automatically set start_lesson_id to cm-p1-m4
+    const range = calculateLessonRangeForSlot({
+      subject: '算数',
+      student,
+      tasks: [],
+      curriculumMasters: masters,
+      curriculumUnits: []
+    });
+
+    expect(range.start_lesson_id).toBe('cm-p1-m4');
+    expect(range.start_lesson_name).toContain('のこりはいくつ');
+  });
+
+  test('STEP 7..10 range expansion, optimistic completion, timeline (📍 現在地) sync to STEP 11, and next session From auto-preset', async () => {
+    const { findNextUncompletedLessonForSubject, calculateLessonRangeForSlot } = await import('../lib/scheduler');
+    const TeacherDashboard = (await import('../components/TeacherDashboard')).default;
+
+    const student: Student = {
+      id: 'st-step-7-10-sync',
+      student_id: 'ST0107',
+      name: '小1たしざん進度同期生徒',
+      grade: '小1',
+      status: 'normal',
+      branch_id: 'b-1',
+      school_id: 'sch-1',
+      selected_days: ['tuesday', 'friday'],
+      default_slots: 2,
+      selected_subjects: ['算数'],
+      // Initially completed STEP 1 to 6
+      completed_lesson_ids: ['cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3', 'cm-p1-m4', 'cm-p2-m1', 'cm-p2-m2'],
+      created_at: new Date().toISOString()
+    };
+    db.saveStudent(student);
+
+    const targetDate = '2026-08-18';
+    // Task covering STEP 7 through STEP 10 (cm-p2-m3 to cm-p3-m2)
+    const task: LearningTask = {
+      id: 'task-step-7-10',
+      student_id: student.id,
+      unit_id: 'cm-p2-m3',
+      scheduled_date: targetDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      start_lesson_id: 'cm-p2-m3',
+      end_lesson_id: 'cm-p3-m2',
+      start_lesson_name: 'かけ算の意味と九九（前半 2〜5の段）',
+      end_lesson_name: 'あまりのあるわり算',
+      lesson_range: 'かけ算の意味と九九（前半 2〜5の段） 〜 あまりのあるわり算',
+      created_at: new Date().toISOString()
+    };
+    await db.saveLearningTasks([task]);
+
+    // 1. Render StudentDashboard and verify 4 steps (STEP 7, 8, 9, 10) are expanded
+    const { unmount } = render(<StudentDashboard student={student} onLogout={() => {}} currentDate={targetDate} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 4 完了');
+    });
+
+    // Complete STEP 7, 8, 9, 10 one by one
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-0'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 4 完了');
+    });
+
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('2 / 4 完了');
+    });
+
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-2'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('3 / 4 完了');
+    });
+
+    fireEvent.click(screen.getByTestId('step-complete-btn-1-3'));
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('4 / 4 完了');
+      expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
+    });
+
+    // 2. Verify all completed IDs (STEP 1..10) are recorded
+    const refreshedStudent = db.getStudents().find(s => s.id === student.id)!;
+    expect(refreshedStudent.completed_lesson_ids).toContain('cm-p2-m3'); // STEP 7
+    expect(refreshedStudent.completed_lesson_ids).toContain('cm-p2-m4'); // STEP 8
+    expect(refreshedStudent.completed_lesson_ids).toContain('cm-p3-m1'); // STEP 9
+    expect(refreshedStudent.completed_lesson_ids).toContain('cm-p3-m2'); // STEP 10
+
+    unmount();
+
+    // 3. Verify next uncompleted lesson auto-detection points to STEP 11 (cm-p3-m3)
+    const masters = db.getCurriculumMasters('算数');
+    const nextLesson = findNextUncompletedLessonForSubject({
+      student: refreshedStudent,
+      subject: '算数',
+      tasks: db.getLearningTasks(),
+      curriculumMasters: masters
+    });
+    expect(nextLesson.lessonId).toBe('cm-p3-m3'); // STEP 11
+    expect(nextLesson.masterIndex).toBe(10); // 0-indexed index 10 = STEP 11
+
+    // 4. Verify TeacherDashboard renders Elementary Timeline with STEP 1..10 completed and STEP 11 as 📍 現在地
+    const timelineRender = render(
+      <TeacherDashboard 
+        students={[refreshedStudent]} 
+        initialStudentId={refreshedStudent.id}
+        initialTab="milestones"
+      />
+    );
+
+    await waitFor(() => {
+      // STEP 10 should show completed badge
+      expect(timelineRender.getByTestId('timeline-item-cm-p3-m2')).toHaveTextContent('✓ 完了');
+      // STEP 11 should show current position badge
+      expect(timelineRender.getByTestId('timeline-item-cm-p3-m3')).toHaveTextContent('📍 現在地（取り組み中）');
+    });
+
+    timelineRender.unmount();
+
+    // 5. Verify TeacherDashboard schedule tab auto-selects STEP 11 (cm-p3-m3) as From for next date (2026-08-21)
+    const scheduleRender = render(
+      <TeacherDashboard 
+        students={[refreshedStudent]} 
+        initialStudentId={refreshedStudent.id}
+        initialTab="schedule"
+        initialDate="2026-08-21"
+      />
+    );
+
+    await waitFor(() => {
+      const periodSelect = scheduleRender.getByTestId('period-unit-select-1') as HTMLSelectElement;
+      expect(periodSelect.value).toBe('cm-p3-m3');
+    });
+
+    scheduleRender.unmount();
+  });
 });
+
+
+
