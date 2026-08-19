@@ -395,4 +395,71 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     expect(videoNode1.className).toContain('stepCompleted');
     expect(videoNode2.className).toContain('stepCompleted');
   });
+
+  test('Optimistic UI instantly updates step status and handles server error gracefully', async () => {
+    const student: Student = {
+      id: 'st-opt-err-test',
+      student_id: 'ST0104',
+      name: '楽観的UI検証生徒',
+      grade: '中3',
+      status: 'normal',
+      branch_id: 'b-1',
+      selected_subjects: ['数学'],
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+    db.saveStudent(student);
+
+    const testDate = '2026-08-18';
+    const singleStepTask: LearningTask = {
+      id: 'task-opt-test-1',
+      student_id: student.id,
+      unit_id: 'u-1',
+      scheduled_date: testDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '数学',
+      start_lesson_id: 'cm-jhs-1',
+      start_lesson_name: '多項式の乗法と公式①',
+      end_lesson_id: 'cm-jhs-1',
+      end_lesson_name: '多項式の乗法と公式①',
+      lesson_range: '多項式の乗法と公式①',
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+    await db.saveLearningTasks([singleStepTask]);
+
+    // Mock saveStudentLessonProgress to throw error
+    const spyError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const origSave = db.saveStudentLessonProgress;
+    db.saveStudentLessonProgress = vi.fn().mockRejectedValueOnce(new Error('Network Save Failure'));
+
+    render(
+      <StudentDashboard
+        student={student}
+        initialDate={testDate}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 1 完了');
+    });
+
+    const stepBtn = screen.getByTestId('step-complete-btn-1-0');
+    fireEvent.click(stepBtn);
+
+    // Optimistic UI updates immediately despite server error
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 1 完了');
+      expect(screen.getByTestId('step-done-badge-1-0')).toBeInTheDocument();
+      expect(screen.getByTestId('task-completed-badge-1')).toHaveTextContent('合格完了！');
+    });
+
+    // Error was logged and toast was shown
+    expect(spyError).toHaveBeenCalled();
+    spyError.mockRestore();
+    db.saveStudentLessonProgress = origSave;
+  });
 });

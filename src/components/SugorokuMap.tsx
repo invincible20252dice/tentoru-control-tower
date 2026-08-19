@@ -112,11 +112,13 @@ export default function SugorokuMap({
       Boolean(student?.completed_lesson_ids && (
         student.completed_lesson_ids.includes(node.id) || 
         student.completed_lesson_ids.includes(String(node.id)) ||
+        student.completed_lesson_ids.map(String).includes(String(node.id)) ||
         student.completed_lesson_ids.includes(node.name)
       )) ||
       tasks.some(t => t.completed_lesson_ids && (
         t.completed_lesson_ids.includes(node.id) || 
         t.completed_lesson_ids.includes(String(node.id)) ||
+        t.completed_lesson_ids.map(String).includes(String(node.id)) ||
         t.completed_lesson_ids.includes(node.name)
       )) ||
       tasks.some(t => (t.status === 'completed' || t.test_passed) && (
@@ -231,11 +233,13 @@ export default function SugorokuMap({
               Boolean(student?.completed_lesson_ids && (
                 student.completed_lesson_ids.includes(node.id) || 
                 student.completed_lesson_ids.includes(String(node.id)) ||
+                student.completed_lesson_ids.map(String).includes(String(node.id)) ||
                 student.completed_lesson_ids.includes(node.name)
               )) ||
               tasks.some(t => t.completed_lesson_ids && (
                 t.completed_lesson_ids.includes(node.id) || 
                 t.completed_lesson_ids.includes(String(node.id)) ||
+                t.completed_lesson_ids.map(String).includes(String(node.id)) ||
                 t.completed_lesson_ids.includes(node.name)
               )) ||
               tasks.some(t => (t.status === 'completed' || t.test_passed) && (

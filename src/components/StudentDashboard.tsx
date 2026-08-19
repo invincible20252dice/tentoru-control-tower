@@ -54,8 +54,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   };
 
   useEffect(() => {
-    setCurrentStudent(getLatestStudent());
-  }, [student]);
+    setCurrentStudent(prev => {
+      const latest = getLatestStudent();
+      const mergedCompleted = Array.from(new Set([
+        ...(prev?.completed_lesson_ids || []).map(String),
+        ...(latest?.completed_lesson_ids || []).map(String),
+        ...(student.completed_lesson_ids || []).map(String)
+      ]));
+      return {
+        ...latest,
+        ...student,
+        completed_lesson_ids: mergedCompleted
+      };
+    });
+  }, [student.id, student.grade, student.name, student.status]);
 
   const [currentDateStr, setCurrentDateStr] = useState<string>(determineInitialDate);
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
@@ -225,7 +237,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
   };
 
-  // 各授業ステップの受講完了アクション
+  // 各授業ステップの受講完了アクション (Optimistic UI & Async Save)
   const handleCompleteLessonStep = async (
     task: LearningTask,
     step: { id: string; name: string; fullTitle: string },
@@ -264,8 +276,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       last_completed_at: new Date().toISOString()
     };
 
-    // 1. レッスン進捗 (student_lesson_progress) を保存
+    // ⚡️ 1. Optimistic UI Update: Reactステートを即座に更新（通信完了を待たずに画面描画）
+    setCurrentStudent(updatedStudent);
+    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+
+    if (isAllStepsCompleted) {
+      showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
+    } else {
+      showToast(`🎉 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講完了にしました！`);
+    }
+
+    // 🌐 2. バックエンド (Supabase / LocalStorage) への非同期保存処理
     try {
+      // (a) レッスン進捗 (student_lesson_progress) を保存
       await db.saveStudentLessonProgress({
         id: `slp-${student.id}-${stepIdStr}`,
         student_id: student.id,
@@ -278,16 +302,12 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         completed_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       });
-    } catch (e) {
-      console.warn('saveStudentLessonProgress error:', e);
-    }
 
-    // 2. タスクと生徒情報を保存 (Supabase + LocalStorage)
-    await db.saveLearningTasks([updatedTask]);
-    await db.saveStudent(updatedStudent);
+      // (b) タスクと生徒情報を保存 (Supabase + LocalStorage)
+      await db.saveLearningTasks([updatedTask]);
+      await db.saveStudent(updatedStudent);
 
-    // 3. ログ記録
-    try {
+      // (c) ログ記録
       await db.addLearningLog({
         id: `log-step-${Date.now()}`,
         student_id: student.id,
@@ -309,22 +329,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           created_at: new Date().toISOString()
         });
       }
-    } catch (e) {
-      console.warn('addLearningLog error:', e);
+    } catch (err) {
+      console.error('ステップ進捗の保存中にエラーが発生しました:', err);
+      showToast('⚠️ 進捗のサーバー保存に失敗しました。');
     }
-
-    // 即時State更新
-    setCurrentStudent(updatedStudent);
-    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
-    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
-
-    if (isAllStepsCompleted) {
-      showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
-    } else {
-      showToast(`🎉 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講完了にしました！`);
-    }
-
-    await loadData();
   };
 
   // 生徒による小テスト結果の送信
@@ -907,7 +915,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                   ) : (
                                     <button
                                       type="button"
-                                      onClick={() => handleCompleteLessonStep(task, step, sIdx, stepLessons)}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleCompleteLessonStep(task, step, sIdx, stepLessons);
+                                      }}
                                       className={styles.stepCompleteBtn}
                                       data-testid={`step-complete-btn-${task.period}-${sIdx}`}
                                     >
