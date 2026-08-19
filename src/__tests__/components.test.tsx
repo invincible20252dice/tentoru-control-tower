@@ -994,11 +994,13 @@ describe('UI Components Render & Interaction Tests', () => {
       created_at: ''
     };
     
-    const { unmount } = render(<StudentDashboard student={testStudent} onBackToPortal={() => {}} />);
+    const { unmount } = render(<StudentDashboard student={testStudent} onBackToPortal={() => {}} initialDate="2026-06-19" />);
 
-    expect(screen.getByText('📝 本日のテスト')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/本日のテスト/)).toBeInTheDocument();
+    });
     expect(screen.getByText('数学小テスト（一次方程式）')).toBeInTheDocument();
-    expect(screen.getByText('📚 今日の宿題')).toBeInTheDocument();
+    expect(screen.getByText(/今日の宿題/)).toBeInTheDocument();
     expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
     expect(screen.getByText('提出期限: 2026-06-25')).toBeInTheDocument();
     expect(screen.getByText('スキップ宿題')).toBeInTheDocument();

@@ -1505,6 +1505,28 @@ export default function TeacherDashboard({
           }
         }
 
+        // 業務連絡がある場合、本日のタスクに設定するか、タスクがなければ業務連絡用タスクを保持
+        if (commonOfficeNote.trim()) {
+          const existingTodayTask = clearedTasks.find(t => t.scheduled_date === scheduleDate);
+          if (existingTodayTask) {
+            existingTodayTask.office_note = commonOfficeNote;
+          } else if (newCustomTasks.length === 0) {
+            newCustomTasks.push({
+              id: `task-note-${Date.now()}-${student.id}`,
+              student_id: student.id,
+              unit_id: `note-${student.id}-${scheduleDate}`,
+              scheduled_date: scheduleDate,
+              period: null,
+              status: 'unstarted',
+              video_watched: false,
+              test_passed: false,
+              custom_unit_name: '業務連絡',
+              office_note: commonOfficeNote,
+              created_at: new Date().toISOString()
+            });
+          }
+        }
+
         // メモリ上の全タスクリストをこの生徒向けに更新する
         const studentOtherTasks = currentLearningTasks.filter(t => t.student_id !== student.id);
         let updatedStudentTasks = [...studentOtherTasks, ...clearedTasks, ...newCustomTasks];
@@ -1628,7 +1650,7 @@ export default function TeacherDashboard({
       await db.saveLearningTasks(currentLearningTasks);
 
       // トースト通知を表示
-      setTimetableToast('✅ 時間割を保存しました');
+      setTimetableToast('✅ 時間割・宿題・テストを保存しました');
       setTimeout(() => setTimetableToast(null), 4000);
 
       alert(

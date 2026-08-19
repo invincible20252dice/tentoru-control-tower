@@ -22,7 +22,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const todayStr = getSystemTodayStr();
     const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
     const hasTodayTasks = stTasks.some(t => t.scheduled_date === todayStr && t.period !== null);
-    if (hasTodayTasks) return todayStr;
+    const hasTodayTestsOrHw = db.getMiniTestResults().some(r => r.student_id === student.id && r.date === todayStr) ||
+      db.getHomeworkResults().some(r => r.student_id === student.id && r.date === todayStr);
+    if (hasTodayTasks || hasTodayTestsOrHw) return todayStr;
     const upcomingTasks = stTasks
       .filter(t => t.scheduled_date >= todayStr && t.period !== null)
       .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
@@ -52,6 +54,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       setToastMessage(prev => (prev === msg ? null : prev));
     }, 3500);
   };
+
+  useEffect(() => {
+    if (initialDate && initialDate !== currentDateStr) {
+      setCurrentDateStr(initialDate);
+      setHasAutoSelectedDate(true);
+    }
+  }, [initialDate]);
 
   useEffect(() => {
     setCurrentStudent(prev => {
@@ -875,11 +884,43 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             </div>
           )}
 
-          {/* 本日のテスト表示 */}
+          {/* 📢 業務連絡カード */}
+          {(() => {
+            const todayAllTasks = tasks.filter(t => t.scheduled_date === currentDateStr);
+            const officeNote = todayTasks.find(t => t.office_note && t.office_note.trim() !== '')?.office_note
+              || todayAllTasks.find(t => t.office_note && t.office_note.trim() !== '')?.office_note;
+            if (!officeNote) return null;
+            return (
+              <div 
+                style={{ 
+                  margin: '12px 0', 
+                  padding: '14px 16px', 
+                  background: '#fffbeb', 
+                  borderRadius: '8px', 
+                  border: '1px solid #fef3c7', 
+                  borderLeft: '4px solid #f59e0b', 
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)' 
+                }} 
+                data-testid="office-note-card"
+              >
+                <h3 style={{ margin: '0 0 6px 0', fontSize: '0.9rem', color: '#92400e', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📢 講師からの業務連絡
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#78350f', whiteSpace: 'pre-wrap', fontWeight: 600 }}>
+                  {officeNote}
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* 🎯 本日のテストカード */}
           {miniTestResults.length > 0 && (
-            <div style={{ margin: '12px 0', padding: '16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fee2e2' }}>
+            <div 
+              style={{ margin: '12px 0', padding: '16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fee2e2' }}
+              data-testid="today-test-card"
+            >
               <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                📝 本日のテスト
+                🎯 本日のテスト
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {miniTestResults.map(test => {
@@ -896,7 +937,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     );
                   }
                   return (
-                    <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }}>
+                    <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }} data-testid={`test-item-${test.id}`}>
                       <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>
                         {test.test_content}
                         <span style={{ marginLeft: '10px', fontSize: '0.75rem', color: '#4b5563', fontWeight: 'normal' }}>
@@ -914,12 +955,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                           placeholder="点数を入力"
                           className={styles.input}
                           style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
+                          data-testid={`test-score-input-${test.id}`}
                         />
                         <button
                           type="button"
                           onClick={() => handleSaveStudentScore(test.id, studentScores[test.id])}
                           className={styles.btn}
                           style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                          data-testid={`test-save-btn-${test.id}`}
                         >
                           結果を保存
                         </button>
@@ -932,15 +975,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             </div>
           )}
 
-          {/* 宿題表示 */}
+          {/* 📝 宿題カード */}
           {homeworkResults.length > 0 && (
-            <div style={{ margin: '12px 0', padding: '16px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7' }}>
-              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700 }}>
-                📚 今日の宿題
+            <div 
+              style={{ margin: '12px 0', padding: '16px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7' }}
+              data-testid="today-homework-card"
+            >
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📝 今日の宿題
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {homeworkResults.map(hw => (
-                  <div key={hw.id} style={{ borderBottom: '1px dashed #dcfce7', paddingBottom: '12px' }}>
+                  <div key={hw.id} style={{ borderBottom: '1px dashed #dcfce7', paddingBottom: '12px' }} data-testid={`homework-item-${hw.id}`}>
                     <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap', fontWeight: 600 }}>
                       {hw.homework_content}
                     </p>

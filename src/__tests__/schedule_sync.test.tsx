@@ -640,7 +640,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     await db.saveLearningTasks([task]);
 
     // 1. Render StudentDashboard and verify 4 steps (STEP 7, 8, 9, 10) are expanded
-    const { unmount } = render(<StudentDashboard student={student} onLogout={() => {}} currentDate={targetDate} />);
+    const { unmount } = render(<StudentDashboard student={student} onBackToPortal={() => {}} initialDate={targetDate} />);
 
     await waitFor(() => {
       expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 4 完了');
