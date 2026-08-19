@@ -41,28 +41,64 @@ export function findNextUncompletedLessonForSubject(params: {
     lessonProgressList = []
   } = params;
 
-  // 1. 対象教科の全授業リストを抽出
-  let masterLessons = curriculumMasters
-    .filter(m => m.subject === subject || (subject === '算数' && m.subject === '数学') || (subject === '数学' && m.subject === '算数'))
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map(m => ({
-      id: m.id,
-      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-      sort_order: m.sort_order ?? 0
-    }));
+  const isElem = Boolean(
+    student?.grade?.startsWith('小') || 
+    (student?.grade?.includes('年') && !student?.grade?.startsWith('中') && !student?.grade?.startsWith('高')) ||
+    student?.grade === '園児'
+  );
+  const isJunior = Boolean(student?.grade?.startsWith('中'));
+  const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
-  if (masterLessons.length === 0) {
-    const unitLessons = curriculumUnits
-      .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
-                   (u.subject === subject || (subject === '数学' && u.subject === '算数') || (subject === '算数' && u.subject === '数学')))
+  // 1. 対象教科の全授業リストを抽出 (校舎固有単元 -> カリキュラムマスター -> 汎用単元)
+  const matchingSchoolUnits = curriculumUnits.filter(u => 
+    (schoolId ? u.school_id === schoolId : false) &&
+    (isElem ? u.subject === '算数' : u.subject === subject)
+  );
+
+  let masterLessons: Array<{ id: string; name: string; sort_order: number }> = [];
+
+  if (matchingSchoolUnits.length > 0) {
+    masterLessons = matchingSchoolUnits
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,
         name: u.name,
         sort_order: u.sequence_order ?? 0
       }));
-    if (unitLessons.length > 0) {
-      masterLessons = unitLessons;
+  } else {
+    const filteredMasters = curriculumMasters.filter(m => {
+      if (subject === '算数' || subject === '数学') {
+        if (isElem) {
+          return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
+        } else if (isJunior) {
+          return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
+        } else if (isHigh) {
+          return m.subject === '数学' && (m.grade?.startsWith('高') || !m.grade?.startsWith('小'));
+        }
+        return m.subject === subject;
+      }
+      return m.subject === subject;
+    });
+
+    if (filteredMasters.length > 0) {
+      masterLessons = filteredMasters
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({
+          id: m.id,
+          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+          sort_order: m.sort_order ?? 0
+        }));
+    } else {
+      const fallbackUnits = curriculumUnits
+        .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
+                     (isElem ? u.subject === '算数' : u.subject === subject))
+        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .map(u => ({
+          id: u.id,
+          name: u.name,
+          sort_order: u.sequence_order ?? 0
+        }));
+      masterLessons = fallbackUnits;
     }
   }
 
@@ -271,27 +307,64 @@ export function calculateLessonRangeForSlot(params: {
     lessonProgressList = []
   } = params;
 
-  // 1. 対象教科の授業リストを抽出
-  let masterLessons = curriculumMasters
-    .filter(m => m.subject === subject || (subject === '算数' && m.subject === '数学') || (subject === '数学' && m.subject === '算数'))
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map(m => ({
-      id: m.id,
-      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-      sort_order: m.sort_order ?? 0
-    }));
+  const isElem = Boolean(
+    student?.grade?.startsWith('小') || 
+    (student?.grade?.includes('年') && !student?.grade?.startsWith('中') && !student?.grade?.startsWith('高')) ||
+    student?.grade === '園児'
+  );
+  const isJunior = Boolean(student?.grade?.startsWith('中'));
+  const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
-  if (masterLessons.length === 0 || (startLessonId && !masterLessons.some(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId)) && curriculumUnits.some(u => u.id === startLessonId))) {
-    const unitLessons = curriculumUnits
-      .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && (u.subject === subject || (subject === '数学' && u.subject === '算数') || (subject === '算数' && u.subject === '数学')))
+  // 1. 対象教科の授業リストを抽出 (校舎固有単元 -> カリキュラムマスター -> 汎用単元)
+  const matchingSchoolUnits = curriculumUnits.filter(u => 
+    (schoolId ? u.school_id === schoolId : false) &&
+    (isElem ? u.subject === '算数' : u.subject === subject)
+  );
+
+  let masterLessons: Array<{ id: string; name: string; sort_order: number }> = [];
+
+  if (matchingSchoolUnits.length > 0) {
+    masterLessons = matchingSchoolUnits
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,
         name: u.name,
         sort_order: u.sequence_order ?? 0
       }));
-    if (unitLessons.length > 0) {
-      masterLessons = unitLessons;
+  } else {
+    const filteredMasters = curriculumMasters.filter(m => {
+      if (subject === '算数' || subject === '数学') {
+        if (isElem) {
+          return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
+        } else if (isJunior) {
+          return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
+        } else if (isHigh) {
+          return m.subject === '数学' && (m.grade?.startsWith('高') || !m.grade?.startsWith('小'));
+        }
+        return m.subject === subject;
+      }
+      return m.subject === subject;
+    });
+
+    if (filteredMasters.length > 0) {
+      masterLessons = filteredMasters
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({
+          id: m.id,
+          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+          sort_order: m.sort_order ?? 0
+        }));
+    } else {
+      const fallbackUnits = curriculumUnits
+        .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
+                     (isElem ? u.subject === '算数' : u.subject === subject))
+        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .map(u => ({
+          id: u.id,
+          name: u.name,
+          sort_order: u.sequence_order ?? 0
+        }));
+      masterLessons = fallbackUnits;
     }
   }
 

@@ -62,7 +62,10 @@ import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../li
 export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import';
 
 interface TeacherDashboardProps {
-  onBackToPortal: () => void;
+  students?: Student[];
+  initialStudentId?: string;
+  initialTab?: DashboardTabType;
+  onBackToPortal?: () => void;
   onLogout?: () => void;
   onViewStudentScreen?: (student: Student, date?: string) => void;
   onViewStudent?: (student: Student, date?: string) => void;
@@ -86,7 +89,20 @@ function normalizeGrade(g?: string): string {
   return trimmed;
 }
 
-export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStudentScreen, onViewStudent, theme = 'light', teacherType: propTeacherType, initialRole, initialBranchId, initialDate }: TeacherDashboardProps) {
+export default function TeacherDashboard({
+  students: propStudents,
+  initialStudentId,
+  initialTab,
+  onBackToPortal,
+  onLogout,
+  onViewStudentScreen,
+  onViewStudent,
+  theme = 'light',
+  teacherType: propTeacherType,
+  initialRole,
+  initialBranchId,
+  initialDate
+}: TeacherDashboardProps) {
   // State
   const [currentTeacherType, setCurrentTeacherType] = useState<'elementary' | 'junior_high' | 'high_school' | 'all'>(() => {
     if (propTeacherType) return propTeacherType;
@@ -107,13 +123,20 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
   const gradeCategoryLabel = currentTeacherType === 'elementary' ? '【小学生】' : currentTeacherType === 'high_school' ? '【高校生】' : currentTeacherType === 'junior_high' ? '【中学生】' : '【中学生】';
 
-  const [students, setStudents] = useState<Student[]>(() => db.getStudents());
+  const [students, setStudents] = useState<Student[]>(() => propStudents || db.getStudents());
   const [schools, setSchools] = useState<School[]>(() => db.getSchools());
   const [branches, setBranches] = useState<Branch[]>(() => db.getBranches());
   const [userRole, setUserRole] = useState<UserRole>(initialRole || 'admin');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(initialBranchId || 'all');
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<DashboardTabType>('student-list');
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(() => {
+    if (initialStudentId) {
+      const all = propStudents || db.getStudents();
+      const found = all.find(s => s.id === initialStudentId);
+      if (found) return found;
+    }
+    return null;
+  });
+  const [activeTab, setActiveTab] = useState<DashboardTabType>(initialTab || 'student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
   // 生徒詳細（生徒情報）画面用 State
@@ -184,7 +207,16 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
   // Curriculum State
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState(currentTeacherType === 'elementary' ? '算数' : '数学');
+  const [selectedSubject, setSelectedSubject] = useState(() => {
+    if (initialStudentId) {
+      const all = propStudents || db.getStudents();
+      const found = all.find(s => s.id === initialStudentId);
+      if (found && (found.grade.startsWith('小') || found.grade === '園児')) {
+        return (found.selected_subjects && found.selected_subjects[0]) || '算数';
+      }
+    }
+    return (currentTeacherType === 'elementary' ? '算数' : '数学');
+  });
   const [schoolUnits, setSchoolUnits] = useState<CurriculumUnit[]>([]);
 
   // Daily Scheduler State
@@ -481,9 +513,9 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
         if (today.length > 0) {
           today.forEach(t => {
             if (t.period) {
-              const units = db.getCurriculumUnits();
+              const units = listUnits;
               const unit = units.find(u => u.id === t.unit_id);
-              const master = curriculumMastersList.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+              const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
               const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
               const endName = t.end_lesson_name || startName;
 
@@ -533,8 +565,8 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
               student: freshSt,
               tasks: freshTasks,
               branchRules,
-              curriculumMasters: curriculumMastersList,
-              curriculumUnits: allCurriculumUnits,
+              curriculumMasters: listMasters,
+              curriculumUnits: listUnits,
               schoolId: freshSt.school_id,
               lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
             });
@@ -1703,12 +1735,14 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
   const getLessonsForSubject = (subj: string) => {
     const isElem = Boolean(
       selectedStudent?.grade?.startsWith('小') || 
-      (selectedStudent?.grade?.includes('年') && !selectedStudent?.grade?.startsWith('中'))
+      (selectedStudent?.grade?.includes('年') && !selectedStudent?.grade?.startsWith('中') && !selectedStudent?.grade?.startsWith('高')) ||
+      selectedStudent?.grade === '園児' ||
+      currentTeacherType === 'elementary'
     );
 
     const matchingSchoolUnits = allCurriculumUnits.filter(u => 
       (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-      (isElem ? (u.subject === '算数' || u.subject === '数学') : (u.subject === subj))
+      (isElem ? u.subject === '算数' : u.subject === subj)
     );
 
     if (matchingSchoolUnits.length > 0) {
@@ -1746,7 +1780,7 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
 
     const fallbackUnits = allCurriculumUnits.filter(u => 
       (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-      (u.subject === subj || (subj === '数学' && u.subject === '算数') || (subj === '算数' && u.subject === '数学'))
+      (isElem ? u.subject === '算数' : u.subject === subj)
     );
 
     return fallbackUnits
@@ -3448,12 +3482,12 @@ export default function TeacherDashboard({ onBackToPortal, onLogout, onViewStude
                                     return (
                                       <>
                                         {studentSubjs.map(sub => (
-                                          <option key={sub} value={sub === '算数' ? '数学' : sub}>
+                                          <option key={sub} value={sub}>
                                             {sub} ⭐ (選択教科)
                                           </option>
                                         ))}
                                         {otherSubjs.map(sub => (
-                                          <option key={sub} value={sub === '算数' ? '数学' : sub}>
+                                          <option key={sub} value={sub}>
                                             {sub}
                                           </option>
                                         ))}
