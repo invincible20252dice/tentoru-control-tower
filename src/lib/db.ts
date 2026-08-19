@@ -2576,6 +2576,7 @@ class DatabaseService {
     localStorage.removeItem('tentoru_student_interactions');
     localStorage.removeItem('tentoru_personality_options');
     localStorage.removeItem('tentoru_student_lesson_progress');
+    localStorage.removeItem('tentoru_branches');
   }
 
   // 14.5. StudentLessonProgress CRUD

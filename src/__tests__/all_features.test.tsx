@@ -509,5 +509,93 @@ describe('Comprehensive Test Suite for High Coverage', () => {
 
       unmountDash();
     });
+
+    it('should test TestScoreRadarChart empty state, custom props, and status calculations', () => {
+      const { rerender } = render(<TestScoreRadarChart data={[]} title="空データ" showTable={false} />);
+      expect(screen.getByText('表示できる点数データがありません')).toBeInTheDocument();
+
+      const testData = [
+        { subject: '数学', score: 85 },
+        { subject: '英語', score: 70 },
+        { subject: '国語', score: 45 }
+      ];
+
+      rerender(<TestScoreRadarChart data={testData} chartColor="#ef4444" showTable={true} />);
+      expect(screen.getByText('教科別スコア詳細')).toBeInTheDocument();
+      expect(screen.getByText('85')).toBeInTheDocument();
+      expect(screen.getByText('70')).toBeInTheDocument();
+      expect(screen.getByText('45')).toBeInTheDocument();
+      expect(screen.getByText('得意')).toBeInTheDocument();
+      expect(screen.getByText('要強化')).toBeInTheDocument();
+    });
+
+    it('should test SugorokuMap with different node statuses, video watched, and test passed', async () => {
+      vi.spyOn(db, 'getCurriculumMasters').mockReturnValue([]);
+      vi.spyOn(db, 'fetchCurriculumMasters').mockResolvedValue([]);
+      const SugorokuMap = (await import('../components/SugorokuMap')).default;
+      const student: Student = {
+        id: 'std-sugo-1',
+        name: 'すごろく生徒',
+        grade: '中1',
+        school_id: 'sch-1',
+        status: 'normal',
+        created_at: ''
+      };
+
+      const units: CurriculumUnit[] = [
+        { id: 'u-1', school_id: 'sch-1', subject: '数学', name: '単元1', sequence_order: 1, created_at: '' },
+        { id: 'u-2', school_id: 'sch-1', subject: '数学', name: '単元2', sequence_order: 2, created_at: '' },
+        { id: 'u-3', school_id: 'sch-1', subject: '数学', name: '単元3', sequence_order: 3, created_at: '' }
+      ];
+
+      const tasks: LearningTask[] = [
+        { id: 't-1', student_id: 'std-sugo-1', unit_id: 'u-1', scheduled_date: '2026-08-01', status: 'completed', video_watched: true, test_passed: true, created_at: '' },
+        { id: 't-2', student_id: 'std-sugo-1', unit_id: 'u-2', scheduled_date: '2026-08-02', status: 'unstarted', video_watched: true, test_passed: false, created_at: '' },
+        { id: 't-3', student_id: 'std-sugo-1', unit_id: 'u-3', scheduled_date: '2026-08-03', status: 'skipped', video_watched: false, test_passed: false, created_at: '' }
+      ];
+
+      render(<SugorokuMap student={student} tasks={tasks} units={units} todayTasks={[]} onSelectTask={vi.fn()} />);
+
+      expect(screen.getByTestId('sugoroku-node-u-1')).toBeInTheDocument();
+      expect(screen.getByTestId('sugoroku-node-u-2')).toBeInTheDocument();
+      expect(screen.getByTestId('sugoroku-node-u-3')).toBeInTheDocument();
+    });
+
+    it('should test TeacherDashboard Branch AI rules modal interactions and subject start grade selector', async () => {
+      const TeacherDashboard = (await import('../components/TeacherDashboard')).default;
+      render(<TeacherDashboard />);
+
+      // Select student
+      const studentCard = screen.getByText(/佐藤 拓海/);
+      await act(async () => {
+        fireEvent.click(studentCard);
+      });
+
+      // Open Branch AI rules modal
+      const openAIRulesBtn = screen.getByTestId('open-branch-ai-rules-modal-btn');
+      fireEvent.click(openAIRulesBtn);
+
+      expect(screen.getAllByText(/校舎別AI自動設定ルール/)[0]).toBeInTheDocument();
+
+      // Change inputs
+      const lessonsPerSlotInput = screen.getByTestId('branch-ai-lessons-per-slot-input');
+      const testPrepWeeksInput = screen.getByTestId('branch-ai-test-prep-weeks-input');
+      const punkThresholdInput = screen.getByTestId('branch-ai-punk-threshold-input');
+      const reviewIntervalInput = screen.getByTestId('branch-ai-review-slot-interval-input');
+
+      fireEvent.change(lessonsPerSlotInput, { target: { value: '3' } });
+      fireEvent.change(testPrepWeeksInput, { target: { value: '4' } });
+      fireEvent.change(punkThresholdInput, { target: { value: '5' } });
+      fireEvent.change(reviewIntervalInput, { target: { value: '3' } });
+
+      // Save modal
+      const saveRulesBtn = screen.getByTestId('save-branch-ai-rules-btn');
+      await act(async () => {
+        fireEvent.click(saveRulesBtn);
+      });
+
+      expect(screen.queryByTestId('save-branch-ai-rules-btn')).not.toBeInTheDocument();
+    });
   });
 });
+

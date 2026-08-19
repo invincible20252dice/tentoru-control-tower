@@ -223,4 +223,125 @@ describe('Branch Management & Multi-tenant RBAC Tests', () => {
       expect(options).toContain('中目黒教室');
     });
   });
+
+  it('should support deleting a branch with confirm, handle rejection, and catch errors', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    
+    render(<BranchManagement />);
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-row-branch-1')).toBeInTheDocument();
+    });
+
+    const ebisuRow = screen.getByTestId('branch-row-branch-1');
+    const deleteBtn = ebisuRow.querySelector('button[title="校舎を削除"]')!;
+
+    // 1. Confirm rejected
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(deleteBtn);
+    expect(screen.getByText('恵比寿教室')).toBeInTheDocument();
+
+    // 2. Confirm accepted
+    confirmSpy.mockReturnValueOnce(true);
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/「恵比寿教室」を削除しました/)).toBeInTheDocument();
+    });
+
+    // 3. Error case during delete
+    vi.spyOn(db, 'deleteBranch').mockRejectedValueOnce(new Error('Delete DB Failed'));
+    confirmSpy.mockReturnValueOnce(true);
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-row-branch-2')).toBeInTheDocument();
+    });
+    const shibuyaRow = screen.getByTestId('branch-row-branch-2');
+    const deleteShibuyaBtn = shibuyaRow.querySelector('button[title="校舎を削除"]')!;
+    await act(async () => {
+      fireEvent.click(deleteShibuyaBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/削除失敗: Delete DB Failed/)).toBeInTheDocument();
+    });
+  });
+
+  it('should cover create branch form interactions: validation, direct db fallback, eye toggle, and phone/address fields', async () => {
+    render(<BranchManagement />);
+    await waitFor(() => {
+      expect(screen.getByTestId('open-create-branch-modal')).toBeInTheDocument();
+    });
+
+    // Open modal
+    fireEvent.click(screen.getByTestId('open-create-branch-modal'));
+
+    // Validation when name is empty
+    const submitBtn = screen.getByText('アカウントを発行する');
+    const form = submitBtn.closest('form')!;
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    expect(screen.getByText('校舎名とメールアドレスは必須です')).toBeInTheDocument();
+
+    // Fill form with phone, address, and test password visibility toggle
+    const nameInput = screen.getByPlaceholderText('例: 横浜教室');
+    const codeInput = screen.getByPlaceholderText('例: YOKOHAMA');
+    const emailInput = screen.getByPlaceholderText('例: yokohama@tentoru.jp');
+    const phoneInput = screen.getByPlaceholderText('045-123-4567');
+    const addressInput = screen.getByPlaceholderText('例: 神奈川県横浜市西区...');
+
+    fireEvent.change(nameInput, { target: { value: '武蔵小杉教室' } });
+    fireEvent.change(codeInput, { target: { value: 'KOSUGI' } });
+    fireEvent.change(emailInput, { target: { value: 'kosugi@tentoru.jp' } });
+    fireEvent.change(phoneInput, { target: { value: '044-999-8888' } });
+    fireEvent.change(addressInput, { target: { value: '神奈川県川崎市中原区...' } });
+
+    // Click cancel button
+    const cancelBtn = screen.getByText('キャンセル');
+    fireEvent.click(cancelBtn);
+    expect(screen.queryByText('アカウントを発行する')).not.toBeInTheDocument();
+
+    // Reopen modal and submit with API error triggering fallback to db.createBranchAccount
+    fireEvent.click(screen.getByTestId('open-create-branch-modal'));
+    fireEvent.change(screen.getByPlaceholderText('例: 横浜教室'), { target: { value: '武蔵小杉教室' } });
+    fireEvent.change(screen.getByPlaceholderText('例: yokohama@tentoru.jp'), { target: { value: 'kosugi@tentoru.jp' } });
+
+    // Mock fetch error to trigger db fallback
+    global.fetch = vi.fn().mockRejectedValueOnce(new Error('Network error'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('アカウントを発行する'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/校舎アカウント「武蔵小杉教室」を発行しました/)).toBeInTheDocument();
+    });
+  });
+
+  it('should handle errors in toggle status and password reset', async () => {
+    vi.spyOn(db, 'toggleBranchStatus').mockRejectedValueOnce(new Error('Status toggle error'));
+    vi.spyOn(db, 'sendBranchPasswordReset').mockRejectedValueOnce(new Error('Reset error'));
+
+    render(<BranchManagement />);
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-row-branch-1')).toBeInTheDocument();
+    });
+    const row = screen.getByTestId('branch-row-branch-1');
+
+    // Toggle status error
+    const toggleBtn = row.querySelector('button[title="アカウントを一時停止"]')!;
+    await act(async () => {
+      fireEvent.click(toggleBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/ステータス更新失敗: Status toggle error/)).toBeInTheDocument();
+    });
+
+    // Password reset error
+    const resetBtn = row.querySelector('button[title="パスワード再設定メールを送信"]')!;
+    await act(async () => {
+      fireEvent.click(resetBtn);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/送信失敗: Reset error/)).toBeInTheDocument();
+    });
+  });
 });

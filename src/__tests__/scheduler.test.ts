@@ -3,14 +3,18 @@ import {
   rescheduleDelayedTasks, 
   handleForwardTasks, 
   reorganizeFutureTasks, 
-  calculateMockExamPassRate,
-  generateAIReportText,
-  learnFromTeacherCorrections,
-  schedulerConfig,
-  getYearMonthWeek,
-  calculateProgressGap,
-  rescheduleFutureUncompletedTasks,
-  calculateDefaultSlots
+  calculateMockExamPassRate, 
+  generateAIReportText, 
+  learnFromTeacherCorrections, 
+  schedulerConfig, 
+  getYearMonthWeek, 
+  calculateProgressGap, 
+  rescheduleFutureUncompletedTasks, 
+  calculateDefaultSlots,
+  formatLessonRange,
+  findNextUncompletedLessonForSubject,
+  inferStudentSubjectPace,
+  calculateLessonRangeForSlot
 } from '../lib/scheduler';
 import { CurriculumUnit, LearningTask, Student, TestRecord, ExamThresholdMaster, MilestonePlan } from '../lib/db';
 
@@ -731,4 +735,130 @@ describe('Scheduler and Core Logic Tests', () => {
       });
     });
   });
+
+  describe('Additional Scheduler Functions & Edge Cases', () => {
+    it('should format lesson range correctly with formatLessonRange', () => {
+      expect(formatLessonRange(null, null)).toBe('');
+      expect(formatLessonRange('単元1', null)).toBe('単元1');
+      expect(formatLessonRange(null, '単元2')).toBe('単元2');
+      expect(formatLessonRange('単元1', '単元1')).toBe('単元1');
+      expect(formatLessonRange('単元1', '単元3')).toBe('単元1 〜 単元3');
+    });
+
+    it('should calculateDefaultSlots for all duration strings and grade categories', () => {
+      expect(calculateDefaultSlots('elementary', '120min')).toBe(2);
+      expect(calculateDefaultSlots('junior_high', '60min')).toBe(2);
+      expect(calculateDefaultSlots('junior_high', '90min')).toBe(2);
+      expect(calculateDefaultSlots('junior_high', '120min')).toBe(2);
+      expect(calculateDefaultSlots('junior_high', '180min')).toBe(3);
+      expect(calculateDefaultSlots('junior_high', '240min')).toBe(4);
+      expect(calculateDefaultSlots('junior_high', 'unlimited')).toBe(5);
+      expect(calculateDefaultSlots('junior_high', '50min')).toBe(2);
+    });
+
+    it('should find next uncompleted lesson for subject and infer pace dynamically', () => {
+      const masters = [
+        { id: 'cm-1', grade: '小5', subject: '算数', unit_name: '1章', lesson_name: '授業1', sort_order: 1, created_at: '' },
+        { id: 'cm-2', grade: '小5', subject: '算数', unit_name: '1章', lesson_name: '授業2', sort_order: 2, created_at: '' },
+        { id: 'cm-3', grade: '小5', subject: '算数', unit_name: '1章', lesson_name: '授業3', sort_order: 3, created_at: '' },
+        { id: 'cm-4', grade: '小5', subject: '算数', unit_name: '2章', lesson_name: '授業4', sort_order: 4, created_at: '' }
+      ];
+
+      const student: Student = {
+        id: 'std-pace-1',
+        name: 'ペーステスト生',
+        grade: '小5',
+        school_id: 'sch-1',
+        status: 'fast',
+        level: 'A',
+        completed_lesson_ids: ['cm-1'],
+        created_at: ''
+      };
+
+      const tasks: LearningTask[] = [
+        { id: 't-1', student_id: 'std-pace-1', unit_id: 'cm-1', scheduled_date: '2026-08-01', status: 'completed', video_watched: true, test_passed: true, completed_lesson_ids: ['cm-1', 'cm-2'], created_at: '' }
+      ];
+
+      const nextLesson = findNextUncompletedLessonForSubject({
+        student,
+        subject: '算数',
+        curriculumMasters: masters,
+        tasks
+      });
+
+      // cm-1 and cm-2 are completed, so next is cm-3
+      expect(nextLesson.lessonId).toBe('cm-3');
+      expect(nextLesson.masterIndex).toBe(2);
+
+      // Infer student pace
+      const pace = inferStudentSubjectPace({
+        student,
+        subject: '算数',
+        tasks
+      });
+      expect(pace.estimatedLessonsPerSlot).toBeGreaterThanOrEqual(2);
+      expect(pace.reason).toContain('爆速');
+
+      // Warning status student
+      const warningStudent: Student = {
+        ...student,
+        status: 'warning',
+        level: 'C'
+      };
+      const warningPace = inferStudentSubjectPace({
+        student: warningStudent,
+        subject: '算数',
+        tasks: []
+      });
+      expect(warningPace.estimatedLessonsPerSlot).toBe(1);
+      expect(warningPace.reason).toContain('パンク防止');
+
+      // Calculate lesson range for slot
+      const range = calculateLessonRangeForSlot({
+        subject: '算数',
+        student,
+        curriculumMasters: masters,
+        tasks
+      });
+      expect(range.start_lesson_id).toBe('cm-3');
+      expect(range.end_lesson_id).toBeDefined();
+      expect(range.lesson_range).toBeDefined();
+    });
+
+    it('should reschedule future uncompleted tasks with sequence order and subject ordering', () => {
+      const units: CurriculumUnit[] = [
+        { id: 'u-eng-1', school_id: 'sch-1', subject: '英語', name: 'Unit 1', sequence_order: 1, created_at: '' },
+        { id: 'u-math-1', school_id: 'sch-1', subject: '数学', name: '単元 1', sequence_order: 1, created_at: '' },
+        { id: 'u-math-2', school_id: 'sch-1', subject: '数学', name: '単元 2', sequence_order: 2, created_at: '' }
+      ];
+
+      const tasks: LearningTask[] = [
+        { id: 't-comp', student_id: 'std-1', unit_id: 'u-math-1', scheduled_date: '2026-08-01', status: 'completed', video_watched: true, test_passed: true, created_at: '' },
+        { id: 't-un-1', student_id: 'std-1', unit_id: 'u-math-2', scheduled_date: '2026-08-02', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' },
+        { id: 't-un-2', student_id: 'std-1', unit_id: 'u-eng-1', scheduled_date: '2026-08-03', status: 'unstarted', video_watched: false, test_passed: false, created_at: '' }
+      ];
+
+      const futureDates = ['2026-08-10', '2026-08-11', '2026-08-12'];
+      const rescheduled = rescheduleFutureUncompletedTasks('std-1', tasks, units, '2026-08-05', futureDates);
+
+      expect(rescheduled.find(t => t.id === 't-comp')?.scheduled_date).toBe('2026-08-01');
+      expect(rescheduled.find(t => t.id === 't-un-1')?.scheduled_date).toBe('2026-08-10');
+      expect(rescheduled.find(t => t.id === 't-un-2')?.scheduled_date).toBe('2026-08-10');
+    });
+
+    it('should calculateMockExamPassRate for in-range, below-range, above-range, and empty thresholds', () => {
+      const thresholds: ExamThresholdMaster[] = [
+        { id: 'eth-1', school_code: 'SCH001', min_score: 60, max_score: 79, probability: 60, target_level: 'B' },
+        { id: 'eth-2', school_code: 'SCH001', min_score: 80, max_score: 100, probability: 80, target_level: 'A' },
+        { id: 'eth-3', school_code: 'SCH001', min_score: 0, max_score: 59, probability: 20, target_level: 'C' }
+      ];
+
+      expect(calculateMockExamPassRate(85, 'SCH001', thresholds)).toBe(80);
+      expect(calculateMockExamPassRate(70, 'SCH001', thresholds)).toBe(60);
+      expect(calculateMockExamPassRate(-5, 'SCH001', thresholds)).toBe(20);
+      expect(calculateMockExamPassRate(110, 'SCH001', thresholds)).toBe(80);
+      expect(calculateMockExamPassRate(85, 'UNKNOWN', thresholds)).toBe(0);
+    });
+  });
 });
+

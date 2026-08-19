@@ -961,6 +961,119 @@ describe('Database Service CRUD Tests', () => {
     const res3 = await localDb.deleteCurriculumMastersByGrades(['小1']);
     expect(res3.success).toBe(true);
   });
+
+  it('should support Authentication, Sessions, and Role management in Mock and Supabase modes', async () => {
+    // 1. Mock Sign In with Admin email
+    const adminRes = await db.signInWithPassword('admin@tentoru.jp', 'anypass');
+    expect(adminRes.success).toBe(true);
+    expect(adminRes.session?.user.role).toBe('admin');
+    expect(db.getSession()?.user.role).toBe('admin');
+
+    // 2. Mock Sign In with Branch email
+    const branchRes = await db.signInWithPassword('ebisu@tentoru.jp', 'anypass');
+    expect(branchRes.success).toBe(true);
+    expect(branchRes.session?.user.role).toBe('branch');
+
+    // 3. Mock Sign In with Wrong Password
+    const wrongRes = await db.signInWithPassword('ebisu@tentoru.jp', 'wrongpass');
+    expect(wrongRes.success).toBe(false);
+    expect(wrongRes.error).toBeDefined();
+
+    // 4. Missing inputs
+    const emptyEmail = await db.signInWithPassword('', 'pass');
+    expect(emptyEmail.success).toBe(false);
+    const emptyPass = await db.signInWithPassword('admin@tentoru.jp', '');
+    expect(emptyPass.success).toBe(false);
+
+    // 5. Suspended branch sign in
+    const branches = db.getBranches();
+    const yokohama = branches.find(b => b.name === '横浜教室');
+    if (yokohama) {
+      const suspendedRes = await db.signInWithPassword(yokohama.email, 'pass');
+      expect(suspendedRes.success).toBe(false);
+      expect(suspendedRes.error).toContain('一時停止中');
+    }
+
+    // 6. Sign Out
+    await db.signOut();
+    expect(db.getSession()).toBeNull();
+
+    // 7. Supabase Mode Auth
+    const localDb = new (db.constructor as any)();
+    (localDb as any).isMockMode = false;
+    (localDb as any).supabase = {
+      auth: {
+        signInWithPassword: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: 'supa-usr-1',
+              user_metadata: { role: 'branch', branch_name: '恵比寿教室', branch_id: 'branch-1' }
+            },
+            session: { access_token: 'token-abc' }
+          },
+          error: null
+        }),
+        signOut: vi.fn().mockResolvedValue({ error: null })
+      }
+    };
+
+    const supaRes = await localDb.signInWithPassword('ebisu@tentoru.jp', 'correctpass');
+    expect(supaRes.success).toBe(true);
+    expect(supaRes.session?.user.role).toBe('branch');
+
+    await localDb.signOut();
+  });
+
+  it('should support Milestone Templates, Interaction Logs, Homework, MiniTests, and Custom Classes CRUD', async () => {
+    // 1. Milestone Templates
+    const template = { id: 'tpl-1', name: '標準プラン', grade: '中3', subject: '数学', target_term: '1学期', created_at: '' };
+    await db.saveMilestoneTemplate(template);
+    expect(db.getMilestoneTemplates().length).toBeGreaterThan(0);
+    await db.deleteMilestoneTemplate('tpl-1');
+
+    // 2. Student Interaction Logs
+    const log = {
+      id: 'log-1',
+      student_id: 'std-1',
+      date: '2026-08-01',
+      teacher_name: '田中先生',
+      interaction_type: 'counseling' as const,
+      content: '面談実施',
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudentInteraction(log);
+    const logs = db.getStudentInteractions('std-1');
+    expect(logs.find(l => l.id === 'log-1')).toBeDefined();
+    await db.deleteStudentInteraction('log-1');
+
+    // 3. Homework & Mini Tests Results & Status
+    const hwList = [
+      { id: 'hw-t1', student_id: 'std-1', date: '2026-08-01', homework_content: '宿題1', homework_deadline: '2026-08-02', status: 'completed' as const, target_scope: 'individual' as const, created_at: '' }
+    ];
+    await db.saveHomeworkResults(hwList);
+    const freshHw = await db.fetchHomeworkResults('std-1');
+    expect(freshHw.find(h => h.id === 'hw-t1')?.status).toBe('completed');
+    await db.deleteHomeworkResult('hw-t1');
+
+    const miniList = [
+      { id: 'mini-t1', student_id: 'std-1', date: '2026-08-01', test_content: 'テスト1', score: 95, passed: true, passing_line: 80, target_scope: 'individual' as const, created_at: '' }
+    ];
+    await db.saveMiniTestResult(miniList[0]);
+    const freshMini = await db.fetchMiniTestResults('std-1');
+    expect(freshMini.find(m => m.id === 'mini-t1')?.score).toBe(95);
+    expect(freshMini.find(m => m.id === 'mini-t1')?.passed).toBe(true);
+    await db.deleteMiniTestResult('mini-t1');
+
+    // 4. Custom classes & Custom apply scopes
+    expect(db.getCustomClasses().length).toBeGreaterThan(0);
+    expect(db.getCustomApplyScopes()).toBeDefined();
+
+    // 5. Branch AI Rules
+    const rules = { lessons_per_slot: 3, test_prep_lead_weeks: 4, punk_threshold_slots: 5, review_slot_interval: 4 };
+    await db.saveBranchAIRules('branch-1', rules);
+    const savedRules = await db.getBranchAIRules('branch-1');
+    expect(savedRules.lessons_per_slot).toBe(3);
+  });
 });
 
 describe('Gemini API Key Utility Tests', () => {
@@ -972,3 +1085,4 @@ describe('Gemini API Key Utility Tests', () => {
     expect(localStorage.getItem('tentoru_gemini_api_key')).toBeNull();
   });
 });
+

@@ -97,6 +97,44 @@ describe('Clean Login Screen & Direct Dashboard Navigation Tests', () => {
     });
   });
 
+  it('should handle login errors, exceptions, password eye toggle, and dark theme in LoginForm', async () => {
+    const onLoginSuccessMock = vi.fn();
+    const { rerender } = render(<LoginForm onLoginSuccess={onLoginSuccessMock} theme="dark" />);
+
+    const emailInput = screen.getByTestId('login-email-input') as HTMLInputElement;
+    const passInput = screen.getByTestId('login-password-input') as HTMLInputElement;
+    const submitBtn = screen.getByTestId('login-submit-btn');
+
+    // 1. Password eye toggle
+    expect(passInput.type).toBe('password');
+    const eyeBtn = passInput.parentElement?.querySelector('button')!;
+    fireEvent.click(eyeBtn);
+    expect(passInput.type).toBe('text');
+    fireEvent.click(eyeBtn);
+    expect(passInput.type).toBe('password');
+
+    // 2. Failed login (wrong password)
+    fireEvent.change(emailInput, { target: { value: 'ebisu@tentoru.jp' } });
+    fireEvent.change(passInput, { target: { value: 'wrongpass' } });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/メールアドレスまたはパスワードが正しくありません/)).toBeInTheDocument();
+    });
+
+    // 3. Exception thrown during login
+    vi.spyOn(db, 'signInWithPassword').mockRejectedValueOnce(new Error('Network Connection Error'));
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Network Connection Error/)).toBeInTheDocument();
+    });
+  });
+
   it('should support viewing student screen from TeacherDashboard student banner', async () => {
     // Start with admin session
     db.saveSession({
