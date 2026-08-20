@@ -40,6 +40,7 @@ import {
   rescheduleDelayedTasks, 
   reorganizeFutureTasks, 
   rescheduleFutureUncompletedTasks,
+  isStudentAttendanceDay,
   calculateMockExamPassRate, 
   learnFromTeacherCorrections, 
   generateAIReportText,
@@ -507,65 +508,112 @@ export default function TeacherDashboard({
             lessonRange: ''
           };
         }
-        const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date(scheduleDate).getDay()];
-        const isAttendanceDay = ((freshSt as any).selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
-        let loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || 2;
+        const isAttendanceDay = isStudentAttendanceDay(freshSt, scheduleDate);
+        let loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || 3;
         let foundCommonNote = '';
         
-        if (today.length > 0) {
-          today.forEach(t => {
-            if (t.period) {
-              const units = listUnits;
-              const unit = units.find(u => u.id === t.unit_id);
-              const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
-              const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
-              const endName = t.end_lesson_name || startName;
+        if (!isAttendanceDay) {
+          // 休塾日（木曜日など通塾曜日以外）：自動でコマ生成は行わず、既存保存データのみを表示
+          if (today.length > 0) {
+            today.forEach(t => {
+              if (t.period) {
+                const units = listUnits;
+                const unit = units.find(u => u.id === t.unit_id);
+                const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+                const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
+                const endName = t.end_lesson_name || startName;
 
-              if (unit || master) {
-                newPeriods[t.period] = {
-                  subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
-                  unitId: t.unit_id,
-                  customTheme: '',
-                  startLessonId: t.start_lesson_id || t.unit_id,
-                  endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
-                  startLessonName: startName,
-                  endLessonName: endName,
-                  lessonRange: t.lesson_range || formatLessonRange(startName, endName)
-                };
-              } else {
-                newPeriods[t.period] = {
-                  subject: t.subject || 'テスト',
-                  unitId: '',
-                  customTheme: t.custom_unit_name || '',
-                  startLessonId: t.start_lesson_id || '',
-                  endLessonId: t.end_lesson_id || '',
-                  startLessonName: t.start_lesson_name || t.custom_unit_name || '',
-                  endLessonName: t.end_lesson_name || t.custom_unit_name || '',
-                  lessonRange: t.lesson_range || t.custom_unit_name || ''
-                };
+                if (unit || master) {
+                  newPeriods[t.period] = {
+                    subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
+                    unitId: t.unit_id,
+                    customTheme: '',
+                    startLessonId: t.start_lesson_id || t.unit_id,
+                    endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
+                    startLessonName: startName,
+                    endLessonName: endName,
+                    lessonRange: t.lesson_range || formatLessonRange(startName, endName)
+                  };
+                } else if (t.subject || t.custom_unit_name) {
+                  newPeriods[t.period] = {
+                    subject: t.subject || 'テスト',
+                    unitId: '',
+                    customTheme: t.custom_unit_name || '',
+                    startLessonId: t.start_lesson_id || '',
+                    endLessonId: t.end_lesson_id || '',
+                    startLessonName: t.start_lesson_name || t.custom_unit_name || '',
+                    endLessonName: t.end_lesson_name || t.custom_unit_name || '',
+                    lessonRange: t.lesson_range || t.custom_unit_name || ''
+                  };
+                }
+                if (t.period > loadedPeriodCount) {
+                  loadedPeriodCount = t.period;
+                }
               }
-              if (t.period > loadedPeriodCount) {
-                loadedPeriodCount = t.period;
+              if (t.office_note) {
+                foundCommonNote = t.office_note;
               }
-            }
-            if (t.office_note) {
-              foundCommonNote = t.office_note;
-            }
-          });
+            });
+          }
         } else {
-          // 新規通塾日や未設定日の場合、生徒の「選択教科（進捗率が低い順）」に基づきコマ割り（From〜To）を自動割り当て
-          const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
-          newPeriods = generateSlotsForSelectedSubjects({
-            student: freshSt,
-            periodCount: loadedPeriodCount,
-            selectedSubjects: freshSt.selected_subjects,
-            tasks: freshTasks,
-            branchRules,
-            curriculumMasters: listMasters,
-            curriculumUnits: listUnits,
-            schoolId: freshSt.school_id,
-            lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
-          });
+          // 通塾日（金曜日など）：既存の有効コマがあればロードし、未設定・不完全な場合は選択教科から進捗順で自動割り当て
+          const validTasks = today.filter(t => t.period && (t.subject || t.unit_id || t.start_lesson_id || t.custom_unit_name));
+          
+          if (validTasks.length > 0) {
+            today.forEach(t => {
+              if (t.period) {
+                const units = listUnits;
+                const unit = units.find(u => u.id === t.unit_id);
+                const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+                const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
+                const endName = t.end_lesson_name || startName;
+
+                if (unit || master) {
+                  newPeriods[t.period] = {
+                    subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
+                    unitId: t.unit_id,
+                    customTheme: '',
+                    startLessonId: t.start_lesson_id || t.unit_id,
+                    endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
+                    startLessonName: startName,
+                    endLessonName: endName,
+                    lessonRange: t.lesson_range || formatLessonRange(startName, endName)
+                  };
+                } else if (t.subject || t.custom_unit_name) {
+                  newPeriods[t.period] = {
+                    subject: t.subject || 'テスト',
+                    unitId: '',
+                    customTheme: t.custom_unit_name || '',
+                    startLessonId: t.start_lesson_id || '',
+                    endLessonId: t.end_lesson_id || '',
+                    startLessonName: t.start_lesson_name || t.custom_unit_name || '',
+                    endLessonName: t.end_lesson_name || t.custom_unit_name || '',
+                    lessonRange: t.lesson_range || t.custom_unit_name || ''
+                  };
+                }
+                if (t.period > loadedPeriodCount) {
+                  loadedPeriodCount = t.period;
+                }
+              }
+              if (t.office_note) {
+                foundCommonNote = t.office_note;
+              }
+            });
+          } else {
+            // 未設定日、または不完全なデータ（「-- コマ割りなし --」のみ等）の場合は、選択教科と進捗順を反映して自動割り当て
+            const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
+            newPeriods = generateSlotsForSelectedSubjects({
+              student: freshSt,
+              periodCount: loadedPeriodCount,
+              selectedSubjects: freshSt.selected_subjects,
+              tasks: freshTasks,
+              branchRules,
+              curriculumMasters: listMasters,
+              curriculumUnits: listUnits,
+              schoolId: freshSt.school_id,
+              lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+            });
+          }
         }
         setPeriodSelections(newPeriods);
         setPeriodCount(loadedPeriodCount);

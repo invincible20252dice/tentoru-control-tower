@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import StudentDashboard from '../components/StudentDashboard';
 import SugorokuMap from '../components/SugorokuMap';
 import { db, Student, LearningTask, CurriculumMaster } from '../lib/db';
-import { getSortedSubjectsByProgressRate, generateSlotsForSelectedSubjects } from '../lib/scheduler';
+import { getSortedSubjectsByProgressRate, generateSlotsForSelectedSubjects, isStudentAttendanceDay } from '../lib/scheduler';
 
 describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integration', () => {
   const mockStudent: Student = {
@@ -280,5 +280,27 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     expect(updatedSt?.completed_lesson_ids).toContain('cm-p1-m1');
 
     spySaveProgress.mockRestore();
+  });
+
+  test('生徒の通塾曜日設定（火・金）に基づき、木曜日（休塾日）と金曜日（通塾日）の判定およびコマ割り初期化が正確に実行されること', () => {
+    const studentWithDays: Student = {
+      id: 'std-days-check',
+      name: '通塾日判定生徒',
+      grade: '小1',
+      login_id: 'days_check_std',
+      password: 'pass',
+      status: 'normal',
+      selected_days: ['tuesday', 'friday'],
+      selected_subjects: ['算数', '国語', '英語'],
+      created_at: new Date().toISOString()
+    };
+
+    // 2026-08-20 は木曜日（休塾日）
+    const isThuAttendance = isStudentAttendanceDay(studentWithDays, '2026-08-20');
+    expect(isThuAttendance).toBe(false);
+
+    // 2026-08-21 は金曜日（通塾日）
+    const isFriAttendance = isStudentAttendanceDay(studentWithDays, '2026-08-21');
+    expect(isFriAttendance).toBe(true);
   });
 });

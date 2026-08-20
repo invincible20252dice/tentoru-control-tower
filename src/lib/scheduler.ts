@@ -610,6 +610,39 @@ export function getFirstAttendanceDate(
 }
 
 /**
+ * 指定された日付が生徒の通塾曜日に該当するか判定する
+ */
+export function isStudentAttendanceDay(
+  student?: Student | null,
+  dateStr?: string | null
+): boolean {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return false;
+
+  const dayOfWeek = d.getDay(); // 0: 日, 1: 月, 2: 火, 3: 水, 4: 木, 5: 金, 6: 土
+
+  const rawDays: string[] = (student as any)?.selected_days || (student as any)?.attendance_days;
+  const days: string[] = (rawDays && rawDays.length > 0) ? rawDays : ['tuesday', 'friday'];
+
+  const dayMap: Record<string, number> = {
+    'sunday': 0, 'sun': 0, '日': 0, '0': 0,
+    'monday': 1, 'mon': 1, '月': 1, '1': 1,
+    'tuesday': 2, 'tue': 2, '火': 2, '2': 2,
+    'wednesday': 3, 'wed': 3, '水': 3, '3': 3,
+    'thursday': 4, 'thu': 4, '木': 4, '4': 4,
+    'friday': 5, 'fri': 5, '金': 5, '5': 5,
+    'saturday': 6, 'sat': 6, '土': 6, '6': 6,
+  };
+
+  const targetDayNums = new Set(
+    days.map(day => dayMap[String(day).toLowerCase()] ?? -1).filter(n => n !== -1)
+  );
+
+  return targetDayNums.size > 0 ? targetDayNums.has(dayOfWeek) : true;
+}
+
+/**
  * 通塾開始日（Day 1）から始まる通塾日の日付リストを生成する
  */
 export function generateAttendanceDates(
@@ -951,8 +984,9 @@ export function rescheduleDelayedTasks(
   const deadlineSunday = new Date(currDateObj.getTime() + diffToSunday * oneDayMs);
   const deadlineDateStr = deadlineSunday.toISOString().split('T')[0];
 
-  // 4. 休校週の日付を除外した、デッドラインまでの有効な割り当て可能日を抽出
+  // 4. 通塾日であり、かつ休校週の日付を除外した、デッドラインまでの有効な割り当て可能日を抽出
   const validFutureDates = futureDates.filter(dStr => {
+    if (!isStudentAttendanceDay(student, dStr)) return false;
     if (dStr > deadlineDateStr) return false;
 
     const { month: dMonth, week_number: dWeek } = getYearMonthWeek(dStr);
@@ -966,10 +1000,11 @@ export function rescheduleDelayedTasks(
     return !isHoliday;
   });
 
-  // もしデッドラインまでに割り当て可能な日がない場合は、全体から休校週を除外した日付を使用
+  // もしデッドラインまでに割り当て可能な日がない場合は、全体から通塾日かつ休校週を除外した日付を使用
   let targetDates = validFutureDates;
   if (targetDates.length === 0) {
     targetDates = futureDates.filter(dStr => {
+      if (!isStudentAttendanceDay(student, dStr)) return false;
       const { month: dMonth, week_number: dWeek } = getYearMonthWeek(dStr);
       return !milestonePlans.some(p => 
         p.grade === student.grade && 
