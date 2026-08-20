@@ -92,7 +92,70 @@ export default function SugorokuMap({
   });
 
   // 本日のタスク情報 (今日の挑戦中範囲)
-  const subjectTodayTasks = todayTasks.filter(t => t.subject === activeSubject || (!t.subject && activeSubject === '数学'));
+  const subjectTodayTasks = todayTasks.filter(t => 
+    t.subject === activeSubject || 
+    (!t.subject && activeSubject === '数学') || 
+    (activeSubject === '算数' && (!t.subject || t.subject === '算数'))
+  );
+
+  // 1. 本日のコマ割り範囲に該当するすごろくマス (node.id) の集合を計算
+  const todayNodeIds = new Set<string>();
+
+  subjectTodayTasks.forEach(tt => {
+    const findNodeIndex = (targetId?: string, targetName?: string): number => {
+      if (targetId) {
+        const idx = nodes.findIndex(n => n.id === targetId || String(n.id) === String(targetId) || String(n.sortOrder) === String(targetId));
+        if (idx >= 0) return idx;
+      }
+      if (targetName && targetName.trim()) {
+        const raw = targetName.trim();
+        const clean = (s: string) => s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
+        const norm = clean(raw);
+
+        const exact = nodes.findIndex(n => n.name === raw || n.fullTitle === raw);
+        if (exact >= 0) return exact;
+
+        const normIdx = nodes.findIndex(n => {
+          const nNorm = clean(n.name);
+          const fNorm = clean(n.fullTitle);
+          return (nNorm && (nNorm === norm || nNorm.includes(norm) || norm.includes(nNorm))) ||
+                 (fNorm && (fNorm === norm || fNorm.includes(norm) || norm.includes(fNorm)));
+        });
+        if (normIdx >= 0) return normIdx;
+      }
+      return -1;
+    };
+
+    let startIdx = findNodeIndex(tt.start_lesson_id, tt.start_lesson_name);
+    let endIdx = findNodeIndex(tt.end_lesson_id, tt.end_lesson_name);
+
+    const rangeText = tt.lesson_range || tt.custom_unit_name;
+    if ((startIdx < 0 || endIdx < 0) && rangeText && (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～'))) {
+      const parts = rangeText.split(/〜|~|～/);
+      if (parts.length >= 2) {
+        const fromStr = parts[0].trim();
+        const toStr = parts[1].trim();
+        if (startIdx < 0 && fromStr) startIdx = findNodeIndex(undefined, fromStr);
+        if (endIdx < 0 && toStr) endIdx = findNodeIndex(undefined, toStr);
+      }
+    }
+
+    if (startIdx >= 0 || endIdx >= 0) {
+      const minI = startIdx >= 0 && endIdx >= 0 ? Math.min(startIdx, endIdx) : (startIdx >= 0 ? startIdx : endIdx);
+      const maxI = startIdx >= 0 && endIdx >= 0 ? Math.max(startIdx, endIdx) : (endIdx >= 0 ? endIdx : startIdx);
+      for (let i = minI; i <= maxI; i++) {
+        if (nodes[i]) todayNodeIds.add(nodes[i].id);
+      }
+    } else {
+      nodes.forEach(n => {
+        if (tt.unit_id === n.id || tt.start_lesson_id === n.id || tt.end_lesson_id === n.id ||
+            String(tt.unit_id) === String(n.id) || String(tt.start_lesson_id) === String(n.id) || String(tt.end_lesson_id) === String(n.id) ||
+            tt.custom_unit_name?.includes(n.name) || tt.lesson_range?.includes(n.name) || tt.start_lesson_name === n.name || tt.end_lesson_name === n.name) {
+          todayNodeIds.add(n.id);
+        }
+      });
+    }
+  });
 
   // 現在の「プレイヤーの位置」を計算
   let playerNodeId: string | null = null;
@@ -113,13 +176,15 @@ export default function SugorokuMap({
         student.completed_lesson_ids.includes(node.id) || 
         student.completed_lesson_ids.includes(String(node.id)) ||
         student.completed_lesson_ids.map(String).includes(String(node.id)) ||
-        student.completed_lesson_ids.includes(node.name)
+        student.completed_lesson_ids.includes(node.name) ||
+        student.completed_lesson_ids.includes(String(node.sortOrder))
       )) ||
       tasks.some(t => t.completed_lesson_ids && (
         t.completed_lesson_ids.includes(node.id) || 
         t.completed_lesson_ids.includes(String(node.id)) ||
         t.completed_lesson_ids.map(String).includes(String(node.id)) ||
-        t.completed_lesson_ids.includes(node.name)
+        t.completed_lesson_ids.includes(node.name) ||
+        t.completed_lesson_ids.includes(String(node.sortOrder))
       )) ||
       tasks.some(t => (t.status === 'completed' || t.test_passed) && (
         t.unit_id === node.id || 
@@ -234,13 +299,15 @@ export default function SugorokuMap({
                 student.completed_lesson_ids.includes(node.id) || 
                 student.completed_lesson_ids.includes(String(node.id)) ||
                 student.completed_lesson_ids.map(String).includes(String(node.id)) ||
-                student.completed_lesson_ids.includes(node.name)
+                student.completed_lesson_ids.includes(node.name) ||
+                student.completed_lesson_ids.includes(String(node.sortOrder))
               )) ||
               tasks.some(t => t.completed_lesson_ids && (
                 t.completed_lesson_ids.includes(node.id) || 
                 t.completed_lesson_ids.includes(String(node.id)) ||
                 t.completed_lesson_ids.map(String).includes(String(node.id)) ||
-                t.completed_lesson_ids.includes(node.name)
+                t.completed_lesson_ids.includes(node.name) ||
+                t.completed_lesson_ids.includes(String(node.sortOrder))
               )) ||
               tasks.some(t => (t.status === 'completed' || t.test_passed) && (
                 t.unit_id === node.id || 
@@ -258,12 +325,7 @@ export default function SugorokuMap({
             const isTestPassed = task?.test_passed || isCompleted;
 
             // Check if this node is in today's task range
-            const isTodayTask = subjectTodayTasks.some(tt => {
-              if (tt.unit_id === node.id || tt.start_lesson_id === node.id || tt.end_lesson_id === node.id) return true;
-              if (String(tt.unit_id) === String(node.id) || String(tt.start_lesson_id) === String(node.id) || String(tt.end_lesson_id) === String(node.id)) return true;
-              if (tt.lesson_range?.includes(node.name) || tt.custom_unit_name?.includes(node.name) || tt.start_lesson_name === node.name || tt.end_lesson_name === node.name) return true;
-              return false;
-            });
+            const isTodayTask = todayNodeIds.has(node.id);
 
             // 各ステップ（ビデオ、テスト）の表示ステータス
             let videoClass = styles.stepCircle;

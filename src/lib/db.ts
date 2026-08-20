@@ -1721,7 +1721,17 @@ class DatabaseService {
     if (!this.isMockMode && this.supabase) {
       const dbPayloads = tasks.map(t => sanitizeLearningTaskForDB(t));
       const { data, error } = await this.supabase.from('learning_tasks').upsert(dbPayloads).select();
-      if (error) throw error;
+      if (error) {
+        // If error is about missing column completed_lesson_ids or similar, fallback by stripping non-standard columns
+        if (error.message?.includes('completed_lesson_ids') || error.code === '42703' || (error as any).details?.includes('completed_lesson_ids') || error.code === 'PGRST204') {
+          const fallbackPayloads = dbPayloads.map(({ completed_lesson_ids, ...rest }) => rest);
+          const retryRes = await this.supabase.from('learning_tasks').upsert(fallbackPayloads).select();
+          if (!retryRes.error) {
+            return (retryRes.data || sanitizedTasks) as LearningTask[];
+          }
+        }
+        throw error;
+      }
       return (data || sanitizedTasks) as LearningTask[];
     }
     return sanitizedTasks;
@@ -1729,12 +1739,28 @@ class DatabaseService {
 
   public async fetchLearningTasks(studentId?: string, date?: string): Promise<LearningTask[]> {
     if (!this.isMockMode && this.supabase) {
-      let query = this.supabase.from('learning_tasks').select('*');
-      if (studentId) query = query.eq('student_id', studentId);
-      if (date) query = query.eq('scheduled_date', date);
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data || []) as LearningTask[];
+      try {
+        let query = this.supabase.from('learning_tasks').select('*');
+        if (studentId) query = query.eq('student_id', studentId);
+        if (date) query = query.eq('scheduled_date', date);
+        const { data, error } = await query;
+        if (error) throw error;
+        const tasks = (data || []) as LearningTask[];
+
+        // Synchronize local memory cache with latest remote tasks
+        let currentList = this.getLearningTasks();
+        if (studentId && date) {
+          currentList = currentList.filter(t => !(t.student_id === studentId && t.scheduled_date === date));
+        } else if (studentId) {
+          currentList = currentList.filter(t => t.student_id !== studentId);
+        }
+        currentList.push(...tasks.map(t => sanitizeLearningTask(t)));
+        this.saveMockData('learning_tasks', currentList);
+
+        return tasks;
+      } catch (err) {
+        console.warn('Supabase fetchLearningTasks fallback to local storage:', err);
+      }
     }
     const all = this.getLearningTasks();
     return all.filter(t => {
@@ -1742,6 +1768,40 @@ class DatabaseService {
       if (date && t.scheduled_date !== date) return false;
       return true;
     });
+  }
+
+  public async deleteLearningTasksByDate(studentId: string, date: string): Promise<void> {
+    // 1. Update local cache immediately
+    let list = this.getLearningTasks();
+    list = list.filter(t => !(t.student_id === studentId && t.scheduled_date === date));
+    this.saveMockData('learning_tasks', list);
+
+    // 2. Delete from Supabase
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { error } = await this.supabase
+          .from('learning_tasks')
+          .delete()
+          .eq('student_id', studentId)
+          .eq('scheduled_date', date);
+        if (error) {
+          console.warn('Supabase deleteLearningTasksByDate warning:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase deleteLearningTasksByDate exception:', err);
+      }
+    }
+  }
+
+  public async overwriteLearningTasksForDate(studentId: string, date: string, newTasks: LearningTask[]): Promise<LearningTask[]> {
+    // 1. First delete existing tasks for this student and date
+    await this.deleteLearningTasksByDate(studentId, date);
+
+    // 2. Insert new tasks if any
+    if (newTasks && newTasks.length > 0) {
+      return await this.saveLearningTasks(newTasks);
+    }
+    return [];
   }
 
   public async deleteLearningTasksByStudent(studentId: string): Promise<void> {

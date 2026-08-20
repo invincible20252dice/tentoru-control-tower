@@ -197,112 +197,132 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   }, [student.id, student.level, currentDateStr]);
 
   // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
+  // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
   const getTaskStepLessons = (task: LearningTask): Array<{ id: string; name: string; fullTitle: string }> => {
     const isElem = student.grade.startsWith('小') || student.grade === '園児';
     const isJhs = student.grade.startsWith('中');
     const isHs = student.grade.startsWith('高') || student.grade === '既卒';
     const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || (isElem ? '算数' : '数学');
 
-    const masterLessons = curriculumMasters
-      .filter(m => {
-        const matchesSubject = m.subject === taskSubject || 
-          (isElem && (m.subject === '算数' || (taskSubject === '算数' && m.subject === '数学'))) || 
-          (!isElem && (m.subject === '数学' || (taskSubject === '数学' && m.subject === '算数')));
-        if (!matchesSubject) return false;
-        if (isElem && m.grade) return m.grade.startsWith('小') || m.grade === '園児';
-        if (isJhs && m.grade) return m.grade.startsWith('中');
-        if (isHs && m.grade) return m.grade.startsWith('高') || m.grade === '既卒';
-        return true;
-      })
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map(m => ({
-        id: m.id,
-        sort_order: m.sort_order,
-        name: m.lesson_name || m.unit_name || '',
-        fullTitle: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : (m.lesson_name || '')
-      }));
+    const cleanStr = (s: string) => {
+      if (!s) return '';
+      return s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
+    };
 
-    if (masterLessons.length > 0) {
-      let startIdx = -1;
-      let endIdx = -1;
+    // 関連するカリキュラムマスターのリストを抽出
+    let candidateMasters = curriculumMasters.filter(m => {
+      const matchesSubject = m.subject === taskSubject || 
+        (isElem && (m.subject === '算数' || (taskSubject === '算数' && m.subject === '数学'))) || 
+        (!isElem && (m.subject === '数学' || (taskSubject === '数学' && m.subject === '算数')));
+      return matchesSubject;
+    });
 
-      // 1. start_lesson_id での検索
-      if (task.start_lesson_id) {
-        startIdx = masterLessons.findIndex(m => 
-          m.id === task.start_lesson_id || 
-          String(m.id) === String(task.start_lesson_id) || 
-          (m.sort_order !== undefined && String(m.sort_order) === String(task.start_lesson_id))
-        );
-      }
-      // 2. start_lesson_name での検索
-      if (startIdx < 0 && task.start_lesson_name) {
-        const sName = task.start_lesson_name.trim();
-        startIdx = masterLessons.findIndex(m => 
-          m.name === sName || 
-          m.fullTitle === sName || 
-          m.name.includes(sName) || 
-          sName.includes(m.name) ||
-          m.fullTitle.includes(sName) ||
-          sName.includes(m.fullTitle)
-        );
-      }
+    if (candidateMasters.length === 0 && curriculumMasters.length > 0) {
+      candidateMasters = curriculumMasters;
+    }
 
-      // 3. end_lesson_id での検索
-      if (task.end_lesson_id) {
-        endIdx = masterLessons.findIndex(m => 
-          m.id === task.end_lesson_id || 
-          String(m.id) === String(task.end_lesson_id) || 
-          (m.sort_order !== undefined && String(m.sort_order) === String(task.end_lesson_id))
-        );
-      }
-      // 4. end_lesson_name での検索
-      if (endIdx < 0 && task.end_lesson_name) {
-        const eName = task.end_lesson_name.trim();
-        endIdx = masterLessons.findIndex(m => 
-          m.name === eName || 
-          m.fullTitle === eName || 
-          m.name.includes(eName) || 
-          eName.includes(m.name) ||
-          m.fullTitle.includes(eName) ||
-          eName.includes(m.fullTitle)
-        );
-      }
+    // 学年での絞り込み（該当するものがあれば優先）
+    const gradeExactMasters = candidateMasters.filter(m => m.grade === student.grade);
+    const gradeCategoryMasters = candidateMasters.filter(m => {
+      if (isElem && m.grade) return m.grade.startsWith('小') || m.grade === '園児';
+      if (isJhs && m.grade) return m.grade.startsWith('中');
+      if (isHs && m.grade) return m.grade.startsWith('高') || m.grade === '既卒';
+      return true;
+    });
 
-      // 5. lesson_range または custom_unit_name からの分割検索 (例: "たしざん - かずをあらわす 〜 たしざん - 10までのたしざん(3)")
-      const rangeText = task.lesson_range || task.custom_unit_name;
-      if ((startIdx < 0 || endIdx < 0) && rangeText && (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～'))) {
-        const parts = rangeText.split(/〜|~|～/);
-        if (parts.length >= 2) {
-          const fromStr = parts[0].trim();
-          const toStr = parts[1].trim();
-          if (startIdx < 0 && fromStr) {
-            startIdx = masterLessons.findIndex(m => 
-              m.name === fromStr || 
-              m.fullTitle === fromStr || 
-              m.name.includes(fromStr) || 
-              fromStr.includes(m.name) ||
-              m.fullTitle.includes(fromStr) ||
-              fromStr.includes(m.fullTitle)
-            );
-          }
-          if (endIdx < 0 && toStr) {
-            endIdx = masterLessons.findIndex(m => 
-              m.name === toStr || 
-              m.fullTitle === toStr || 
-              m.name.includes(toStr) || 
-              toStr.includes(m.name) ||
-              m.fullTitle.includes(toStr) ||
-              toStr.includes(m.fullTitle)
-            );
+    // 検索対象のリスト候補（段階的にフォールバック）
+    const listsToTry = [
+      gradeExactMasters.length > 0 ? gradeExactMasters : null,
+      gradeCategoryMasters.length > 0 ? gradeCategoryMasters : null,
+      candidateMasters.length > 0 ? candidateMasters : null,
+      curriculumMasters.length > 0 ? curriculumMasters : null
+    ].filter(Boolean) as typeof curriculumMasters[];
+
+    const findIndexInList = (list: Array<{ id: string; sort_order?: number; name: string; fullTitle: string }>, targetId?: string, targetName?: string): number => {
+      if (targetId) {
+        const byId = list.findIndex(m => 
+          m.id === targetId || 
+          String(m.id) === String(targetId) || 
+          (m.sort_order !== undefined && String(m.sort_order) === String(targetId))
+        );
+        if (byId >= 0) return byId;
+      }
+      if (targetName && targetName.trim()) {
+        const raw = targetName.trim();
+        const norm = cleanStr(raw);
+        if (!norm) return -1;
+
+        // 1. 完全一致
+        const exact = list.findIndex(m => m.name === raw || m.fullTitle === raw);
+        if (exact >= 0) return exact;
+
+        // 2. 正規化一致
+        const normMatch = list.findIndex(m => {
+          const mNorm = cleanStr(m.name);
+          const fNorm = cleanStr(m.fullTitle);
+          return mNorm === norm || fNorm === norm || 
+                 (mNorm.length >= 2 && norm.includes(mNorm)) || 
+                 (norm.length >= 2 && mNorm.includes(norm)) ||
+                 (fNorm.length >= 2 && norm.includes(fNorm)) ||
+                 (norm.length >= 2 && fNorm.includes(norm));
+        });
+        if (normMatch >= 0) return normMatch;
+      }
+      return -1;
+    };
+
+    for (const rawList of listsToTry) {
+      const masterLessons = rawList
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({
+          id: m.id,
+          sort_order: m.sort_order,
+          name: m.lesson_name || m.unit_name || '',
+          fullTitle: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : (m.lesson_name || '')
+        }));
+
+      if (masterLessons.length > 0) {
+        let startIdx = findIndexInList(masterLessons, task.start_lesson_id, task.start_lesson_name);
+        let endIdx = findIndexInList(masterLessons, task.end_lesson_id, task.end_lesson_name);
+
+        const rangeText = task.lesson_range || task.custom_unit_name;
+        if ((startIdx < 0 || endIdx < 0) && rangeText && (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～'))) {
+          const parts = rangeText.split(/〜|~|～/);
+          if (parts.length >= 2) {
+            const fromStr = parts[0].trim();
+            const toStr = parts[1].trim();
+            if (startIdx < 0 && fromStr) startIdx = findIndexInList(masterLessons, undefined, fromStr);
+            if (endIdx < 0 && toStr) endIdx = findIndexInList(masterLessons, undefined, toStr);
           }
         }
-      }
 
-      if (startIdx >= 0) {
-        if (endIdx >= startIdx) {
-          return masterLessons.slice(startIdx, endIdx + 1);
+        // sort_order 基準での範囲特定 (From〜To)
+        let startOrder: number | undefined;
+        let endOrder: number | undefined;
+
+        if (startIdx >= 0) startOrder = masterLessons[startIdx].sort_order;
+        if (endIdx >= 0) endOrder = masterLessons[endIdx].sort_order;
+
+        if (startOrder === undefined && task.start_lesson_id && !isNaN(Number(task.start_lesson_id))) {
+          startOrder = Number(task.start_lesson_id);
         }
-        return [masterLessons[startIdx]];
+        if (endOrder === undefined && task.end_lesson_id && !isNaN(Number(task.end_lesson_id))) {
+          endOrder = Number(task.end_lesson_id);
+        }
+
+        if (startOrder !== undefined && endOrder !== undefined) {
+          const minOrder = Math.min(startOrder, endOrder);
+          const maxOrder = Math.max(startOrder, endOrder);
+          const rangeItems = masterLessons.filter(m => m.sort_order !== undefined && m.sort_order >= minOrder && m.sort_order <= maxOrder);
+          if (rangeItems.length > 0) return rangeItems;
+        }
+
+        if (startIdx >= 0 || endIdx >= 0) {
+          const minI = startIdx >= 0 && endIdx >= 0 ? Math.min(startIdx, endIdx) : (startIdx >= 0 ? startIdx : endIdx);
+          const maxI = startIdx >= 0 && endIdx >= 0 ? Math.max(startIdx, endIdx) : (endIdx >= 0 ? endIdx : startIdx);
+          return masterLessons.slice(minI, maxI + 1);
+        }
       }
     }
 
@@ -312,36 +332,30 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,
-        sequence_order: u.sequence_order,
+        sort_order: u.sequence_order,
         name: u.name,
         fullTitle: u.name
       }));
 
     if (subjectUnits.length > 0) {
-      let sIdx = -1;
-      let eIdx = -1;
-      const sName = task.start_lesson_name ? String(task.start_lesson_name).trim() : '';
-      const eName = task.end_lesson_name ? String(task.end_lesson_name).trim() : '';
+      let sIdx = findIndexInList(subjectUnits as any, task.start_lesson_id, task.start_lesson_name);
+      let eIdx = findIndexInList(subjectUnits as any, task.end_lesson_id, task.end_lesson_name);
 
-      if (task.start_lesson_id) sIdx = subjectUnits.findIndex(u => u.id === task.start_lesson_id || String(u.id) === String(task.start_lesson_id) || (u.sequence_order !== undefined && String(u.sequence_order) === String(task.start_lesson_id)));
-      if (sIdx < 0 && sName) sIdx = subjectUnits.findIndex(u => u.name === sName || u.name.includes(sName) || sName.includes(u.name));
-      if (task.end_lesson_id) eIdx = subjectUnits.findIndex(u => u.id === task.end_lesson_id || String(u.id) === String(task.end_lesson_id) || (u.sequence_order !== undefined && String(u.sequence_order) === String(task.end_lesson_id)));
-      if (eIdx < 0 && eName) eIdx = subjectUnits.findIndex(u => u.name === eName || u.name.includes(eName) || eName.includes(u.name));
-      
       const rangeText = task.lesson_range || task.custom_unit_name;
       if ((sIdx < 0 || eIdx < 0) && rangeText && (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～'))) {
         const parts = rangeText.split(/〜|~|～/);
         if (parts.length >= 2) {
           const fromStr = parts[0].trim();
           const toStr = parts[1].trim();
-          if (sIdx < 0 && fromStr) sIdx = subjectUnits.findIndex(u => u.name === fromStr || u.name.includes(fromStr) || fromStr.includes(u.name));
-          if (eIdx < 0 && toStr) eIdx = subjectUnits.findIndex(u => u.name === toStr || u.name.includes(toStr) || toStr.includes(u.name));
+          if (sIdx < 0 && fromStr) sIdx = findIndexInList(subjectUnits as any, undefined, fromStr);
+          if (eIdx < 0 && toStr) eIdx = findIndexInList(subjectUnits as any, undefined, toStr);
         }
       }
 
-      if (sIdx >= 0) {
-        if (eIdx >= sIdx) return subjectUnits.slice(sIdx, eIdx + 1);
-        return [subjectUnits[sIdx]];
+      if (sIdx >= 0 || eIdx >= 0) {
+        const minI = sIdx >= 0 && eIdx >= 0 ? Math.min(sIdx, eIdx) : (sIdx >= 0 ? sIdx : eIdx);
+        const maxI = sIdx >= 0 && eIdx >= 0 ? Math.max(sIdx, eIdx) : (eIdx >= 0 ? eIdx : sIdx);
+        return subjectUnits.slice(minI, maxI + 1);
       }
 
       if (task.unit_id) {
@@ -508,6 +522,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       last_completed_at: new Date().toISOString()
     };
 
+    // ⚡️ 1. Optimistic UI Update: Reactステートを即座に更新
+    setCurrentStudent(updatedStudent);
+    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    showToast(`🎉 【第${task.period}コマ 完了！】授業の全ステップを完了にしました！`);
+
+    // 🌐 2. バックエンド保存
     for (const step of stepLessons) {
       try {
         await db.saveStudentLessonProgress({
@@ -527,10 +548,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       }
     }
 
-    await db.saveLearningTasks([updatedTask]);
-    await db.saveStudent(updatedStudent);
-
     try {
+      await db.saveLearningTasks([updatedTask]);
+      await db.saveStudent(updatedStudent);
+
       await db.addLearningLog({
         id: `log-pass-${Date.now()}`,
         student_id: student.id,
@@ -542,18 +563,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         created_at: new Date().toISOString()
       });
     } catch (e) {
-      console.warn('addLearningLog error:', e);
+      console.warn('handleCompleteCustomTask error:', e);
     }
-
-    setCurrentStudent(updatedStudent);
-    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
-    setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
-    if (typeof window !== 'undefined') {
-      window.alert('授業を完了にしました！');
-    }
-    showToast(`🎉 【第${task.period}コマ 完了！】授業の全ステップを完了にしました！`);
-
-    await loadData();
   };
 
   // 1. 動画視聴ボタンのアクション

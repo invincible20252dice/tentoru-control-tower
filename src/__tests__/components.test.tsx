@@ -1056,7 +1056,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const completeCustomBtn = screen.getByText('この授業を完了にする');
     fireEvent.click(completeCustomBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('授業を完了にしました！');
+      expect(screen.getByText(/授業の全ステップを完了にしました/)).toBeInTheDocument();
     });
 
     const updatedMiniResults = db.getMiniTestResults();
