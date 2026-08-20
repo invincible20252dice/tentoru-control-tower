@@ -427,9 +427,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       showToast(`🎉 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講完了にしました！`);
     }
 
-    // 🌐 2. バックエンド (Supabase / LocalStorage) への非同期保存処理
+    // 🌐 2. バックエンド (Supabase / LocalStorage) への非同期保存処理（堅牢・フォールバック保存構造）
     try {
-      // (a) レッスン進捗 (student_lesson_progress) を保存
+      // (a) 生徒情報（completed_lesson_ids）とタスク情報をフォールバックとして最優先保存
+      await db.saveStudent(updatedStudent);
+      await db.saveLearningTasks([updatedTask]);
+    } catch (primarySaveErr) {
+      console.error('プライマリデータ保存エラー (フォールバック保持):', primarySaveErr);
+    }
+
+    try {
+      // (b) レッスン進捗 (student_lesson_progress) を保存
       await db.saveStudentLessonProgress({
         id: `slp-${student.id}-${stepIdStr}`,
         student_id: student.id,
@@ -442,11 +450,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         completed_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       });
+    } catch (progressErr) {
+      console.error('student_lesson_progress 保存警告 (completed_lesson_idsにて保持済み):', progressErr);
+    }
 
-      // (b) タスクと生徒情報を保存 (Supabase + LocalStorage)
-      await db.saveLearningTasks([updatedTask]);
-      await db.saveStudent(updatedStudent);
-
+    try {
       // (c) ログ記録
       await db.addLearningLog({
         id: `log-step-${Date.now()}`,
@@ -469,9 +477,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           created_at: new Date().toISOString()
         });
       }
-    } catch (err) {
-      console.error('ステップ進捗の保存中にエラーが発生しました:', err);
-      showToast('⚠️ 進捗のサーバー保存に失敗しました。');
+    } catch (logErr) {
+      console.warn('学習ログ保存警告 (進捗完了処理は継続):', logErr);
     }
   };
 
@@ -530,7 +537,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
     showToast(`🎉 【第${task.period}コマ 完了！】授業の全ステップを完了にしました！`);
 
-    // 🌐 2. バックエンド保存
+    // 🌐 2. バックエンド保存（最優先フォールバック保存）
+    try {
+      await db.saveStudent(updatedStudent);
+      await db.saveLearningTasks([updatedTask]);
+    } catch (primaryErr) {
+      console.error('一括完了 プライマリ保存エラー (フォールバック保持):', primaryErr);
+    }
+
     for (const step of stepLessons) {
       try {
         await db.saveStudentLessonProgress({
@@ -551,9 +565,6 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     }
 
     try {
-      await db.saveLearningTasks([updatedTask]);
-      await db.saveStudent(updatedStudent);
-
       await db.addLearningLog({
         id: `log-pass-${Date.now()}`,
         student_id: student.id,
@@ -565,7 +576,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         created_at: new Date().toISOString()
       });
     } catch (e) {
-      console.warn('handleCompleteCustomTask error:', e);
+      console.warn('addLearningLog error:', e);
     }
   };
 

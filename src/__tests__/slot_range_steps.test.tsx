@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { vi } from 'vitest';
 import '@testing-library/jest-dom';
 import StudentDashboard from '../components/StudentDashboard';
 import SugorokuMap from '../components/SugorokuMap';
@@ -226,5 +227,58 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     expect(slots4[2].subject).toBe('国語');
     expect(slots4[3].subject).toBe('英語');
     expect(slots4[4].subject).toBe('算数');
+  });
+
+  test('生徒画面で授業ステップ完了ボタンを押した際、Supabase通信警告時でもトーストエラーを出さずにOptimistic UIおよびcompleted_lesson_idsへのフォールバック保存が実行されること', async () => {
+    const spySaveProgress = vi.spyOn(db, 'saveStudentLessonProgress').mockRejectedValueOnce(new Error('Network error test'));
+
+    const taskStepTest: LearningTask = {
+      id: 'task-step-fail-safe',
+      student_id: mockStudent.id,
+      unit_id: 'cm-p1-m1',
+      scheduled_date: '2026-08-20',
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      start_lesson_id: 'cm-p1-m1',
+      start_lesson_name: 'あわせていくつ',
+      end_lesson_id: 'cm-p1-m1',
+      end_lesson_name: 'あわせていくつ',
+      lesson_range: 'あわせていくつ',
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveStudent(mockStudent);
+    await db.saveLearningTasks([taskStepTest]);
+
+    render(
+      <StudentDashboard
+        student={mockStudent}
+        initialDate="2026-08-20"
+        onBackToPortal={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('step-complete-btn-1-0')).toBeInTheDocument();
+    });
+
+    const completeBtn = screen.getByTestId('step-complete-btn-1-0');
+    fireEvent.click(completeBtn);
+
+    // 画面に「⚠️ 進捗のサーバー保存に失敗しました。」が表示されず、正常完了トーストが表示されること
+    await waitFor(() => {
+      expect(screen.queryByText(/進捗のサーバー保存に失敗しました/)).not.toBeInTheDocument();
+      expect(screen.getByText(/全ステップを達成しました/)).toBeInTheDocument();
+    });
+
+    // 生徒の completed_lesson_ids に 'cm-p1-m1' が保存・更新されていること
+    const updatedSt = db.getStudents().find(s => s.id === mockStudent.id);
+    expect(updatedSt?.completed_lesson_ids).toContain('cm-p1-m1');
+
+    spySaveProgress.mockRestore();
   });
 });

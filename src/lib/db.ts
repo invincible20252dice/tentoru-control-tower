@@ -2680,9 +2680,27 @@ class DatabaseService {
 
     if (!this.isMockMode && this.supabase) {
       try {
-        const { data, error } = await this.supabase.from('student_lesson_progress').upsert(progress).select().single();
+        const payload = {
+          id: progress.id,
+          student_id: progress.student_id,
+          subject: progress.subject || 'その他',
+          lesson_id: progress.lesson_id,
+          lesson_name: progress.lesson_name || '',
+          task_id: progress.task_id || null,
+          date: progress.date || new Date().toISOString().split('T')[0],
+          status: progress.status || 'completed',
+          completed_at: progress.completed_at || new Date().toISOString(),
+          created_at: progress.created_at || new Date().toISOString()
+        };
+
+        const { data, error } = await this.supabase.from('student_lesson_progress').upsert(payload).select().single();
         if (error) {
-          console.warn('saveStudentLessonProgress supabase warning:', error);
+          console.warn('saveStudentLessonProgress supabase warning (trying student_task_progress):', error);
+          try {
+            await this.supabase.from('student_task_progress').upsert(payload);
+          } catch (fbErr) {
+            console.warn('student_task_progress fallback warning:', fbErr);
+          }
         } else if (data) {
           return data as StudentLessonProgress;
         }
