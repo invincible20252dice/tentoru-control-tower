@@ -1505,16 +1505,11 @@ describe('UI Components Render & Interaction Tests', () => {
     const hasUnit1 = Array.from(document.querySelectorAll('select')).some(select => select.value.includes('文字を使った式'));
     expect(hasUnit1).toBe(true);
 
-    // 対象教科を「英語」に切り替えて onChange ブランチをカバー
-    const labels = Array.from(document.querySelectorAll('label'));
-    const subjectLabel = labels.find(l => l.textContent?.includes('対象教科:'));
-    if (subjectLabel) {
-      const select = subjectLabel.nextElementSibling as HTMLSelectElement;
-      if (select) {
-        fireEvent.change(select, { target: { value: '英語' } });
-        fireEvent.change(select, { target: { value: '数学' } });
-      }
-    }
+    // 対象教科を「英語」に切り替えてボタンクリックブランチをカバー
+    const englishBtn = screen.getByTestId('milestone-subject-btn-英語');
+    const mathBtn = screen.getByTestId('milestone-subject-btn-数学');
+    fireEvent.click(englishBtn);
+    fireEvent.click(mathBtn);
 
     // 10. 小学生の状態でマイルストーン計画を表示させて教科の算数ブランチカバー
     const studentListTabBtn2 = screen.getAllByText('生徒一覧')[0];
@@ -1523,8 +1518,8 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(cardB);
 
     fireEvent.click(milestoneMenuBtn);
-    // 教科セレクトボックスで「算数」が表示されていることを確認
-    expect(screen.getByRole('option', { name: '算数' })).toBeInTheDocument();
+    // 教科ボタングループで「算数」が表示されていることを確認
+    expect(screen.getByTestId('milestone-subject-btn-算数')).toBeInTheDocument();
 
     unmount();
     db.clearMockData();
@@ -1570,6 +1565,27 @@ describe('UI Components Render & Interaction Tests', () => {
 
     const milestoneMenuBtn = screen.getByRole('button', { name: '年間計画（マイルストーン）' });
     fireEvent.click(milestoneMenuBtn);
+
+    // 対象教科タブ型ボタングループの存在確認と切り替えテスト
+    const subjectBtnGroup = screen.getByTestId('milestone-subject-button-group');
+    expect(subjectBtnGroup).toBeInTheDocument();
+
+    const mathSubjectBtn = screen.getByTestId('milestone-subject-btn-数学');
+    const japaneseSubjectBtn = screen.getByTestId('milestone-subject-btn-国語');
+    const englishSubjectBtn = screen.getByTestId('milestone-subject-btn-英語');
+
+    expect(mathSubjectBtn).toBeInTheDocument();
+    expect(japaneseSubjectBtn).toBeInTheDocument();
+    expect(englishSubjectBtn).toBeInTheDocument();
+
+    // 国語ボタンをクリックして教科を切り替える
+    fireEvent.click(japaneseSubjectBtn);
+    
+    // 英語ボタンをクリックして教科を切り替える
+    fireEvent.click(englishSubjectBtn);
+
+    // 数学ボタンをクリックして戻す
+    fireEvent.click(mathSubjectBtn);
 
     // レベルトグルでBが選択されていることを確認
     const levelBBtn = screen.getByRole('button', { name: 'レベルB (標準)' });
@@ -4267,24 +4283,23 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getAllByText('小5').length).toBeGreaterThan(0);
     expect(screen.getAllByText('小6').length).toBeGreaterThan(0);
 
-    // Test switching subject in elementary view (国語, 理科, 社会, 英語)
-    const subjectSelect = screen.getByDisplayValue('算数');
+    // Test switching subject in elementary view using tab button group (国語, 理科, 社会, 英語)
+    const japaneseTabBtn = screen.getByTestId('milestone-subject-btn-国語');
     await act(async () => {
-      fireEvent.change(subjectSelect, { target: { value: '国語' } });
+      fireEvent.click(japaneseTabBtn);
     });
-    expect(subjectSelect).toHaveValue('国語');
     expect(screen.getByText(/同音異義語・同訓異字の使い分け/)).toBeInTheDocument();
 
+    const scienceTabBtn = screen.getByTestId('milestone-subject-btn-理科');
     await act(async () => {
-      fireEvent.change(subjectSelect, { target: { value: '理科' } });
+      fireEvent.click(scienceTabBtn);
     });
-    expect(subjectSelect).toHaveValue('理科');
     expect(screen.getByText(/発芽に必要な条件/)).toBeInTheDocument();
 
+    const englishTabBtn = screen.getByTestId('milestone-subject-btn-英語');
     await act(async () => {
-      fireEvent.change(subjectSelect, { target: { value: '英語' } });
+      fireEvent.click(englishTabBtn);
     });
-    expect(subjectSelect).toHaveValue('英語');
     expect(screen.getByText(/自己紹介と日常会話/)).toBeInTheDocument();
 
     // Test CSV import button in sidebar
@@ -4406,7 +4421,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // Switch subject to 数学
     await waitFor(() => {
-      expect(screen.getByDisplayValue('数学')).toBeInTheDocument();
+      expect(screen.getByTestId('milestone-subject-btn-数学')).toBeInTheDocument();
     });
 
     // 7. Test updating student detail start positions with 2-step grade filtering and saving

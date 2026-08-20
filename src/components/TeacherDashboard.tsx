@@ -5137,37 +5137,78 @@ export default function TeacherDashboard({
 
                       <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-                          {/* Subject select */}
-                          <div>
-                            <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>対象教科:</label>
-                            <select 
-                              value={selectedSubject} 
-                              onChange={e => setSelectedSubject(e.target.value)} 
-                              className={styles.select}
-                              style={{ width: '120px', padding: '6px' }}
-                            >
-                              {isElementary ? (
-                                <>
-                                  <option value="算数">算数</option>
-                                  <option value="国語">国語</option>
-                                  <option value="英語">英語</option>
-                                  <option value="理科">理科</option>
-                                  <option value="社会">社会</option>
-                                </>
-                              ) : selectedStudent.grade.startsWith('中') ? (
-                                <>
-                                  <option value="数学">数学</option>
-                                  <option value="英語">英語</option>
-                                  <option value="理科">理科</option>
-                                  <option value="歴史">歴史</option>
-                                  <option value="地理">地理</option>
-                                  <option value="国語">国語</option>
-                                </>
-                              ) : (
-                                <option value="算数">算数</option>
-                              )}
-                            </select>
-                          </div>
+                          {/* Subject Tab Button Group */}
+                          {(() => {
+                            const getSubjectIcon = (sub: string) => {
+                              if (sub.includes('算数') || sub.includes('数学')) return '🧮';
+                              if (sub.includes('国語')) return '📖';
+                              if (sub.includes('英語')) return '🌍';
+                              if (sub.includes('理科') || sub.includes('物理') || sub.includes('化学') || sub.includes('生物')) return '🧪';
+                              if (sub.includes('社会') || sub.includes('歴史') || sub.includes('地理') || sub.includes('日本史') || sub.includes('世界史')) return '🏛️';
+                              return '📚';
+                            };
+
+                            const baseSubjs = isElementary
+                              ? ['算数', '国語', '英語', '理科', '社会']
+                              : selectedStudent.grade.startsWith('中')
+                                ? ['数学', '英語', '理科', '社会', '国語']
+                                : ['数学', '英語', '国語', '理科', '社会'];
+
+                            const studentSubjs = selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0
+                              ? selectedStudent.selected_subjects
+                              : baseSubjs;
+
+                            const availableSubjects = Array.from(new Set([...studentSubjs, ...baseSubjs]));
+
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginRight: '4px' }}>対象教科:</label>
+                                <div 
+                                  data-testid="milestone-subject-button-group"
+                                  style={{ 
+                                    display: 'inline-flex', 
+                                    gap: '4px', 
+                                    backgroundColor: '#f1f5f9', 
+                                    padding: '4px', 
+                                    borderRadius: '10px',
+                                    border: '1px solid #cbd5e1'
+                                  }}
+                                >
+                                  {availableSubjects.map(sub => {
+                                    const isActive = selectedSubject === sub || (sub === '数学' && selectedSubject === '算数') || (sub === '算数' && selectedSubject === '数学');
+                                    const icon = getSubjectIcon(sub);
+
+                                    return (
+                                      <button
+                                        key={sub}
+                                        type="button"
+                                        data-testid={`milestone-subject-btn-${sub}`}
+                                        onClick={() => setSelectedSubject(sub)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px',
+                                          padding: '6px 14px',
+                                          fontSize: '0.85rem',
+                                          fontWeight: 700,
+                                          borderRadius: '8px',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.2s ease',
+                                          border: isActive ? '1px solid #3b82f6' : '1px solid transparent',
+                                          backgroundColor: isActive ? '#2563eb' : '#ffffff',
+                                          color: isActive ? '#ffffff' : '#475569',
+                                          boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.3)' : 'none',
+                                        }}
+                                      >
+                                        <span>{icon}</span>
+                                        <span>{sub}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Level Toggle switch */}
                           <div>
