@@ -209,17 +209,12 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
     };
 
-    // 関連するカリキュラムマスターのリストを抽出
-    let candidateMasters = curriculumMasters.filter(m => {
-      const matchesSubject = m.subject === taskSubject || 
-        (isElem && (m.subject === '算数' || (taskSubject === '算数' && m.subject === '数学'))) || 
-        (!isElem && (m.subject === '数学' || (taskSubject === '数学' && m.subject === '算数')));
-      return matchesSubject;
+    // 1. 該当コマの教科のみに最優先で厳密絞り込み（他教科混入を完全遮断）
+    const candidateMasters = curriculumMasters.filter(m => {
+      if (m.subject === taskSubject) return true;
+      if ((taskSubject === '算数' || taskSubject === '数学') && (m.subject === '算数' || m.subject === '数学')) return true;
+      return false;
     });
-
-    if (candidateMasters.length === 0 && curriculumMasters.length > 0) {
-      candidateMasters = curriculumMasters;
-    }
 
     // 学年での絞り込み（該当するものがあれば優先）
     const gradeExactMasters = candidateMasters.filter(m => m.grade === student.grade);
@@ -230,12 +225,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return true;
     });
 
-    // 検索対象のリスト候補（段階的にフォールバック）
+    // 検索対象のリスト候補（該当教科内でのみ段階的にフォールバック）
     const listsToTry = [
       gradeExactMasters.length > 0 ? gradeExactMasters : null,
       gradeCategoryMasters.length > 0 ? gradeCategoryMasters : null,
-      candidateMasters.length > 0 ? candidateMasters : null,
-      curriculumMasters.length > 0 ? curriculumMasters : null
+      candidateMasters.length > 0 ? candidateMasters : null
     ].filter(Boolean) as typeof curriculumMasters[];
 
     const findIndexInList = (
@@ -330,9 +324,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       }
     }
 
-    // fallback to curriculumUnits
+    // fallback to curriculumUnits (該当教科のみに厳密制限)
     const subjectUnits = units
-      .filter(u => u.subject === taskSubject || (isElem && (u.subject === '算数' || u.subject === '数学')) || (!isElem && (u.subject === '数学' || u.subject === '算数')))
+      .filter(u => {
+        if (u.subject === taskSubject) return true;
+        if ((taskSubject === '算数' || taskSubject === '数学') && (u.subject === '算数' || u.subject === '数学')) return true;
+        return false;
+      })
       .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
       .map(u => ({
         id: u.id,

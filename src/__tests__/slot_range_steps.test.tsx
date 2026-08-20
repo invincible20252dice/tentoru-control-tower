@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import StudentDashboard from '../components/StudentDashboard';
 import SugorokuMap from '../components/SugorokuMap';
@@ -108,5 +108,49 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
 
     expect(videoNodeM2.className).toContain('stepToday');
     expect(videoNodeM3.className).toContain('stepToday');
+  });
+
+  test('他教科（英語）のコマに算数の単元やレッスンが紛れ込まないこと', async () => {
+    const taskEnglish: LearningTask = {
+      id: 'task-eng-range',
+      student_id: mockStudent.id,
+      unit_id: 'cm-p1-e1',
+      scheduled_date: '2026-08-20',
+      period: 2,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '英語',
+      start_lesson_id: 'cm-p1-e1',
+      start_lesson_name: 'A〜Gの発音',
+      end_lesson_id: 'cm-p1-e2',
+      end_lesson_name: '身の回りのもの',
+      lesson_range: 'A〜Gの発音 〜 身の回りのもの',
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveStudent(mockStudent);
+    await db.saveLearningTasks([taskEnglish]);
+
+    render(
+      <StudentDashboard
+        student={mockStudent}
+        initialDate="2026-08-20"
+        onBackToPortal={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('step-progress-count-2')).toHaveTextContent('0 / 2 完了');
+    });
+
+    // 英語のコマ枠内(period-row-2)に英語のステップのみが表示され、算数の単元(「ひきざん」など)は一切表示されないこと
+    const period2Row = screen.getByTestId('period-row-2');
+    expect(within(period2Row).getByTestId('step-card-2-0')).toBeInTheDocument();
+    expect(within(period2Row).getByTestId('step-card-2-1')).toBeInTheDocument();
+    expect(within(period2Row).getAllByText(/A〜Gの発音/)[0]).toBeInTheDocument();
+    expect(within(period2Row).getAllByText(/身の回りのもの/)[0]).toBeInTheDocument();
+    expect(within(period2Row).queryByText(/ひきざん/)).not.toBeInTheDocument();
   });
 });
