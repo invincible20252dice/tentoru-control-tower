@@ -102,7 +102,7 @@ export default function SugorokuMap({
   const todayNodeIds = new Set<string>();
 
   subjectTodayTasks.forEach(tt => {
-    const findNodeIndex = (targetId?: string, targetName?: string): number => {
+    const findNodeIndex = (targetId?: string | null, targetName?: string | null): number => {
       if (targetId) {
         const idx = nodes.findIndex(n => n.id === targetId || String(n.id) === String(targetId) || String(n.sortOrder) === String(targetId));
         if (idx >= 0) return idx;

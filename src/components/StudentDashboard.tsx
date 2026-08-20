@@ -238,7 +238,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       curriculumMasters.length > 0 ? curriculumMasters : null
     ].filter(Boolean) as typeof curriculumMasters[];
 
-    const findIndexInList = (list: Array<{ id: string; sort_order?: number; name: string; fullTitle: string }>, targetId?: string, targetName?: string): number => {
+    const findIndexInList = (
+      list: Array<{ id: string; sort_order?: number; name: string; fullTitle: string }>, 
+      targetId?: string | null, 
+      targetName?: string | null
+    ): number => {
       if (targetId) {
         const byId = list.findIndex(m => 
           m.id === targetId || 
