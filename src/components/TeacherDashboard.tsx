@@ -54,7 +54,9 @@ import {
   calculateLessonRangeForSlot,
   formatLessonRange,
   findNextUncompletedLessonForSubject,
-  inferStudentSubjectPace
+  inferStudentSubjectPace,
+  getSortedSubjectsByProgressRate,
+  generateSlotsForSelectedSubjects
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -483,7 +485,7 @@ export default function TeacherDashboard({
 
         // Load today's periods values
         const today = freshTasks.filter(t => t.scheduled_date === scheduleDate);
-        const newPeriods: Record<number, { 
+        let newPeriods: Record<number, { 
           subject: string; 
           unitId: string; 
           customTheme: string;
@@ -551,39 +553,19 @@ export default function TeacherDashboard({
             }
           });
         } else {
-          // 新規通塾日や未設定日の場合、生徒の受講教科と次回来受講レッスン（From）を自動プリセット
+          // 新規通塾日や未設定日の場合、生徒の「選択教科（進捗率が低い順）」に基づきコマ割り（From〜To）を自動割り当て
           const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
-          const selectedSubjs = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
-            ? freshSt.selected_subjects
-            : (freshSt.grade.startsWith('小') ? ['算数', '国語'] : ['数学', '英語']);
-          
-          for (let p = 1; p <= loadedPeriodCount; p++) {
-            const sub = selectedSubjs[(p - 1) % selectedSubjs.length] || selectedSubjs[0] || (freshSt.grade.startsWith('小') ? '算数' : '数学');
-            const range = calculateLessonRangeForSlot({
-              subject: sub,
-              startLessonId: null,
-              student: freshSt,
-              tasks: freshTasks,
-              branchRules,
-              curriculumMasters: listMasters,
-              curriculumUnits: listUnits,
-              schoolId: freshSt.school_id,
-              lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
-            });
-
-            if (range.start_lesson_id) {
-              newPeriods[p] = {
-                subject: sub,
-                unitId: range.start_lesson_id,
-                customTheme: '',
-                startLessonId: range.start_lesson_id,
-                endLessonId: range.end_lesson_id || range.start_lesson_id,
-                startLessonName: range.start_lesson_name || '',
-                endLessonName: range.end_lesson_name || range.start_lesson_name || '',
-                lessonRange: range.lesson_range || ''
-              };
-            }
-          }
+          newPeriods = generateSlotsForSelectedSubjects({
+            student: freshSt,
+            periodCount: loadedPeriodCount,
+            selectedSubjects: freshSt.selected_subjects,
+            tasks: freshTasks,
+            branchRules,
+            curriculumMasters: listMasters,
+            curriculumUnits: listUnits,
+            schoolId: freshSt.school_id,
+            lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+          });
         }
         setPeriodSelections(newPeriods);
         setPeriodCount(loadedPeriodCount);
@@ -977,6 +959,18 @@ export default function TeacherDashboard({
         const recalculatedTasks = applyStartPositionsToTasks(saved, allCurrentTasks, allCurriculumUnits, masters);
         await db.saveLearningTasks(recalculatedTasks);
         setStudentTasks(recalculatedTasks.filter(t => t.student_id === saved.id));
+
+        const autoSlots = generateSlotsForSelectedSubjects({
+          student: saved,
+          periodCount: saved.default_slots || saved.period_count || newSlots,
+          selectedSubjects: saved.selected_subjects,
+          tasks: recalculatedTasks,
+          curriculumMasters: masters,
+          curriculumUnits: allCurriculumUnits,
+          schoolId: saved.school_id,
+          lessonProgressList: db.getStudentLessonProgressList(saved.id)
+        });
+        setPeriodSelections(autoSlots);
       } catch (taskErr) {
         console.warn('Auto task recalculation warning:', taskErr);
       }
@@ -3252,7 +3246,7 @@ export default function TeacherDashboard({
                       <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
                         <input 
-                          type="date" 
+                      type="date" 
                           value={scheduleDate} 
                           onChange={e => setScheduleDate(e.target.value)}
                           className={styles.input}
@@ -3403,9 +3397,17 @@ export default function TeacherDashboard({
                                       : isHigh 
                                         ? ['数学', '国語', '英語'] 
                                         : ['数学', '国語', '英語', '理科', '社会'];
-                                    const studentSubjs = (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0)
+                                    const rawSubjs = (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0)
                                       ? selectedStudent.selected_subjects
                                       : defaultSubjs;
+                                    const studentSubjs = getSortedSubjectsByProgressRate({
+                                      student: selectedStudent,
+                                      selectedSubjects: rawSubjs,
+                                      curriculumMasters: curriculumMastersList,
+                                      curriculumUnits: allCurriculumUnits,
+                                      tasks: studentTasks,
+                                      lessonProgressList: db.getStudentLessonProgressList(selectedStudent.id)
+                                    });
                                     const baseSubjs = isElem
                                       ? ['算数', '国語', '英語', '理科', '社会']
                                       : isHigh

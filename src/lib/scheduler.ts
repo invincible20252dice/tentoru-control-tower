@@ -1,4 +1,4 @@
-import { CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES, StudentLessonProgress } from './db';
+import { db, CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES, StudentLessonProgress } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
@@ -35,11 +35,14 @@ export function findNextUncompletedLessonForSubject(params: {
     student,
     subject,
     tasks = [],
-    curriculumMasters = [],
-    curriculumUnits = [],
+    curriculumMasters: rawMasters = [],
+    curriculumUnits: rawUnits = [],
     schoolId = student?.school_id,
     lessonProgressList = []
   } = params;
+
+  const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
+  const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
 
   const isElem = Boolean(
     student?.grade?.startsWith('小') || 
@@ -77,7 +80,7 @@ export function findNextUncompletedLessonForSubject(params: {
   } else {
     const matchingSchoolUnits = curriculumUnits.filter(u => 
       (schoolId ? u.school_id === schoolId : false) &&
-      (isElem ? u.subject === '算数' : u.subject === subject)
+      (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject)
     );
 
     if (matchingSchoolUnits.length > 0) {
@@ -99,7 +102,7 @@ export function findNextUncompletedLessonForSubject(params: {
     } else {
       const fallbackUnits = curriculumUnits
         .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
-                     (isElem ? u.subject === '算数' : u.subject === subject))
+                     (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject))
         .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
         .map(u => ({
           id: u.id,
@@ -1261,3 +1264,246 @@ export function rescheduleFutureUncompletedTasks(
 
   return [...otherTasks, ...completedTasks, ...rescheduled];
 }
+
+/**
+ * 生徒の指定教科における進捗率 (0.0 ～ 1.0) を算出する
+ */
+export function calculateSubjectProgressRate(params: {
+  student: Student;
+  subject: string;
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  tasks?: LearningTask[];
+  lessonProgressList?: StudentLessonProgress[];
+}): { progressRate: number; completedCount: number; totalCount: number } {
+  const {
+    student,
+    subject,
+    curriculumMasters: rawMasters = [],
+    curriculumUnits: rawUnits = [],
+    tasks = [],
+    lessonProgressList = []
+  } = params;
+
+  const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
+  const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
+
+  const isElem = Boolean(
+    student.grade?.startsWith('小') || 
+    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
+    student.grade === '園児'
+  );
+
+  // 対象教科のマスタレッスン一覧
+  const filteredMasters = curriculumMasters.filter(m => {
+    if (subject === '算数' || subject === '数学') {
+      if (isElem) return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
+      return m.subject === '数学' || m.subject === '算数';
+    }
+    return m.subject === subject;
+  });
+
+  let totalLessons: Array<{ id: string; name: string; sort_order: number }> = [];
+  if (isElem && filteredMasters.length > 0) {
+    totalLessons = filteredMasters
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(m => ({ id: m.id, name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name, sort_order: m.sort_order ?? 0 }));
+  } else {
+    const matchingUnits = curriculumUnits.filter(u => 
+      (student.school_id ? u.school_id === student.school_id : true) &&
+      (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject)
+    );
+    if (matchingUnits.length > 0) {
+      totalLessons = matchingUnits
+        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .map(u => ({ id: u.id, name: u.name, sort_order: u.sequence_order ?? 0 }));
+    } else if (filteredMasters.length > 0) {
+      totalLessons = filteredMasters
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({ id: m.id, name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name, sort_order: m.sort_order ?? 0 }));
+    }
+  }
+
+  const totalCount = totalLessons.length > 0 ? totalLessons.length : 1;
+
+  // 直近未完了授業のインデックスを取得
+  const { masterIndex } = findNextUncompletedLessonForSubject({
+    student,
+    subject,
+    tasks,
+    curriculumMasters,
+    curriculumUnits,
+    lessonProgressList
+  });
+
+  // 完了IDに基づく完了数カウント
+  const completedSet = new Set<string>();
+  if (student.completed_lesson_ids) {
+    student.completed_lesson_ids.forEach(id => {
+      completedSet.add(id);
+      completedSet.add(String(id));
+    });
+  }
+  lessonProgressList
+    .filter(p => p.student_id === student.id && p.status === 'completed')
+    .forEach(p => {
+      completedSet.add(p.lesson_id);
+      completedSet.add(String(p.lesson_id));
+      if (p.lesson_name) completedSet.add(p.lesson_name);
+    });
+  tasks
+    .filter(t => t.student_id === student.id && t.status === 'completed' && (t.subject === subject || (!t.subject && (subject === '算数' || subject === '数学'))))
+    .forEach(t => {
+      if (t.unit_id) {
+        completedSet.add(t.unit_id);
+        completedSet.add(String(t.unit_id));
+      }
+      if (t.start_lesson_id) {
+        completedSet.add(t.start_lesson_id);
+        completedSet.add(String(t.start_lesson_id));
+      }
+    });
+
+  const directMatchCount = totalLessons.filter(l => completedSet.has(l.id) || completedSet.has(String(l.id)) || completedSet.has(String(l.sort_order)) || completedSet.has(l.name)).length;
+
+  let completedCount = directMatchCount;
+  if (masterIndex >= 0 && masterIndex > completedCount) {
+    completedCount = masterIndex;
+  }
+
+  const progressRate = Math.min(1.0, Math.max(0.0, completedCount / totalCount));
+  return { progressRate, completedCount, totalCount };
+}
+
+/**
+ * 選択教科 (selected_subjects) を進捗率の昇順 (低い順 / 最も遅れている教科が先頭) にソートする
+ */
+export function getSortedSubjectsByProgressRate(params: {
+  student: Student;
+  selectedSubjects?: string[];
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  tasks?: LearningTask[];
+  lessonProgressList?: StudentLessonProgress[];
+}): string[] {
+  const {
+    student,
+    selectedSubjects = student.selected_subjects,
+    curriculumMasters = [],
+    curriculumUnits = [],
+    tasks = [],
+    lessonProgressList = []
+  } = params;
+
+  const isElem = Boolean(
+    student.grade?.startsWith('小') || 
+    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
+    student.grade === '園児'
+  );
+  const defaultSubjs = isElem ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語'];
+  const subjectsToUse = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : defaultSubjs;
+
+  const subjectRates = subjectsToUse.map((sub, originalIdx) => {
+    const { progressRate } = calculateSubjectProgressRate({
+      student,
+      subject: sub,
+      curriculumMasters,
+      curriculumUnits,
+      tasks,
+      lessonProgressList
+    });
+    return { subject: sub, rate: progressRate, originalIdx };
+  });
+
+  // 進捗率の昇順（低率順）、同率なら元の配列順
+  subjectRates.sort((a, b) => {
+    if (a.rate !== b.rate) {
+      return a.rate - b.rate;
+    }
+    return a.originalIdx - b.originalIdx;
+  });
+
+  return subjectRates.map(sr => sr.subject);
+}
+
+/**
+ * 設定されたコマ数 (periodCount) と 選択教科 (進捗率昇順) に基づき、コマ割りの教科とFrom〜Toを自動生成
+ */
+export function generateSlotsForSelectedSubjects(params: {
+  student: Student;
+  periodCount: number;
+  selectedSubjects?: string[];
+  tasks?: LearningTask[];
+  branchRules?: BranchAIRules;
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  schoolId?: string;
+  lessonProgressList?: StudentLessonProgress[];
+}): Record<number, {
+  subject: string;
+  unitId: string;
+  customTheme: string;
+  startLessonId: string;
+  endLessonId: string;
+  startLessonName: string;
+  endLessonName: string;
+  lessonRange: string;
+}> {
+  const {
+    student,
+    periodCount,
+    selectedSubjects,
+    tasks = [],
+    branchRules,
+    curriculumMasters = [],
+    curriculumUnits = [],
+    schoolId = student.school_id,
+    lessonProgressList = []
+  } = params;
+
+  const sortedSubjs = getSortedSubjectsByProgressRate({
+    student,
+    selectedSubjects,
+    curriculumMasters,
+    curriculumUnits,
+    tasks,
+    lessonProgressList
+  });
+
+  const slots: Record<number, any> = {};
+
+  for (let p = 1; p <= periodCount; p++) {
+    let sub = '';
+    if (p <= sortedSubjs.length) {
+      sub = sortedSubjs[p - 1];
+    } else {
+      sub = sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0];
+    }
+
+    const range = calculateLessonRangeForSlot({
+      subject: sub,
+      startLessonId: null,
+      student,
+      tasks,
+      branchRules,
+      curriculumMasters,
+      curriculumUnits,
+      schoolId,
+      lessonProgressList
+    });
+
+    slots[p] = {
+      subject: sub,
+      unitId: range.start_lesson_id || '',
+      customTheme: '',
+      startLessonId: range.start_lesson_id || '',
+      endLessonId: range.end_lesson_id || range.start_lesson_id || '',
+      startLessonName: range.start_lesson_name || '',
+      endLessonName: range.end_lesson_name || range.start_lesson_name || '',
+      lessonRange: range.lesson_range || ''
+    };
+  }
+
+  return slots;
+}
+
