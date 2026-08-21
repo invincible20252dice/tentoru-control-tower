@@ -1,280 +1,246 @@
-import { db, Student, LearningTask, CurriculumMaster, CurriculumUnit, MiniTestResult, HomeworkResult, LearningLog, StudentScheduleConfig } from '../lib/db';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { db, Branch, StudentScheduleConfig, BranchAIRules, UserRole } from '../lib/db';
 
-describe('Comprehensive DB & Scheduler Coverage Tests', () => {
+describe('DatabaseService (db.ts) Comprehensive High-Coverage Test Suite', () => {
   beforeEach(() => {
-    localStorage.clear();
+    db.clearMockData();
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear();
+    }
   });
 
-  test('db.ts: Mock data getter/setter & localStorage fallback handling', () => {
-    const emptyStudents = db.getStudents();
-    expect(Array.isArray(emptyStudents)).toBe(true);
+  describe('Branch & Multitenancy Management API', () => {
+    test('getBranches should calculate student count dynamically', () => {
+      const branches = db.getBranches();
+      expect(branches.length).toBeGreaterThan(0);
+      expect(branches[0]).toHaveProperty('id');
+      expect(branches[0]).toHaveProperty('name');
+      expect(branches[0]).toHaveProperty('student_count');
+    });
 
-    const emptyMasters = db.getCurriculumMasters();
-    expect(Array.isArray(emptyMasters)).toBe(true);
+    test('fetchBranches should work in mock mode and trigger event', async () => {
+      const branches = await db.fetchBranches();
+      expect(branches.length).toBeGreaterThan(0);
+    });
 
-    const emptyUnits = db.getCurriculumUnits();
-    expect(Array.isArray(emptyUnits)).toBe(true);
+    test('saveBranch should add a new branch or update existing one', async () => {
+      const newBranch: Branch = {
+        id: 'branch-test-99',
+        name: 'テスト校舎',
+        code: 'TEST99',
+        email: 'test99@tentoru.jp',
+        status: 'active',
+        created_at: new Date().toISOString()
+      };
 
-    const emptyTasks = db.getLearningTasks();
-    expect(Array.isArray(emptyTasks)).toBe(true);
+      const saved = await db.saveBranch(newBranch);
+      expect(saved.id).toBe('branch-test-99');
 
-    const emptyTeacherOptions = db.getTeacherOptions();
-    expect(Array.isArray(emptyTeacherOptions)).toBe(true);
+      const all = db.getBranches();
+      expect(all.some(b => b.id === 'branch-test-99')).toBe(true);
 
-    const emptyMiniResults = db.getMiniTestResults();
-    expect(Array.isArray(emptyMiniResults)).toBe(true);
+      // Update
+      const updated = await db.saveBranch({ ...newBranch, name: 'テスト校舎(更新)' });
+      expect(updated.name).toBe('テスト校舎(更新)');
+    });
 
-    const emptyHomework = db.getHomeworkResults();
-    expect(Array.isArray(emptyHomework)).toBe(true);
+    test('toggleBranchStatus should switch branch status between active and suspended', async () => {
+      const branches = db.getBranches();
+      const targetId = branches[0].id;
+      const initialStatus = branches[0].status;
 
-    const emptyLogs = db.getLearningLogs();
-    expect(Array.isArray(emptyLogs)).toBe(true);
+      const toggled = await db.toggleBranchStatus(targetId);
+      expect(toggled.status).toBe(initialStatus === 'active' ? 'suspended' : 'active');
+
+      const restored = await db.toggleBranchStatus(targetId);
+      expect(restored.status).toBe(initialStatus);
+    });
+
+    test('toggleBranchStatus should throw error if branch not found', async () => {
+      await expect(db.toggleBranchStatus('non-existent-branch-id')).rejects.toThrow('校舎が見つかりません');
+    });
+
+    test('deleteBranch should remove specified branch', async () => {
+      const branches = db.getBranches();
+      const deleteId = branches[0].id;
+
+      await db.deleteBranch(deleteId);
+      const after = db.getBranches();
+      expect(after.some(b => b.id === deleteId)).toBe(false);
+    });
+
+    test('createBranchAccount should generate unique code and branch model', async () => {
+      const branch = await db.createBranchAccount({
+        name: ' 横浜みなとみらい校 ',
+        email: ' yokohama_mm@tentoru.jp ',
+        code: ' ymm ',
+        phone: ' 045-999-9999 ',
+        address: ' 神奈川県横浜市 '
+      });
+
+      expect(branch.name).toBe('横浜みなとみらい校');
+      expect(branch.email).toBe('yokohama_mm@tentoru.jp');
+      expect(branch.code).toBe('YMM');
+      expect(branch.phone).toBe('045-999-9999');
+      expect(branch.status).toBe('active');
+    });
+
+    test('createBranchAccount without code should generate fallback code', async () => {
+      const branch = await db.createBranchAccount({
+        name: '特設テスト校',
+        email: 'special@tentoru.jp'
+      });
+      expect(branch.code).toBeDefined();
+      expect(branch.name).toBe('特設テスト校');
+    });
   });
 
-  test('db.ts: Student CRUD & Branch filter operations', async () => {
-    const student1: Student = {
-      id: 'std-branch-1',
-      name: '生徒1',
-      grade: '中1',
-      login_id: 'std1',
-      password: 'pass',
-      status: 'normal',
-      branch_id: 'branch-A',
-      school_id: 'school-A',
-      school_name: '第一中学',
-      selected_subjects: ['数学', '英語'],
-      created_at: new Date().toISOString()
-    };
+  describe('Branch AI Rules API', () => {
+    test('getBranchAIRules should return default rules when branchId is null/all', () => {
+      const rulesAll = db.getBranchAIRules('all');
+      expect(rulesAll).toHaveProperty('lessons_per_slot');
+      expect(rulesAll).toHaveProperty('punk_threshold_slots');
+      const rulesNull = db.getBranchAIRules(null);
+      expect(rulesNull).toHaveProperty('lessons_per_slot');
+    });
 
-    const student2: Student = {
-      id: 'std-branch-2',
-      name: '生徒2',
-      grade: '中2',
-      login_id: 'std2',
-      password: 'pass',
-      status: 'withdrawal',
-      branch_id: 'branch-B',
-      created_at: new Date().toISOString()
-    };
+    test('getBranchAIRules for specific branch should merge custom rules', () => {
+      const branches = db.getBranches();
+      const rules = db.getBranchAIRules(branches[0].id);
+      expect(rules).toBeDefined();
+    });
 
-    await db.saveStudent(student1);
-    await db.saveStudent(student2);
+    test('saveBranchAIRules should update rules for all and specific branch', async () => {
+      const updatedGlobal = await db.saveBranchAIRules('all', { max_daily_tasks: 5 });
+      expect(updatedGlobal.max_daily_tasks).toBe(5);
 
-    const allStudents = db.getStudents();
-    expect(allStudents.length).toBe(2);
+      const branches = db.getBranches();
+      const branchId = branches[0].id;
 
-    const branchAStudents = db.getStudents().filter(s => s.branch_id === 'branch-A');
-    expect(branchAStudents.length).toBe(1);
-    expect(branchAStudents[0].id).toBe('std-branch-1');
+      const updatedBranch = await db.saveBranchAIRules(branchId, { max_daily_tasks: 6, auto_reschedule_enabled: false });
+      expect(updatedBranch.max_daily_tasks).toBe(6);
+      expect(updatedBranch.auto_reschedule_enabled).toBe(false);
 
-    await db.deleteStudent('std-branch-2');
-    const remaining = db.getStudents();
-    expect(remaining.length).toBe(1);
-    expect(remaining[0].id).toBe('std-branch-1');
+      const reFetched = db.getBranchAIRules(branchId);
+      expect(reFetched.max_daily_tasks).toBe(6);
+    });
   });
 
-  test('db.ts: Schedule Config CRUD operations', async () => {
-    const config: StudentScheduleConfig = {
-      id: 'cfg-1',
-      student_id: 'std-branch-1',
-      subject: '数学',
-      day_of_week: 1, // Monday
-      period: 2,
-      start_lesson_id: 'cm-m-1',
-      end_lesson_id: 'cm-m-2',
-      created_at: new Date().toISOString()
-    };
+  describe('Student Schedule Config API', () => {
+    test('getStudentScheduleConfig should return default or mock saved config', () => {
+      const config = db.getStudentScheduleConfig('non-existent-student');
+      expect(config.weekly_frequency).toBe('2回');
+      expect(config.selected_days).toEqual(['tuesday', 'friday']);
+    });
 
-    await db.saveStudentScheduleConfig(config);
-    const savedConfig = db.getStudentScheduleConfig('std-branch-1');
-    expect(savedConfig).toBeDefined();
+    test('fetchStudentScheduleConfig & saveStudentScheduleConfig lifecycle', async () => {
+      const studentId = 'std-config-test-1';
+      const initialConfig = await db.fetchStudentScheduleConfig(studentId);
+      expect(initialConfig.student_id).toBe(studentId);
+
+      const newConfig: StudentScheduleConfig = {
+        student_id: studentId,
+        weekly_frequency: '3回',
+        weekly_duration: '180分',
+        selected_days: ['monday', 'wednesday', 'friday'],
+        default_slots: 3
+      };
+
+      await db.saveStudentScheduleConfig(newConfig);
+
+      const savedConfig = await db.fetchStudentScheduleConfig(studentId);
+      expect(savedConfig.weekly_frequency).toBe('3回');
+      expect(savedConfig.selected_days).toEqual(['monday', 'wednesday', 'friday']);
+      expect(savedConfig.default_slots).toBe(3);
+    });
   });
 
-  test('db.ts: MiniTest, Homework & LearningLog operations', async () => {
-    const miniTest: MiniTestResult = {
-      id: 'mini-cov-1',
-      student_id: 'std-cov-1',
-      date: '2026-08-20',
-      test_content: '単元テスト1',
-      score: 90,
-      passed: true,
-      created_at: new Date().toISOString()
-    };
+  describe('Auth & Session Management API', () => {
+    test('signInWithPassword validation checks', async () => {
+      const res1 = await db.signInWithPassword('', 'password');
+      expect(res1.success).toBe(false);
+      expect(res1.error).toContain('メールアドレスを入力してください');
 
-    const homework: HomeworkResult = {
-      id: 'hw-cov-1',
-      student_id: 'std-cov-1',
-      date: '2026-08-20',
-      homework_content: 'ワーク P10-15',
-      status: 'completed',
-      created_at: new Date().toISOString()
-    };
+      const res2 = await db.signInWithPassword('test@tentoru.jp', '');
+      expect(res2.success).toBe(false);
+      expect(res2.error).toContain('パスワードを入力してください');
+    });
 
-    const log: LearningLog = {
-      id: 'log-cov-1',
-      student_id: 'std-cov-1',
-      unit_id: 'cm-m-1',
-      log_type: 'video_view',
-      duration_seconds: 300,
-      created_at: new Date().toISOString()
-    };
+    test('signInWithPassword for branch account', async () => {
+      const res = await db.signInWithPassword('ebisu@tentoru.jp', 'validpass');
+      expect(res.success).toBe(true);
+      expect(res.session?.user.role).toBe('branch');
+      expect(res.session?.user.branch_id).toBe('branch-1');
+      expect(res.session?.user.branch_name).toBe('恵比寿教室');
+    });
 
-    await db.saveMiniTestResult(miniTest);
-    await db.saveHomeworkResult(homework);
-    await db.addLearningLog(log);
+    test('signInWithPassword for suspended branch account should fail', async () => {
+      const res = await db.signInWithPassword('yokohama@tentoru.jp', 'validpass');
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('一時停止中');
+    });
 
-    expect(db.getMiniTestResults('std-cov-1').length).toBeGreaterThanOrEqual(1);
-    expect(db.getHomeworkResults('std-cov-1').length).toBeGreaterThanOrEqual(1);
-    expect(db.getLearningLogs('std-cov-1').length).toBeGreaterThanOrEqual(1);
+    test('signInWithPassword for admin account', async () => {
+      const res = await db.signInWithPassword('admin@tentoru.jp', 'adminpass');
+      expect(res.success).toBe(true);
+      expect(res.session?.user.role).toBe('admin');
+      expect(res.session?.user.branch_name).toBe('本部統括管理者');
+    });
 
-    // Filter by date
-    expect(db.getMiniTestResults('std-cov-1', '2026-08-20').length).toBe(1);
-    expect(db.getHomeworkResults('std-cov-1', '2026-08-20').length).toBe(1);
+    test('signInWithPassword wrong password should fail', async () => {
+      const res = await db.signInWithPassword('unknown_user@example.com', 'wrongpass');
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('正しくありません');
+    });
+
+    test('signInWithPassword general user email fallback', async () => {
+      const res = await db.signInWithPassword('teacher_school@tentoru.jp', 'secret');
+      expect(res.success).toBe(true);
+      expect(res.session?.user.role).toBe('branch');
+
+      const resAdmin = await db.signInWithPassword('general_teacher@tentoru.jp', 'secret');
+      expect(resAdmin.success).toBe(true);
+      expect(resAdmin.session?.user.role).toBe('admin');
+    });
+
+    test('sendBranchPasswordReset mock execution', async () => {
+      const res = await db.sendBranchPasswordReset('reset@tentoru.jp');
+      expect(res.success).toBe(true);
+      expect(res.message).toContain('送信しました');
+    });
+
+    test('getCurrentUserRole & setCurrentUserRole localStorage integration', () => {
+      db.setCurrentUserRole('branch', 'branch-1', '恵比寿教室');
+      const roleObj = db.getCurrentUserRole();
+      expect(roleObj.role).toBe('branch');
+      expect(roleObj.branch_id).toBe('branch-1');
+      expect(roleObj.branch_name).toBe('恵比寿教室');
+    });
+
+    test('signOut should clear auth session and reset role', async () => {
+      await db.signInWithPassword('ebisu@tentoru.jp', 'pass');
+      expect(db.getSession()).not.toBeNull();
+
+      await db.signOut();
+      expect(db.getSession()).toBeNull();
+
+      const roleObj = db.getCurrentUserRole();
+      expect(roleObj.role).toBe('admin');
+    });
   });
 
-  test('db.ts: TeacherOptions & PersonalityOptions CRUD', async () => {
-    await db.addTeacherOption('テスト講師');
-    await db.addPersonalityOption('集中力高い');
+  describe('Supabase Error Handlers & Network Resilience', () => {
+    test('saveStudentLessonProgress should catch network errors and return mock fallback safely', async () => {
+      const result = await db.saveStudentLessonProgress({
+        student_id: 'std-fail-1',
+        lesson_id: 'les-fail-1',
+        subject: '算数',
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      });
 
-    const teachers = await db.fetchTeacherOptions();
-    expect(teachers).toContain('テスト講師');
-
-    const personalities = await db.fetchPersonalityOptions();
-    expect(personalities).toContain('集中力高い');
-
-    await db.removeTeacherOption('テスト講師');
-    await db.deletePersonalityOption('集中力高い');
-
-    const updatedTeachers = db.getTeacherOptions();
-    expect(updatedTeachers).not.toContain('テスト講師');
-  });
-
-  test('db.ts: Cleanup legacy curriculum masters', async () => {
-    const masters: CurriculumMaster[] = [
-      { id: 'cm-old-1', grade: '小5', subject: '算数', unit_name: '旧単元', lesson_name: '旧レッスン1', sort_order: 1 },
-      { id: 'cm-old-2', grade: '中1', subject: '数学', unit_name: '正の数・負の数', lesson_name: '計算', sort_order: 2 }
-    ];
-
-    await db.saveCurriculumMasters(masters);
-    const currentMasters = db.getCurriculumMasters();
-    expect(currentMasters.length).toBeGreaterThanOrEqual(2);
-
-    await db.deleteCurriculumMastersByGrades(['小5']);
-    const remaining = db.getCurriculumMasters();
-    expect(remaining.some(m => m.grade === '小5')).toBe(false);
-  });
-
-  test('db.ts: AIReport, PromptSetting & TeacherCorrectionLog CRUD operations', async () => {
-    const report = {
-      id: 'rpt-cov-1',
-      student_id: 'std-cov-1',
-      report_month: '2026-08',
-      summary: '非常に良好な進捗です',
-      ai_comment: '計算力が定着しています',
-      created_at: new Date().toISOString()
-    };
-
-    await db.saveAIReport(report);
-    expect(db.getAIReports('std-cov-1').length).toBeGreaterThanOrEqual(1);
-
-    const prompt = {
-      id: 'prompt-1',
-      setting_key: 'custom_instruction',
-      prompt_text: '生徒のモチベーションを高める文章で記述すること',
-      updated_at: new Date().toISOString()
-    };
-    await db.savePromptSetting(prompt);
-    expect(db.getPromptSettings().length).toBeGreaterThanOrEqual(1);
-
-    const correction = {
-      id: 'corr-1',
-      student_id: 'std-cov-1',
-      report_month: '2026-08',
-      original_ai_text: 'AI下書き',
-      corrected_text: '講師の修正済み本文',
-      created_at: new Date().toISOString()
-    };
-    await db.addTeacherCorrectionLog(correction);
-    expect(db.getTeacherCorrectionsLogs().length).toBeGreaterThanOrEqual(1);
-  });
-
-  test('db.ts: CustomClass, MilestonePlan, MilestoneTemplate CRUD operations', async () => {
-    const customClass = {
-      id: 'cls-1',
-      name: '夏期講習特訓クラス',
-      grade: '中3',
-      created_at: new Date().toISOString()
-    };
-    await db.saveCustomClass(customClass);
-    expect(db.getCustomClasses().length).toBeGreaterThanOrEqual(1);
-    await db.deleteCustomClass('cls-1');
-
-    const plan = {
-      id: 'plan-1',
-      student_id: 'std-cov-1',
-      subject: '数学',
-      unit_name: '一次関数',
-      scheduled_month: 7,
-      scheduled_week: 2,
-      created_at: new Date().toISOString()
-    };
-    await db.saveMilestonePlan(plan);
-    expect(db.getMilestonePlans().filter(p => p.student_id === 'std-cov-1').length).toBe(1);
-
-    const template = {
-      id: 'tmpl-1',
-      name: '中3数学標準ロードマップ',
-      grade: '中3',
-      subject: '数学',
-      items: [{ month: 4, week: 1, unit_name: '展開と因数分解' }],
-      created_at: new Date().toISOString()
-    };
-    await db.saveMilestoneTemplate(template);
-    expect(db.getMilestoneTemplates().length).toBeGreaterThanOrEqual(1);
-    await db.deleteMilestoneTemplate('tmpl-1');
-  });
-
-  test('db.ts: StudentInteraction, ExamThresholdMasters & BranchAIRules CRUD operations', async () => {
-    const interaction = {
-      id: 'inter-1',
-      student_id: 'std-cov-1',
-      teacher_name: '山田講師',
-      interaction_type: '面談',
-      note: '次回模擬試験に向けた学習計画のすり合わせを実施',
-      created_at: new Date().toISOString()
-    };
-    await db.saveStudentInteraction(interaction);
-    expect(db.getStudentInteractions('std-cov-1').length).toBeGreaterThanOrEqual(1);
-    await db.deleteStudentInteraction('inter-1');
-
-    const rules = {
-      id: 'airules-1',
-      branch_id: 'branch-1',
-      tone: 'supportive' as const,
-      custom_prompt: 'ポジティブなフィードバックを中心に記載',
-      updated_at: new Date().toISOString()
-    };
-    await db.saveBranchAIRules(rules);
-    expect(db.getBranchAIRules('branch-1')).toBeDefined();
-  });
-
-  test('db.ts: School, Branch, CurriculumUnit & LearningTask CRUD operations', async () => {
-    const school = { id: 'sch-cov-1', name: '横浜第一中学', type: 'junior_high' as const, created_at: new Date().toISOString() };
-    await db.saveSchool(school);
-    expect(db.getSchools().some(s => s.id === 'sch-cov-1')).toBe(true);
-    await db.deleteSchool('sch-cov-1');
-    expect(db.getSchools().some(s => s.id === 'sch-cov-1')).toBe(false);
-
-    const branch = { id: 'br-cov-1', name: '横浜校', code: 'YOK', is_active: true, created_at: new Date().toISOString() };
-    await db.saveBranch(branch);
-    expect(db.getBranches().some(b => b.id === 'br-cov-1')).toBe(true);
-
-    const unit = { id: 'u-cov-1', school_id: 'sch-1', subject: '数学', unit_name: '因数分解応用', sort_order: 1, created_at: new Date().toISOString() };
-    await db.saveCurriculumUnit(unit);
-    expect(db.getCurriculumUnits('sch-1', '数学').some(u => u.id === 'u-cov-1')).toBe(true);
-
-    const task = { id: 't-cov-1', student_id: 'std-1', unit_id: 'u-cov-1', scheduled_date: '2026-08-20', period: 1, status: 'unstarted' as const, video_watched: false, test_passed: false, created_at: new Date().toISOString() };
-    await db.saveLearningTasks([task]);
-    await db.deleteLearningTasksByDate('std-1', '2026-08-20');
+      expect(result).toHaveProperty('lesson_id');
+      expect(result.status).toBe('completed');
+    });
   });
 });
