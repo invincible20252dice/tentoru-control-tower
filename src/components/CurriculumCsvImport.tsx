@@ -34,6 +34,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     unit_name: string;
     lesson_name: string;
     item_type?: 'lesson' | 'unit_test';
+    passing_line?: string;
     sort_order: number;
   }>>([]);
   const [fileName, setFileName] = useState<string>('');
@@ -44,7 +45,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
   const [filterGrade, setFilterGrade] = useState<string>('all');
   const [filterSubject, setFilterSubject] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'import' | 'list'>('import');
+  const [activeTab, setActiveTab] = useState<'import' | 'list' | 'unit_tests'>('import');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -82,11 +83,12 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     const gradeIdx = headers.findIndex(h => h === '学年' || h.toLowerCase() === 'grade');
     const subjectIdx = headers.findIndex(h => h === '教科' || h.toLowerCase() === 'subject');
     const unitIdx = headers.findIndex(h => h === '単元名' || h === '単元' || h.toLowerCase() === 'unit_name' || h.toLowerCase() === 'unit');
-    const lessonIdx = headers.findIndex(h => h === '授業名' || h === '授業' || h === 'テーマ名' || h.toLowerCase() === 'lesson_name' || h.toLowerCase() === 'theme_name');
+    const lessonIdx = headers.findIndex(h => h === '授業名' || h === '授業' || h === 'テーマ名' || h === 'テスト名' || h.toLowerCase() === 'lesson_name' || h.toLowerCase() === 'test_name');
     const typeIdx = headers.findIndex(h => h === '区分' || h === 'タイプ' || h === '種別' || h.toLowerCase() === 'item_type' || h.toLowerCase() === 'type');
+    const passingLineIdx = headers.findIndex(h => h === '合格基準' || h === '合格ライン' || h === '目標点' || h.toLowerCase() === 'passing_line');
 
     if (gradeIdx === -1 || subjectIdx === -1 || unitIdx === -1 || lessonIdx === -1) {
-      showToast('CSVヘッダーに「学年」「教科」「単元名」「授業名」が含まれている必要があります。', 'error');
+      showToast('CSVヘッダーに「学年」「教科」「単元名」「授業名（またはテスト名）」が含まれている必要があります。', 'error');
       return;
     }
 
@@ -96,6 +98,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       unit_name: string;
       lesson_name: string;
       item_type: 'lesson' | 'unit_test';
+      passing_line?: string;
       sort_order: number;
     }> = [];
 
@@ -127,6 +130,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       const unit_name = cells[unitIdx] || '';
       const lesson_name = cells[lessonIdx] || '';
       const typeVal = typeIdx !== -1 ? cells[typeIdx] || '' : '';
+      const passing_line = passingLineIdx !== -1 ? cells[passingLineIdx] || '' : undefined;
       const isUnitTest = typeVal.includes('テスト') || typeVal.includes('test') || lesson_name.includes('テスト') || lesson_name.includes('確認');
       const item_type: 'lesson' | 'unit_test' = isUnitTest ? 'unit_test' : 'lesson';
 
@@ -137,6 +141,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
           unit_name: unit_name || '単元未設定',
           lesson_name: lesson_name || '授業名未設定',
           item_type,
+          passing_line: passing_line || (isUnitTest ? '80%以上' : undefined),
           sort_order: rows.length + 1
         });
       }
@@ -328,6 +333,54 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     }
   };
 
+  // CSV Export for Unit Tests or All
+  const exportUnitTestCsv = () => {
+    const unitTests = masters.filter(m => m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'));
+    if (unitTests.length === 0) {
+      showToast('エクスポート対象の単元テストマスタデータがありません。', 'error');
+      return;
+    }
+
+    const headers = ['学年', '教科', '単元名', 'テスト名', '区分', '合格基準'];
+    const rows = unitTests.map(m => [
+      `"${m.grade}"`,
+      `"${m.subject}"`,
+      `"${m.unit_name}"`,
+      `"${m.lesson_name}"`,
+      `"単元テスト"`,
+      `"${m.passing_line || '80%以上'}"`
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `単元テストマスタ一覧_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('単元テストマスタCSVを出力しました。', 'success');
+  };
+
+  const downloadSampleUnitTestCsv = () => {
+    const sampleText = `\uFEFF学年,教科,単元名,テスト名,区分,合格基準
+小5,算数,1章 整数と小数,1章 整数と小数 単元確認テスト,単元テスト,80点以上
+小5,算数,2章 小数の乗除,2章 小数の乗除 単元確認テスト,単元テスト,80点以上
+中2,数学,1章 式の計算,1章 式の計算 単元確認テスト,単元テスト,80%以上
+中2,英語,1章 Be動詞・一般動詞,1章 Be動詞 単元確認テスト,単元テスト,80%以上`;
+
+    const blob = new Blob([sampleText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `単元テスト_インポートサンプル.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('単元テスト用サンプルCSVをダウンロードしました。', 'success');
+  };
+
   // Filtered list
   const filteredMasters = masters.filter(m => {
     if (filterGrade !== 'all' && m.grade !== filterGrade) return false;
@@ -343,6 +396,8 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     }
     return true;
   });
+
+  const unitTestMasters = masters.filter(m => m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'));
 
   const uniqueGrades = Array.from(new Set(masters.map(m => m.grade))).filter(Boolean);
   const uniqueSubjects = Array.from(new Set(masters.map(m => m.subject))).filter(Boolean);
@@ -417,7 +472,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
               カリキュラムデータ CSV一括インポート
             </h2>
             <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-              学年・教科ごとの授業計画（単元名・授業名）をCSVから一括インポートし、sort_order（連番）でマスター管理します。
+              学年・教科ごとの授業計画および「単元テスト（合格基準付き）」をCSVから一括インポート/エクスポートし、マスター管理します。
             </p>
           </div>
         </div>
@@ -444,11 +499,26 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
           </button>
           <button
             type="button"
-            data-testid="tab-curriculum-list"
-            onClick={() => {
-              setActiveTab('list');
-              loadMasters();
+            data-testid="tab-unit-tests"
+            onClick={() => setActiveTab('unit_tests')}
+            style={{
+              padding: '6px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              backgroundColor: activeTab === 'unit_tests' ? '#8b5cf6' : 'transparent',
+              color: activeTab === 'unit_tests' ? '#ffffff' : '#475569',
+              transition: 'all 0.15s'
             }}
+          >
+            📝 単元テスト一括管理＆CSV出力
+          </button>
+          <button
+            type="button"
+            data-testid="tab-curriculum-list"
+            onClick={() => setActiveTab('list')}
             style={{
               padding: '6px 16px',
               borderRadius: '6px',
@@ -465,6 +535,143 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
           </button>
         </div>
       </div>
+
+      {activeTab === 'unit_tests' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Top Info & Export Card */}
+          <div style={{ backgroundColor: '#f3e8ff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #d8b4fe' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h4 style={{ margin: '0 0 6px 0', fontSize: '0.95rem', fontWeight: 800, color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📝 単元テスト マスタ管理 & CSV入出力
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#7e22ce', lineHeight: 1.5 }}>
+                  単元テスト（合格基準付き）の一覧確認、CSV形式でのダウンロード、およびサンプルフォーマットの取得が可能です。<br />
+                  インポート時は「CSVインポート」タブから <code>区分: 単元テスト</code> または <code>テスト名</code> を含めてアップロードしてください。
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  data-testid="download-unit-test-sample-btn"
+                  onClick={downloadSampleUnitTestCsv}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #c084fc',
+                    backgroundColor: '#ffffff',
+                    color: '#6b21a8',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Download size={15} />
+                  単元テスト用サンプルCSV
+                </button>
+                <button
+                  type="button"
+                  data-testid="export-unit-test-csv-btn"
+                  onClick={exportUnitTestCsv}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: '#8b5cf6',
+                    color: '#ffffff',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(139, 92, 246, 0.3)'
+                  }}
+                >
+                  <Download size={15} />
+                  登録済み単元テストCSVエクスポート ({unitTestMasters.length}件)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Unit Test Table */}
+          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '16px', overflowX: 'auto' }}>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', fontWeight: 800, color: '#1e293b' }}>
+              登録済み 単元テストマスタ一覧 ({unitTestMasters.length}件)
+            </h4>
+
+            {unitTestMasters.length === 0 ? (
+              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem' }}>
+                登録されている単元テストマスタがありません。「CSVインポート」から単元テストを含むCSVをアップロードするか、年間計画マイルストーン画面から「＋ 単元テストを追加」してください。
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 12px', width: '80px' }}>学年</th>
+                    <th style={{ padding: '10px 12px', width: '80px' }}>教科</th>
+                    <th style={{ padding: '10px 12px', width: '220px' }}>対象単元名</th>
+                    <th style={{ padding: '10px 12px' }}>単元テスト名</th>
+                    <th style={{ padding: '10px 12px', width: '120px' }}>合格基準</th>
+                    <th style={{ padding: '10px 12px', width: '80px', textAlign: 'center' }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unitTestMasters.map((m) => (
+                    <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 700 }}>{m.grade}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#3730a3' }}>
+                          {m.subject}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#475569', fontWeight: 600 }}>{m.unit_name}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, color: '#6b21a8' }}>
+                        📝 {m.lesson_name}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+                          {m.passing_line || '80%以上'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          data-testid={`delete-unittest-master-${m.id}`}
+                          onClick={async () => {
+                            if (confirm(`単元テスト「${m.lesson_name}」を削除しますか？`)) {
+                              await db.deleteCurriculumMaster(m.id);
+                              loadMasters();
+                              showToast('単元テストを削除しました。', 'success');
+                            }
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            border: '1px solid #fecaca',
+                            backgroundColor: '#fef2f2',
+                            color: '#ef4444',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
 
       {activeTab === 'import' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

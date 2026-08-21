@@ -209,6 +209,7 @@ export interface CurriculumMaster {
   lesson_name: string;  // '正の数・負の数の意味' etc.
   sort_order: number;   // 連番 (1, 2, 3...)
   item_type?: 'lesson' | 'unit_test'; // 'lesson': 通常授業, 'unit_test': 単元確認テスト
+  passing_line?: string; // 合格基準点（例: '80点以上', '-3点以内'）
   created_at?: string;
 }
 

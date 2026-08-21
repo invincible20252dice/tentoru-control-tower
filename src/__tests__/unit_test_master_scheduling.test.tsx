@@ -119,4 +119,46 @@ describe('Unit Test Master Management & Auto Scheduling Integration', () => {
       expect(card.textContent).toContain('連立方程式 単元確認テスト');
     });
   });
+
+  test('CurriculumCsvImport unit_tests tab renders and supports deleting unit tests', async () => {
+    const mockMasters: CurriculumMaster[] = [
+      { id: 'cm-ut-export-1', grade: '小5', subject: '算数', unit_name: '整数と小数', lesson_name: '整数と小数 確認テスト', item_type: 'unit_test', sort_order: 1 }
+    ];
+    await db.saveCurriculumMasters(mockMasters);
+
+    render(<CurriculumCsvImport />);
+
+    const unitTestsTabBtn = screen.getByTestId('tab-unit-tests');
+    fireEvent.click(unitTestsTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/単元テスト マスタ管理/)).toBeInTheDocument();
+      expect(screen.getByText(/整数と小数 確認テスト/)).toBeInTheDocument();
+    });
+
+    // Verify CSV export buttons are present
+    expect(screen.getByTestId('export-unit-test-csv-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('download-unit-test-sample-btn')).toBeInTheDocument();
+  });
+
+  test('Adding a unit test master synchronizes with CurriculumMasters list', async () => {
+    const newMaster: CurriculumMaster = {
+      id: 'cm-ut-sync-1',
+      grade: '中1',
+      subject: '英語',
+      unit_name: 'Be動詞',
+      lesson_name: 'Be動詞 単元確認テスト',
+      item_type: 'unit_test',
+      passing_line: '80点以上',
+      sort_order: 10
+    };
+
+    await db.saveCurriculumMasters([newMaster]);
+
+    const masters = db.getCurriculumMasters('英語');
+    const target = masters.find(m => m.id === 'cm-ut-sync-1');
+    expect(target).toBeDefined();
+    expect(target?.lesson_name).toBe('Be動詞 単元確認テスト');
+    expect(target?.passing_line).toBe('80点以上');
+  });
 });

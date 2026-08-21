@@ -2520,6 +2520,76 @@ export default function TeacherDashboard({
     loadData();
   };
 
+  // --- 単元テスト マスタCRUD（マイルストーン連動） ---
+  const [isUnitTestModalOpen, setIsUnitTestModalOpen] = useState(false);
+  const [editingUnitTestId, setEditingUnitTestId] = useState<string | null>(null);
+  const [unitTestFormGrade, setUnitTestFormGrade] = useState<string>('小5');
+  const [unitTestFormSubject, setUnitTestFormSubject] = useState<string>('算数');
+  const [unitTestFormUnitName, setUnitTestFormUnitName] = useState<string>('');
+  const [unitTestFormTestName, setUnitTestFormTestName] = useState<string>('');
+  const [unitTestFormPassingLine, setUnitTestFormPassingLine] = useState<string>('80%以上');
+
+  const handleOpenAddUnitTestModal = (unitName?: string, grade?: string, subject?: string) => {
+    const stGrade = grade || selectedStudent?.grade || '小5';
+    const stSub = subject || selectedSubject || (stGrade.startsWith('中') ? '数学' : '算数');
+    setUnitTestFormGrade(stGrade);
+    setUnitTestFormSubject(stSub);
+    setUnitTestFormUnitName(unitName || '');
+    setUnitTestFormTestName(unitName ? `${unitName} 単元確認テスト` : '単元確認テスト');
+    setUnitTestFormPassingLine('80%以上');
+    setEditingUnitTestId(null);
+    setIsUnitTestModalOpen(true);
+  };
+
+  const handleOpenEditUnitTestModal = (master: CurriculumMaster) => {
+    setEditingUnitTestId(master.id);
+    setUnitTestFormGrade(master.grade);
+    setUnitTestFormSubject(master.subject);
+    setUnitTestFormUnitName(master.unit_name);
+    setUnitTestFormTestName(master.lesson_name);
+    setUnitTestFormPassingLine(master.passing_line || '80%以上');
+    setIsUnitTestModalOpen(true);
+  };
+
+  const handleSaveUnitTestMaster = async () => {
+    if (!unitTestFormTestName.trim()) {
+      alert('単元テスト名を入力してください。');
+      return;
+    }
+
+    const targetSub = unitTestFormSubject;
+    const sameSubMasters = curriculumMastersList.filter(m => m.subject === targetSub || (targetSub === '算数' && m.subject === '数学') || (targetSub === '数学' && m.subject === '算数'));
+    const maxSort = sameSubMasters.reduce((max, m) => Math.max(max, m.sort_order || 0), 0);
+
+    const masterPayload: CurriculumMaster = {
+      id: editingUnitTestId || `cm-ut-${Date.now()}`,
+      grade: unitTestFormGrade,
+      subject: unitTestFormSubject,
+      unit_name: unitTestFormUnitName || '単元未設定',
+      lesson_name: unitTestFormTestName.includes('テスト') || unitTestFormTestName.includes('確認') ? unitTestFormTestName : `${unitTestFormTestName} 単元確認テスト`,
+      sort_order: editingUnitTestId ? (curriculumMastersList.find(m => m.id === editingUnitTestId)?.sort_order || maxSort + 1) : maxSort + 1,
+      item_type: 'unit_test',
+      passing_line: unitTestFormPassingLine || '80%以上',
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveCurriculumMasters([masterPayload]);
+    
+    const updated = db.getCurriculumMasters();
+    setCurriculumMastersList(updated);
+    setIsUnitTestModalOpen(false);
+    alert(editingUnitTestId ? '単元テストを更新しました。' : '単元テストを追加しました。');
+  };
+
+  const handleDeleteUnitTestMaster = async (id: string) => {
+    if (confirm('この単元テストを削除してもよろしいですか？')) {
+      await db.deleteCurriculumMaster(id);
+      const updated = db.getCurriculumMasters();
+      setCurriculumMastersList(updated);
+      alert('単元テストを削除しました。');
+    }
+  };
+
   const handleTabClick = (tab: DashboardTabType) => {
     setActiveTab(tab);
     if (!selectedStudent && students.length > 0 && tab !== 'student-list' && tab !== 'branches' && tab !== 'curriculum-import' && tab !== 'create-student') {
@@ -5795,9 +5865,32 @@ export default function TeacherDashboard({
 
                           {/* Continuous Timeline List */}
                           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '18px', overflow: 'hidden' }}>
-                            <h4 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              🚀 {selectedSubject} 無段階学習タイムライン（ステップ別カリキュラム）
-                            </h4>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 14px 0', flexWrap: 'wrap', gap: '8px' }}>
+                              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                🚀 {selectedSubject} 無段階学習タイムライン（ステップ別カリキュラム）
+                              </h4>
+                              <button
+                                type="button"
+                                data-testid="timeline-add-unittest-btn"
+                                onClick={() => handleOpenAddUnitTestModal('', selectedStudent?.grade, targetSubject)}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  backgroundColor: '#8b5cf6',
+                                  color: '#ffffff',
+                                  fontSize: '0.8rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  boxShadow: '0 2px 6px rgba(139, 92, 246, 0.3)'
+                                }}
+                              >
+                                ➕ 単元テストを追加
+                              </button>
+                            </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {timelineUnits.map((unit, idx) => {
