@@ -33,6 +33,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     subject: string;
     unit_name: string;
     lesson_name: string;
+    item_type?: 'lesson' | 'unit_test';
     sort_order: number;
   }>>([]);
   const [fileName, setFileName] = useState<string>('');
@@ -82,6 +83,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     const subjectIdx = headers.findIndex(h => h === '教科' || h.toLowerCase() === 'subject');
     const unitIdx = headers.findIndex(h => h === '単元名' || h === '単元' || h.toLowerCase() === 'unit_name' || h.toLowerCase() === 'unit');
     const lessonIdx = headers.findIndex(h => h === '授業名' || h === '授業' || h === 'テーマ名' || h.toLowerCase() === 'lesson_name' || h.toLowerCase() === 'theme_name');
+    const typeIdx = headers.findIndex(h => h === '区分' || h === 'タイプ' || h === '種別' || h.toLowerCase() === 'item_type' || h.toLowerCase() === 'type');
 
     if (gradeIdx === -1 || subjectIdx === -1 || unitIdx === -1 || lessonIdx === -1) {
       showToast('CSVヘッダーに「学年」「教科」「単元名」「授業名」が含まれている必要があります。', 'error');
@@ -93,6 +95,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       subject: string;
       unit_name: string;
       lesson_name: string;
+      item_type: 'lesson' | 'unit_test';
       sort_order: number;
     }> = [];
 
@@ -123,6 +126,9 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       const subject = cells[subjectIdx] || '';
       const unit_name = cells[unitIdx] || '';
       const lesson_name = cells[lessonIdx] || '';
+      const typeVal = typeIdx !== -1 ? cells[typeIdx] || '' : '';
+      const isUnitTest = typeVal.includes('テスト') || typeVal.includes('test') || lesson_name.includes('テスト') || lesson_name.includes('確認');
+      const item_type: 'lesson' | 'unit_test' = isUnitTest ? 'unit_test' : 'lesson';
 
       if (grade || subject || unit_name || lesson_name) {
         rows.push({
@@ -130,6 +136,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
           subject: subject || '算数',
           unit_name: unit_name || '単元未設定',
           lesson_name: lesson_name || '授業名未設定',
+          item_type,
           sort_order: rows.length + 1
         });
       }
@@ -253,6 +260,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
         subject: row.subject,
         unit_name: row.unit_name,
         lesson_name: row.lesson_name,
+        item_type: row.item_type || 'lesson',
         sort_order: idx + 1,
         created_at: now
       }));

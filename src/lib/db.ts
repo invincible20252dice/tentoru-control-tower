@@ -208,6 +208,7 @@ export interface CurriculumMaster {
   unit_name: string;    // '1章 正の数・負の数' etc.
   lesson_name: string;  // '正の数・負の数の意味' etc.
   sort_order: number;   // 連番 (1, 2, 3...)
+  item_type?: 'lesson' | 'unit_test'; // 'lesson': 通常授業, 'unit_test': 単元確認テスト
   created_at?: string;
 }
 
@@ -341,7 +342,9 @@ export interface MiniTestResult {
   student_id: string;
   date: string; // YYYY-MM-DD
   subject?: string; // 教科 (算数, 数学, 英語, etc.)
-  test_content: string; // 自由記述テスト内容
+  test_content: string; // テスト内容
+  test_type?: 'unit_test' | 'custom'; // 'unit_test': 単元テストマスタ連携, 'custom': 自由記述
+  unit_name?: string; // 関連単元名
   score: number | null; // 結果点数
   passed?: boolean | null; // 合格したかどうか
   passing_line?: string | null; // 合格ライン

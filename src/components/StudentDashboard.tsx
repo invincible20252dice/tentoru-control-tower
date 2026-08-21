@@ -960,14 +960,27 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                       <span style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', marginLeft: '8px' }}>不合格 (再挑戦) ⚠️</span>
                     );
                   }
+                  const testSub = test.subject || (student.grade?.startsWith('中') ? '数学' : '算数');
+                  const isUnitTest = test.test_type === 'unit_test' || test.test_content.includes('単元') || test.test_content.includes('確認');
+
                   return (
                     <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }} data-testid={`test-item-${test.id}`}>
-                      <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: '#374151', fontWeight: 600 }}>
-                        {test.test_content}
-                        <span style={{ marginLeft: '10px', fontSize: '0.75rem', color: '#4b5563', fontWeight: 'normal' }}>
-                          (レベル{stLevel}目標: {passScore}点)
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#3730a3' }}>
+                          {testSub}
                         </span>
-                      </p>
+                        {isUnitTest && (
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe' }}>
+                            📝 単元テスト
+                          </span>
+                        )}
+                        <span style={{ fontSize: '0.85rem', color: '#1f2937', fontWeight: 700 }}>
+                          {test.test_content}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 'normal' }}>
+                          ({test.passing_line ? `目標: ${test.passing_line}` : `レベル${stLevel}目標: ${passScore}点`})
+                        </span>
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
                         <input

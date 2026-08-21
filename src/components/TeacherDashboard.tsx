@@ -259,7 +259,15 @@ export default function TeacherDashboard({
   const [branchAIRulesForm, setBranchAIRulesForm] = useState<BranchAIRules>(DEFAULT_BRANCH_AI_RULES);
 
   // 宿題・テスト用の State
-  const [todayTests, setTodayTests] = useState<{ id: string; content: string; passingLine?: string; targetScope?: string }[]>([]);
+  const [todayTests, setTodayTests] = useState<{
+    id: string;
+    subject?: string;
+    testType?: 'unit_test' | 'custom';
+    unitName?: string;
+    content: string;
+    passingLine?: string;
+    targetScope?: string;
+  }[]>([]);
   const [todayHomeworks, setTodayHomeworks] = useState<{ id: string; content: string; deadline: string; targetScope?: string }[]>([]);
   const [miniTestSearchQuery, setMiniTestSearchQuery] = useState('');
   const [homeworkSearchQuery, setHomeworkSearchQuery] = useState('');
@@ -622,7 +630,15 @@ export default function TeacherDashboard({
         // Load MiniTestResults (multiple) for today
         const miniResults = db.getMiniTestResults();
         const todayMiniResults = miniResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
-        setTodayTests(todayMiniResults.map(r => ({ id: r.id, content: r.test_content })));
+        setTodayTests(todayMiniResults.map(r => ({
+          id: r.id,
+          subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
+          testType: r.test_type || (r.test_content.includes('単元') ? 'unit_test' : 'custom'),
+          unitName: r.unit_name || '',
+          content: r.test_content,
+          passingLine: r.passing_line || '',
+          targetScope: r.target_scope || 'individual'
+        })));
 
         // Load HomeworkResults (multiple) for today
         const hwResults = db.getHomeworkResults();
@@ -1533,6 +1549,9 @@ export default function TeacherDashboard({
               id: relExisting?.id || `mini-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               student_id: relSt.id,
               date: scheduleDate,
+              subject: test.subject || (student.grade?.startsWith('中') ? '数学' : '算数'),
+              test_type: test.testType || (test.content.includes('単元') ? 'unit_test' : 'custom'),
+              unit_name: test.unitName || '',
               test_content: test.content,
               score: relExisting ? relExisting.score : null,
               passing_line: test.passingLine || null,
@@ -1978,7 +1997,15 @@ export default function TeacherDashboard({
     }
   };
 
-  const updateTodayTestsState = (newTests: { id: string; content: string; passingLine?: string; targetScope?: string }[]) => {
+  const updateTodayTestsState = (newTests: {
+    id: string;
+    subject?: string;
+    testType?: 'unit_test' | 'custom';
+    unitName?: string;
+    content: string;
+    passingLine?: string;
+    targetScope?: string;
+  }[]) => {
     setTodayTests(newTests);
     
     // 双方向連動：テストが1件のとき、時間割で「テスト」が選ばれている全コマにそのテスト名を自動セット
@@ -2000,10 +2027,19 @@ export default function TeacherDashboard({
 
   // テストの動的追加・更新・削除
   const handleAddTest = () => {
-    updateTodayTestsState([...todayTests, { id: `temp-${Date.now()}-${Math.random()}`, content: '', passingLine: '', targetScope: 'individual' }]);
+    const defaultSub = selectedSubject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
+    updateTodayTestsState([...todayTests, {
+      id: `temp-${Date.now()}-${Math.random()}`,
+      subject: defaultSub,
+      testType: 'custom',
+      unitName: '',
+      content: '',
+      passingLine: '',
+      targetScope: 'individual'
+    }]);
   };
 
-  const handleUpdateTest = (id: string, field: 'content' | 'passingLine' | 'targetScope', val: string) => {
+  const handleUpdateTest = (id: string, field: 'content' | 'passingLine' | 'targetScope' | 'subject' | 'testType' | 'unitName', val: string) => {
     const newTests = todayTests.map(t => t.id === id ? { ...t, [field]: val } : t);
     updateTodayTestsState(newTests);
   };
@@ -2047,6 +2083,66 @@ export default function TeacherDashboard({
       schoolId: freshSt.school_id,
       lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
     });
+
+    // 単元完了時の自動単元テストセット判定
+    const autoUnitTests: typeof todayTests = [];
+    const subjectsToCheck = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
+      ? freshSt.selected_subjects
+      : (freshSt.grade?.startsWith('中') ? ['数学', '英語', '理科', '社会', '国語'] : ['算数', '国語', '英語']);
+
+    for (const sub of subjectsToCheck) {
+      const subMasters = curriculumMastersList.filter(m => 
+        m.subject === sub || (sub === '算数' && m.subject === '数学') || (sub === '数学' && m.subject === '算数')
+      ).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+      const nextUncompleted = findNextUncompletedLessonForSubject({
+        student: freshSt,
+        subject: sub,
+        tasks: freshTasks,
+        curriculumMasters: curriculumMastersList,
+        curriculumUnits: allCurriculumUnits,
+        lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+      });
+
+      if (nextUncompleted.masterIndex >= 0 && nextUncompleted.masterIndex < subMasters.length) {
+        const nextMaster = subMasters[nextUncompleted.masterIndex];
+        if (nextMaster && (nextMaster.item_type === 'unit_test' || nextMaster.lesson_name.includes('テスト') || nextMaster.lesson_name.includes('確認'))) {
+          const testLabel = nextMaster.unit_name ? `${nextMaster.unit_name} ${nextMaster.lesson_name}` : nextMaster.lesson_name;
+          const exists = todayTests.some(t => t.content === testLabel) || autoUnitTests.some(t => t.content === testLabel);
+          if (!exists) {
+            autoUnitTests.push({
+              id: `auto-unit-test-${sub}-${Date.now()}`,
+              subject: sub,
+              testType: 'unit_test',
+              unitName: nextMaster.unit_name || '',
+              content: testLabel,
+              passingLine: '80%以上',
+              targetScope: 'individual'
+            });
+          }
+        }
+      }
+    }
+
+    if (autoUnitTests.length > 0) {
+      const mergedTests = [...todayTests, ...autoUnitTests];
+      updateTodayTestsState(mergedTests);
+      for (const t of autoUnitTests) {
+        await db.saveMiniTestResult({
+          id: t.id,
+          student_id: freshSt.id,
+          date: scheduleDate,
+          subject: t.subject,
+          test_type: 'unit_test',
+          unit_name: t.unitName,
+          test_content: t.content,
+          score: null,
+          passing_line: t.passingLine,
+          target_scope: 'individual',
+          created_at: new Date().toISOString()
+        });
+      }
+    }
 
     // コマ割り設定画面へ即座に反映
     setPeriodSelections(optimizedPeriods);
@@ -3694,62 +3790,125 @@ export default function TeacherDashboard({
                         </button>
                       )}
 
-                      {/* 本日のテスト (複数追加対応) */}
+                      {/* 本日のテスト (教科選択 ＋ 自動セット ＋ 自由記述) */}
                       <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0f172a' }}>本日のテスト (自由記述):</label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>本日のテスト (教科別 ＋ 単元テスト自動選択 ＋ 自由記述):</label>
+                          <span style={{ fontSize: '0.7rem', color: '#64748b' }}>単元完了時・手動登録対応</span>
+                        </div>
                         {todayTests.length === 0 ? (
                           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録されたテストはありません。</div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-                            {todayTests.map((test) => (
-                              <div key={test.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <input
-                                    type="text"
-                                    value={test.content}
-                                    onChange={e => handleUpdateTest(test.id, 'content', e.target.value)}
-                                    placeholder="例: 二次方程式10問"
-                                    className={styles.input}
-                                    style={{ fontSize: '0.8rem', flex: 1, padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveTest(test.id)}
-                                    className={styles.btn}
-                                    style={{ width: 'auto', padding: '4px 8px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                  >
-                                    削除
-                                  </button>
-                                </div>
-                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>合格点/合格ライン:</span>
-                                    <input 
-                                      type="text"
-                                      value={test.passingLine || ''}
-                                      onChange={e => handleUpdateTest(test.id, 'passingLine', e.target.value)}
-                                      placeholder="例: -3点, 80%以上, 90点"
-                                      className={styles.input}
-                                      style={{ fontSize: '0.75rem', padding: '4px 6px', width: '150px' }}
-                                    />
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>対象:</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '8px' }}>
+                            {todayTests.map((test) => {
+                              const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
+                              const unitTestMasters = curriculumMastersList.filter(m => 
+                                (m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認')) &&
+                                (m.subject === testSub || (testSub === '算数' && m.subject === '数学') || (testSub === '数学' && m.subject === '算数'))
+                              );
+
+                              return (
+                                <div key={test.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    {/* 教科選択 */}
                                     <select
-                                      value={test.targetScope || 'individual'}
-                                      onChange={e => handleUpdateTest(test.id, 'targetScope', e.target.value)}
+                                      value={testSub}
+                                      onChange={e => handleUpdateTest(test.id, 'subject', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.75rem', padding: '4px 6px', width: 'auto' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9' }}
                                     >
-                                      <option value="individual">個人 (この生徒のみ)</option>
-                                      <option value="grade">学年全員</option>
-                                      <option value="school">中学校 (同じ中学校の同学年)</option>
-                                      <option value="level">レベル (同じ学習レベルの同学年)</option>
+                                      <option value="算数">算数</option>
+                                      <option value="数学">数学</option>
+                                      <option value="英語">英語</option>
+                                      <option value="国語">国語</option>
+                                      <option value="理科">理科</option>
+                                      <option value="社会">社会</option>
+                                      <option value="共通/その他">共通/その他</option>
                                     </select>
+
+                                    {/* 種別選択 */}
+                                    <select
+                                      value={test.testType || 'custom'}
+                                      onChange={e => handleUpdateTest(test.id, 'testType', e.target.value)}
+                                      className={styles.select}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '130px' }}
+                                    >
+                                      <option value="unit_test">📝 単元テスト</option>
+                                      <option value="custom">✏️ 自由記述</option>
+                                    </select>
+
+                                    {/* 内容入力 / ドロップダウン */}
+                                    {test.testType === 'unit_test' && unitTestMasters.length > 0 ? (
+                                      <select
+                                        value={test.content}
+                                        onChange={e => {
+                                          const selectedContent = e.target.value;
+                                          const matchedMaster = unitTestMasters.find(m => m.lesson_name === selectedContent || `${m.unit_name} ${m.lesson_name}` === selectedContent);
+                                          handleUpdateTest(test.id, 'content', selectedContent);
+                                          if (matchedMaster?.unit_name) {
+                                            handleUpdateTest(test.id, 'unitName', matchedMaster.unit_name);
+                                          }
+                                        }}
+                                        className={styles.select}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '4px 8px', border: '1px solid #8b5cf6', backgroundColor: '#f5f3ff', fontWeight: 600 }}
+                                      >
+                                        <option value="">-- 単元テストマスタから選択 --</option>
+                                        {unitTestMasters.map(m => {
+                                          const label = m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name;
+                                          return <option key={m.id} value={label}>{label}</option>;
+                                        })}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        value={test.content}
+                                        onChange={e => handleUpdateTest(test.id, 'content', e.target.value)}
+                                        placeholder="例: たしざん(1) 単元確認テスト または 漢字テスト10問"
+                                        className={styles.input}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                      />
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveTest(test.id)}
+                                      className={styles.btn}
+                                      style={{ width: 'auto', padding: '4px 10px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+
+                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', paddingTop: '2px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>合格点/合格ライン:</span>
+                                      <input 
+                                        type="text"
+                                        value={test.passingLine || ''}
+                                        onChange={e => handleUpdateTest(test.id, 'passingLine', e.target.value)}
+                                        placeholder="例: 80%以上, 90点"
+                                        className={styles.input}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: '130px' }}
+                                      />
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>対象範囲:</span>
+                                      <select
+                                        value={test.targetScope || 'individual'}
+                                        onChange={e => handleUpdateTest(test.id, 'targetScope', e.target.value)}
+                                        className={styles.select}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto' }}
+                                      >
+                                        <option value="individual">個人 (この生徒のみ)</option>
+                                        <option value="grade">学年全員</option>
+                                        <option value="school">中学校 (同じ中学校の同学年)</option>
+                                        <option value="level">レベル (同じ学習レベルの同学年)</option>
+                                      </select>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                         <button
@@ -5668,11 +5827,27 @@ export default function TeacherDashboard({
                                         fontWeight: 800,
                                         padding: '3px 8px',
                                         borderRadius: '12px',
-                                        backgroundColor: isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1'),
+                                        backgroundColor: (unit as any).item_type === 'unit_test' || unit.name.includes('テスト') ? '#8b5cf6' : (isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1')),
                                         color: '#ffffff'
                                       }}>
                                         STEP {stepNum}
                                       </span>
+                                      {((unit as any).item_type === 'unit_test' || unit.name.includes('テスト')) && (
+                                        <span style={{
+                                          fontSize: '0.72rem',
+                                          fontWeight: 800,
+                                          padding: '2px 8px',
+                                          borderRadius: '6px',
+                                          backgroundColor: '#f3e8ff',
+                                          color: '#7c3aed',
+                                          border: '1px solid #c084fc',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px'
+                                        }}>
+                                          📝 単元テスト
+                                        </span>
+                                      )}
                                       {(unit as any).grade && (
                                         <span style={{
                                           fontSize: '0.72rem',
