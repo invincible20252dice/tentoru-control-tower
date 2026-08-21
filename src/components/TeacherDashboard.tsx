@@ -2558,27 +2558,54 @@ export default function TeacherDashboard({
     }
 
     const targetSub = unitTestFormSubject;
-    const sameSubMasters = curriculumMastersList.filter(m => m.subject === targetSub || (targetSub === '算数' && m.subject === '数学') || (targetSub === '数学' && m.subject === '算数'));
-    const maxSort = sameSubMasters.reduce((max, m) => Math.max(max, m.sort_order || 0), 0);
+    const sameSubMasters = [...curriculumMastersList]
+      .filter(m => m.subject === targetSub || (targetSub === '算数' && m.subject === '数学') || (targetSub === '数学' && m.subject === '算数'))
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+
+    let targetSortOrder = sameSubMasters.length > 0 ? (sameSubMasters[sameSubMasters.length - 1].sort_order || 0) + 1 : 1;
+
+    // もし指定された対象単元が存在する場合、その単元内の最後のアイテムの直後に割り込み配置
+    const selectedUnitName = unitTestFormUnitName.trim();
+    if (selectedUnitName) {
+      const sameUnitItems = sameSubMasters.filter(m => m.unit_name === selectedUnitName);
+      if (sameUnitItems.length > 0) {
+        const lastUnitItem = sameUnitItems[sameUnitItems.length - 1];
+        const lastSort = lastUnitItem.sort_order || 0;
+        targetSortOrder = lastSort + 1;
+
+        // それ以降のアイテムの sort_order を +1
+        sameSubMasters.forEach(m => {
+          if ((m.sort_order || 0) >= targetSortOrder && m.id !== editingUnitTestId) {
+            m.sort_order = (m.sort_order || 0) + 1;
+          }
+        });
+      }
+    }
+
+    const rawTestName = unitTestFormTestName.trim();
+    const formattedTestName = rawTestName.includes('テスト') || rawTestName.includes('確認')
+      ? rawTestName
+      : `${rawTestName} 単元確認テスト`;
 
     const masterPayload: CurriculumMaster = {
       id: editingUnitTestId || `cm-ut-${Date.now()}`,
       grade: unitTestFormGrade,
       subject: unitTestFormSubject,
-      unit_name: unitTestFormUnitName || '単元未設定',
-      lesson_name: unitTestFormTestName.includes('テスト') || unitTestFormTestName.includes('確認') ? unitTestFormTestName : `${unitTestFormTestName} 単元確認テスト`,
-      sort_order: editingUnitTestId ? (curriculumMastersList.find(m => m.id === editingUnitTestId)?.sort_order || maxSort + 1) : maxSort + 1,
+      unit_name: selectedUnitName || '単元未設定',
+      lesson_name: formattedTestName,
+      sort_order: editingUnitTestId ? (curriculumMastersList.find(m => m.id === editingUnitTestId)?.sort_order || targetSortOrder) : targetSortOrder,
       item_type: 'unit_test',
       passing_line: unitTestFormPassingLine || '80%以上',
       created_at: new Date().toISOString()
     };
 
-    await db.saveCurriculumMasters([masterPayload]);
+    const mastersToSave = editingUnitTestId ? [masterPayload] : [masterPayload, ...sameSubMasters.filter(m => m.id !== masterPayload.id)];
+    await db.saveCurriculumMasters(mastersToSave);
     
     const updated = db.getCurriculumMasters();
     setCurriculumMastersList(updated);
     setIsUnitTestModalOpen(false);
-    alert(editingUnitTestId ? '単元テストを更新しました。' : '単元テストを追加しました。');
+    alert(editingUnitTestId ? '✅ 単元テストを更新しました' : '✅ 単元テストを追加しました');
   };
 
   const handleDeleteUnitTestMaster = async (id: string) => {
@@ -7752,6 +7779,169 @@ export default function TeacherDashboard({
                 style={{ width: 'auto', background: '#4f46e5', color: '#ffffff' }}
               >
                 💾 ルールを保存する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 単元テスト マスタ追加・編集モーダル */}
+      {isUnitTestModalOpen && (
+        <div
+          data-testid="unit-test-master-modal"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '520px',
+              width: '90%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📝 {editingUnitTestId ? '単元テスト マスタ編集' : '単元テスト マスタ新規追加'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsUnitTestModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>教科:</label>
+                  <select
+                    value={unitTestFormSubject}
+                    onChange={e => setUnitTestFormSubject(e.target.value)}
+                    className={styles.select}
+                    style={{ width: '100%', padding: '6px', fontSize: '0.85rem' }}
+                  >
+                    {['算数', '数学', '英語', '国語', '理科', '社会'].map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>学年:</label>
+                  <select
+                    value={unitTestFormGrade}
+                    onChange={e => setUnitTestFormGrade(e.target.value)}
+                    className={styles.select}
+                    style={{ width: '100%', padding: '6px', fontSize: '0.85rem' }}
+                  >
+                    {['小1', '小2', '小3', '小4', '小5', '小6', '中1', '中2', '中3', '高1', '高2', '高3'].map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* 対象単元名選択 */}
+              {(() => {
+                const targetSub = unitTestFormSubject;
+                const existingUnits = Array.from(new Set(
+                  curriculumMastersList
+                    .filter(m => m.subject === targetSub || (targetSub === '算数' && m.subject === '数学') || (targetSub === '数学' && m.subject === '算数'))
+                    .map(m => m.unit_name)
+                    .filter(Boolean)
+                ));
+
+                return (
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>対象単元 (unit_name):</label>
+                    {existingUnits.length > 0 && (
+                      <select
+                        value={unitTestFormUnitName}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setUnitTestFormUnitName(val);
+                          if (val && !unitTestFormTestName) {
+                            setUnitTestFormTestName(`${val} 単元確認テスト`);
+                          }
+                        }}
+                        className={styles.select}
+                        style={{ width: '100%', padding: '6px', fontSize: '0.85rem', marginBottom: '6px' }}
+                      >
+                        <option value="">-- 対象単元を選択（または手動入力） --</option>
+                        {existingUnits.map(u => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    )}
+                    <input
+                      type="text"
+                      placeholder="例: 1章 整数と小数 （ドロップダウン選択または直接入力）"
+                      value={unitTestFormUnitName}
+                      onChange={e => setUnitTestFormUnitName(e.target.value)}
+                      className={styles.input}
+                      style={{ fontSize: '0.85rem', padding: '6px' }}
+                    />
+                  </div>
+                );
+              })()}
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>テスト名 (lesson_name):</label>
+                <input
+                  type="text"
+                  placeholder="例: たしざん 単元確認テスト"
+                  value={unitTestFormTestName}
+                  onChange={e => setUnitTestFormTestName(e.target.value)}
+                  className={styles.input}
+                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>合格基準 (合格ライン):</label>
+                <input
+                  type="text"
+                  placeholder="例: 80%以上, 90点"
+                  value={unitTestFormPassingLine}
+                  onChange={e => setUnitTestFormPassingLine(e.target.value)}
+                  className={styles.input}
+                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setIsUnitTestModalOpen(false)}
+                className={styles.btn}
+                style={{ width: 'auto', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                data-testid="save-unittest-master-btn"
+                onClick={handleSaveUnitTestMaster}
+                className={styles.btn}
+                style={{ width: 'auto', background: '#8b5cf6', color: '#ffffff' }}
+              >
+                追加する (保存)
               </button>
             </div>
           </div>

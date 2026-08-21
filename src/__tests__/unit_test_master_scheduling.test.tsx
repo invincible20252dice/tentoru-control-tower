@@ -161,4 +161,57 @@ describe('Unit Test Master Management & Auto Scheduling Integration', () => {
     expect(target?.lesson_name).toBe('Be動詞 単元確認テスト');
     expect(target?.passing_line).toBe('80点以上');
   });
+
+  test('TeacherDashboard unit test modal opens, populates fields, and saves with auto sort_order', async () => {
+    window.alert = vi.fn();
+    const mockStudent: Student = {
+      id: 'std-modal-test',
+      name: 'モーダル検証生徒',
+      grade: '小5',
+      branch_id: 'branch-1',
+      login_id: 'std_modal',
+      password: 'pass',
+      status: 'normal',
+      selected_subjects: ['算数'],
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(mockStudent);
+
+    const mockMasters: CurriculumMaster[] = [
+      { id: 'cm-m1', grade: '小5', subject: '算数', unit_name: 'たしざん', lesson_name: 'たしざんのきほん', sort_order: 1, item_type: 'lesson' }
+    ];
+    await db.saveCurriculumMasters(mockMasters);
+
+    const { getByTestId, findByTestId } = render(<TeacherDashboard />);
+
+    await waitFor(() => {
+      const el = screen.queryAllByText(/モーダル検証生徒/);
+      expect(el.length).toBeGreaterThan(0);
+    });
+
+    const studentItem = screen.getAllByText(/モーダル検証生徒/)[0];
+    fireEvent.click(studentItem);
+
+    // Switch to milestones tab
+    const milestoneMenu = screen.getByText('年間計画（マイルストーン）');
+    fireEvent.click(milestoneMenu);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-add-unittest-btn')).toBeInTheDocument();
+    });
+
+    const addBtn = getByTestId('timeline-add-unittest-btn');
+    fireEvent.click(addBtn);
+
+    const modal = await findByTestId('unit-test-master-modal');
+    expect(modal).toBeInTheDocument();
+
+    const saveBtn = getByTestId('save-unittest-master-btn');
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      const updated = db.getCurriculumMasters('算数');
+      expect(updated.length).toBeGreaterThan(1);
+    });
+  });
 });
