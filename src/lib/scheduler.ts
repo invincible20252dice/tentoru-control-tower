@@ -366,7 +366,7 @@ export function calculateLessonRangeForSlot(params: {
   } else {
     const matchingSchoolUnits = curriculumUnits.filter(u => 
       (schoolId ? u.school_id === schoolId : false) &&
-      (isElem ? u.subject === '算数' : u.subject === subject)
+      (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject)
     );
 
     if (matchingSchoolUnits.length > 0) {
@@ -388,7 +388,7 @@ export function calculateLessonRangeForSlot(params: {
     } else {
       const fallbackUnits = curriculumUnits
         .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
-                     (isElem ? u.subject === '算数' : u.subject === subject))
+                     (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject))
         .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
         .map(u => ({
           id: u.id,

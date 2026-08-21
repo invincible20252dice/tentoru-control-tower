@@ -731,7 +731,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const normalReschedBtn = screen.getByText(/遅れチェック/);
     fireEvent.click(normalReschedBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('2日連続未達成を検出し、自動リスケジュールを実行しました。未達成タスクを残りの日程に均等配分しました。');
+      expect(alertMock).toHaveBeenCalledWith(expect.stringMatching(/学習計画を最新の進捗に合わせて最適化しました/));
     });
 
     // Setup 16 uncompleted tasks to trigger punk alert (386 cover)

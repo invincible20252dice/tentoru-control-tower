@@ -303,4 +303,48 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     const isFriAttendance = isStudentAttendanceDay(studentWithDays, '2026-08-21');
     expect(isFriAttendance).toBe(true);
   });
+
+  test('「遅れチェック & 自動リスケ」実行時に次回通塾日(8/21)のコマ割りが選択教科・直後授業(From)・AI予測目標(To)で自動生成されること', () => {
+    const studentForReschedule: Student = {
+      id: 'std-reschedule-auto',
+      name: 'リスケ自動生成生徒',
+      grade: '小1',
+      login_id: 'std_reschedule',
+      password: 'pass',
+      status: 'normal',
+      selected_days: ['tuesday', 'friday'],
+      selected_subjects: ['算数', '国語', '英語'],
+      completed_lesson_ids: ['cm-p1-m1', 'cm-p1-e1'],
+      created_at: new Date().toISOString()
+    };
+
+    const masters: CurriculumMaster[] = [
+      { id: 'cm-p1-m1', grade: '小1', subject: '算数', unit_name: 'たしざん(1)', lesson_name: 'あわせていくつ', sort_order: 1 },
+      { id: 'cm-p1-m2', grade: '小1', subject: '算数', unit_name: 'ひきざん(1)', lesson_name: 'のこりはいくつ', sort_order: 2 },
+      { id: 'cm-p1-m3', grade: '小1', subject: '算数', unit_name: 'ひきざん(2)', lesson_name: 'ちがいはいくつ', sort_order: 3 },
+      { id: 'cm-p1-j1', grade: '小1', subject: '国語', unit_name: 'ひらがな', lesson_name: 'あいうえお', sort_order: 1 },
+      { id: 'cm-p1-j2', grade: '小1', subject: '国語', unit_name: 'ひらがな', lesson_name: 'かきくけこ', sort_order: 2 },
+      { id: 'cm-p1-e1', grade: '小1', subject: '英語', unit_name: 'アルファベット', lesson_name: 'A〜G', sort_order: 1 },
+      { id: 'cm-p1-e2', grade: '小1', subject: '英語', unit_name: 'アルファベット', lesson_name: 'H〜N', sort_order: 2 },
+    ];
+
+    const slots = generateSlotsForSelectedSubjects({
+      student: studentForReschedule,
+      periodCount: 3,
+      selectedSubjects: ['算数', '国語', '英語'],
+      curriculumMasters: masters
+    });
+
+    // 国語は完全未完了 (0%) なので 1コマ目に優先配置
+    expect(slots[1].subject).toBe('国語');
+    expect(slots[1].startLessonName).toContain('あいうえお');
+
+    // 算数は cm-p1-m1 が完了しているため、直後の未完了授業 cm-p1-m2 (のこりはいくつ) からスタートすること
+    expect(slots[2].subject).toBe('算数');
+    expect(slots[2].startLessonName).toContain('のこりはいくつ');
+
+    // 英語は cm-p1-e1 が完了しているため、直後の未完了授業 cm-p1-e2 (H〜N) からスタートすること
+    expect(slots[3].subject).toBe('英語');
+    expect(slots[3].startLessonName).toContain('H〜N');
+  });
 });

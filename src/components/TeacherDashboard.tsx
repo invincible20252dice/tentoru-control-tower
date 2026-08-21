@@ -2025,45 +2025,107 @@ export default function TeacherDashboard({
     setTodayHomeworks(todayHomeworks.filter(h => h.id !== id));
   };
 
-  // 5. 自動リスケジュール実行 (遅れ発生時)
+  // 5. 自動リスケジュール & 次回通塾日カリキュラム最適化実行
   const handleAutoReschedule = async () => {
     if (!selectedStudent) return;
 
-    // 未来の予定日リストを仮に作成 (土日を除く翌日からの5日間)
-    const futureDates: string[] = [];
-    let checkDate = new Date(scheduleDate);
-    while (futureDates.length < 5) {
-      checkDate.setDate(checkDate.getDate() + 1);
-      const day = checkDate.getDay();
-      if (day !== 0 && day !== 6) { // 土日を除く
-        futureDates.push(checkDate.toISOString().split('T')[0]);
-      }
-    }
-
-    const targetBranchId = selectedStudent.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1');
+    const freshSt = db.getStudents().find(s => s.id === selectedStudent.id) || selectedStudent;
+    const freshTasks = db.getLearningTasks();
+    const targetBranchId = freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1');
     const branchRules = db.getBranchAIRules(targetBranchId);
 
+    // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
+    const loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || periodCount || 3;
+    const optimizedPeriods = generateSlotsForSelectedSubjects({
+      student: freshSt,
+      periodCount: loadedPeriodCount,
+      selectedSubjects: freshSt.selected_subjects,
+      tasks: freshTasks,
+      branchRules,
+      curriculumMasters: curriculumMastersList,
+      curriculumUnits: allCurriculumUnits,
+      schoolId: freshSt.school_id,
+      lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+    });
+
+    // コマ割り設定画面へ即座に反映
+    setPeriodSelections(optimizedPeriods);
+    setPeriodCount(loadedPeriodCount);
+
+    // 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
+    const newDayTasks: LearningTask[] = [];
+    Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
+      const p = parseInt(pStr);
+      if (!sel || !sel.subject) return;
+
+      const unit = allCurriculumUnits.find(u => u.id === sel.unitId);
+      const master = curriculumMastersList.find(m => m.id === sel.unitId || String(m.sort_order) === String(sel.unitId));
+
+      newDayTasks.push({
+        id: `task-${freshSt.id}-${scheduleDate}-${p}`,
+        student_id: freshSt.id,
+        scheduled_date: scheduleDate,
+        period: p,
+        subject: sel.subject,
+        unit_id: sel.unitId || (master ? master.id : ''),
+        custom_unit_name: sel.customTheme || '',
+        start_lesson_id: sel.startLessonId || '',
+        end_lesson_id: sel.endLessonId || '',
+        start_lesson_name: sel.startLessonName || '',
+        end_lesson_name: sel.endLessonName || '',
+        lesson_range: sel.lessonRange || formatLessonRange(sel.startLessonName, sel.endLessonName),
+        status: 'unstarted',
+        video_watched: false,
+        test_passed: false,
+        office_note: commonOfficeNote || '',
+        created_at: new Date().toISOString()
+      });
+    });
+
+    if (newDayTasks.length > 0) {
+      // 対象日付の既存未完了タスクを除去し、最適化された新タスクで更新
+      const otherDayTasks = freshTasks.filter(t => !(t.student_id === freshSt.id && t.scheduled_date === scheduleDate));
+      await db.saveLearningTasks([...otherDayTasks, ...newDayTasks]);
+    }
+
+    // 2. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
+    const futureDates: string[] = generateAttendanceDates(
+      scheduleDate,
+      freshSt.selected_days || ['tuesday', 'friday'],
+      10
+    ).filter(dStr => dStr > scheduleDate);
+
     const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
-      selectedStudent,
+      freshSt,
       db.getLearningTasks(),
       scheduleDate,
       futureDates,
-      periodCount,
+      loadedPeriodCount,
       milestonePlans,
       allCurriculumUnits,
       branchRules,
       curriculumMastersList
     );
 
-    if (isPunked) {
-      alert(`【要判断：計画パンクアラート発火】\n自動リスケジュールを試みましたが、1日あたりのタスク量が現在の設定コマ数(${periodCount}コマ)を超えたため、自動適用をストップしました。目標期日の変更や単元の間引きを検討してください。生徒ステータスが警告(パンク)に更新されます。`);
-    } else {
-      alert('2日連続未達成を検出し、自動リスケジュールを実行しました。未達成タスクを残りの日程に均等配分しました。');
-    }
-
     await db.saveLearningTasks(updatedTasks);
     await db.saveStudent(updatedStudent);
-    
+
+    // 日付フォーマット
+    const dObj = new Date(scheduleDate);
+    const formattedDate = !isNaN(dObj.getTime())
+      ? `${dObj.getMonth() + 1}月${dObj.getDate()}日`
+      : scheduleDate;
+
+    if (isPunked) {
+      alert(`【要判断：計画パンクアラート発火】\n自動リスケジュールを試みましたが、1日あたりのタスク量が現在の設定コマ数(${loadedPeriodCount}コマ)を超えたため、自動適用をストップしました。目標期日の変更や単元の間引きを検討してください。生徒ステータスが警告(パンク)に更新されます。`);
+    } else {
+      setTimetableToast(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
+      setTimeout(() => setTimetableToast(null), 4000);
+      if (typeof window !== 'undefined') {
+        window.alert(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
+      }
+    }
+
     // 反映
     setSelectedStudent(updatedStudent);
     loadData();

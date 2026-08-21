@@ -100,7 +100,7 @@ describe('Coverage Comprehensive Test Suite for 95%+ Target', () => {
     });
 
     rerender(<StudentDashboard student={mockElemStudent} initialDate="2026-08-20" theme="light" onBackToPortal={() => {}} />);
-    expect(screen.getByText(/自習で動画視聴やテストを進めましょう/)).toBeInTheDocument();
+    expect(screen.getByText(/コマ割り予定はありません/)).toBeInTheDocument();
   });
 
   test('SugorokuMap: subject tab clicking, onSelectSubject callback, and dark theme', () => {
