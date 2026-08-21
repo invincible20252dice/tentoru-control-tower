@@ -214,4 +214,86 @@ describe('Unit Test Master Management & Auto Scheduling Integration', () => {
       expect(updated.length).toBeGreaterThan(1);
     });
   });
+
+  test('Unit test failure stops progress to new unit and sets retest review; pass allows new unit progress', async () => {
+    const mockStudent: Student = {
+      id: 'std-branch-test',
+      name: '合否分岐生徒',
+      grade: '小5',
+      branch_id: 'branch-1',
+      login_id: 'std_branch',
+      password: 'pass',
+      status: 'normal',
+      selected_subjects: ['算数'],
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(mockStudent);
+
+    const mockMasters: CurriculumMaster[] = [
+      { id: 'cm-b1', grade: '小5', subject: '算数', unit_name: '1章 小数', lesson_name: '小数計算', sort_order: 1, item_type: 'lesson' },
+      { id: 'cm-b2', grade: '小5', subject: '算数', unit_name: '1章 小数', lesson_name: '1章 小数 単元確認テスト', sort_order: 2, item_type: 'unit_test' },
+      { id: 'cm-b3', grade: '小5', subject: '算数', unit_name: '2章 分数', lesson_name: '分数入門', sort_order: 3, item_type: 'lesson' }
+    ];
+    await db.saveCurriculumMasters(mockMasters);
+
+    // 1. Failed Test Result Scenario
+    const failedResult: MiniTestResult = {
+      id: 'mini-failed-1',
+      student_id: 'std-branch-test',
+      date: '2026-08-20',
+      subject: '算数',
+      test_type: 'unit_test',
+      unit_name: '1章 小数',
+      test_content: '1章 小数 単元確認テスト',
+      score: 50,
+      passed: false,
+      passing_line: '80点以上',
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(failedResult);
+
+    const { calculateLessonRangeForSlot } = await import('../lib/scheduler');
+
+    const failedRange = calculateLessonRangeForSlot({
+      subject: '算数',
+      student: mockStudent,
+      curriculumMasters: mockMasters,
+      miniTestResults: [failedResult]
+    });
+
+    // Verify progress is stopped at failed unit review
+    expect(failedRange.lesson_range).toContain('【弱点補強】');
+    expect(failedRange.start_lesson_name).toContain('【再テスト対策・総復習】');
+
+    // 2. Passed Test Result Scenario
+    const passedResult: MiniTestResult = {
+      id: 'mini-passed-1',
+      student_id: 'std-branch-test',
+      date: '2026-08-21',
+      subject: '算数',
+      test_type: 'unit_test',
+      unit_name: '1章 小数',
+      test_content: '1章 小数 単元確認テスト',
+      score: 95,
+      passed: true,
+      passing_line: '80点以上',
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(passedResult);
+
+    const passedStudent = {
+      ...mockStudent,
+      completed_lesson_ids: ['cm-b1', 'cm-b2']
+    };
+
+    const passedRange = calculateLessonRangeForSlot({
+      subject: '算数',
+      student: passedStudent,
+      curriculumMasters: mockMasters,
+      miniTestResults: [passedResult]
+    });
+
+    // Verify progress proceeds to new unit (2章 分数)
+    expect(passedRange.start_lesson_name).toContain('分数入門');
+  });
 });

@@ -57,7 +57,8 @@ import {
   findNextUncompletedLessonForSubject,
   inferStudentSubjectPace,
   getSortedSubjectsByProgressRate,
-  generateSlotsForSelectedSubjects
+  generateSlotsForSelectedSubjects,
+  getLatestUnitTestStatusForSubject
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -630,7 +631,7 @@ export default function TeacherDashboard({
         // Load MiniTestResults (multiple) for today
         const miniResults = db.getMiniTestResults();
         const todayMiniResults = miniResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
-        setTodayTests(todayMiniResults.map(r => ({
+        let mappedTodayTests = todayMiniResults.map(r => ({
           id: r.id,
           subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
           testType: r.test_type || (r.test_content.includes('単元') ? 'unit_test' : 'custom'),
@@ -638,7 +639,38 @@ export default function TeacherDashboard({
           content: r.test_content,
           passingLine: r.passing_line || '',
           targetScope: r.target_scope || 'individual'
-        })));
+        }));
+
+        // もし本日のテスト結果がまだ未登録の場合、過去の不合格単元テスト（再テスト）を自動セット
+        const subjectsToCheck = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
+          ? freshSt.selected_subjects
+          : [(freshSt.grade?.startsWith('中') ? '数学' : '算数')];
+
+        subjectsToCheck.forEach(sub => {
+          const status = getLatestUnitTestStatusForSubject({
+            studentId: freshSt.id,
+            subject: sub,
+            miniTestResults: miniResults
+          });
+
+          if (status.hasFailedUnitTest && status.failedUnitTest) {
+            const failedTest = status.failedUnitTest;
+            const existsInToday = mappedTodayTests.some(t => t.content === failedTest.test_content || (failedTest.unit_name && t.unitName === failedTest.unit_name));
+            if (!existsInToday) {
+              mappedTodayTests.push({
+                id: `retest-${freshSt.id}-${sub}-${Date.now()}`,
+                subject: sub,
+                testType: 'unit_test',
+                unitName: failedTest.unit_name || '',
+                content: failedTest.test_content.startsWith('【再テスト】') ? failedTest.test_content : `【再テスト】${failedTest.test_content}`,
+                passingLine: failedTest.passing_line || '80%以上',
+                targetScope: 'individual'
+              });
+            }
+          }
+        });
+
+        setTodayTests(mappedTodayTests);
 
         // Load HomeworkResults (multiple) for today
         const hwResults = db.getHomeworkResults();
@@ -1641,24 +1673,68 @@ export default function TeacherDashboard({
     }
   };
 
-  // 小テスト結果の保存
+  // 小テスト結果の保存（合否分岐ロジックと将来タスク・タイムラインの即時連動）
   const handleSaveMiniTestScore = async (result: MiniTestResult) => {
     const scoreStr = tempScores[result.id] || '';
-    const scoreVal = scoreStr === '' ? null : parseInt(scoreStr);
+    const scoreVal = scoreStr === '' ? null : parseInt(scoreStr, 10);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
       alert('点数は0〜100の範囲で入力してください。');
       return;
     }
     const passedStr = tempPassedStatuses[result.id] || 'unstarted';
-    const passedVal = passedStr === 'passed' ? true : passedStr === 'failed' ? false : null;
-    const updated = {
+    let passScore = 80;
+    if (result.passing_line) {
+      const match = result.passing_line.match(/\d+/);
+      if (match) passScore = parseInt(match[0], 10);
+    }
+
+    const passedVal = passedStr === 'passed' 
+      ? true 
+      : passedStr === 'failed' 
+        ? false 
+        : (scoreVal !== null ? scoreVal >= passScore : null);
+
+    const updated: MiniTestResult = {
       ...result,
       score: scoreVal,
       passed: passedVal
     };
     await db.saveMiniTestResult(updated);
+
+    // 点数・合否変更に伴い、生徒の未来の未受講タスクをリアルタイム再計算
+    if (selectedStudent) {
+      const allTasks = db.getLearningTasks().filter(t => t.student_id === selectedStudent.id);
+      const todayStr = scheduleDate;
+      const futureUncompletedTasks = allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
+
+      if (futureUncompletedTasks.length > 0) {
+        const allMasters = db.getCurriculumMasters();
+        const allUnits = db.getCurriculumUnits();
+        const latestMiniResults = db.getMiniTestResults();
+
+        futureUncompletedTasks.forEach(task => {
+          const sub = task.subject || (selectedStudent.grade?.startsWith('中') ? '数学' : '算数');
+          const rangeInfo = calculateLessonRangeForSlot({
+            subject: sub,
+            student: selectedStudent,
+            tasks: allTasks,
+            curriculumMasters: allMasters,
+            curriculumUnits: allUnits,
+            lessonProgressList: [],
+            miniTestResults: latestMiniResults
+          });
+
+          task.start_lesson_name = rangeInfo.start_lesson_name || task.start_lesson_name;
+          task.end_lesson_name = rangeInfo.end_lesson_name || task.end_lesson_name;
+          task.lesson_range = rangeInfo.lesson_range || task.lesson_range;
+        });
+
+        await db.saveLearningTasks(futureUncompletedTasks);
+      }
+    }
+
     alert('小テスト点数・合否を保存しました！');
-    loadData();
+    await loadData();
   };
 
   const handleSaveApiKey = () => {
@@ -4681,7 +4757,7 @@ export default function TeacherDashboard({
                               const student = students.find(s => s.id === r.student_id);
                               const stLevel = student?.level || 'A';
                               const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
-                              const displayPassingLine = r.passing_line ? r.passing_line : `レベル${stLevel} (${passScore}点)`;
+                              const displayPassingLine = r.passing_line ? (r.passing_line.includes('レベル') ? r.passing_line : `レベル${stLevel} (${passScore}点)`) : `レベル${stLevel} (${passScore}点)`;
 
                               return (
                                 <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -5456,9 +5532,25 @@ export default function TeacherDashboard({
                     if (su) startSeq = su.sequence_order - 1;
                   }
 
+                  const latestUnitTestStatus = getLatestUnitTestStatusForSubject({
+                    studentId: selectedStudent.id,
+                    subject: selectedSubject,
+                    miniTestResults: miniTestResultsList
+                  });
+
                   const isUnitDone = (u: any, idx: number) => {
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+
+                    // もし該当テストが不合格の単元テストである場合は未完了
+                    if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
+                      const failedTest = latestUnitTestStatus.failedUnitTest;
+                      const testKey = failedTest.unit_name || failedTest.test_content;
+                      if (u.name.includes(testKey) || (failedTest.unit_name && u.name.includes(failedTest.unit_name))) {
+                        return false;
+                      }
+                    }
+
                     if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort))) return true;
                     if (lessonProgressMap.get(uid) === 'completed') return true;
                     if (completedTaskLessonIds.has(uid)) return true;

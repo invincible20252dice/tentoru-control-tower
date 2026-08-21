@@ -1,4 +1,4 @@
-import { db, CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES, StudentLessonProgress } from './db';
+import { db, CurriculumUnit, CurriculumMaster, LearningTask, Student, ExamThresholdMaster, MilestonePlan, BranchAIRules, DEFAULT_BRANCH_AI_RULES, StudentLessonProgress, MiniTestResult } from './db';
 
 export const schedulerConfig = {
   maxDailyTasksDefault: 3,
@@ -16,7 +16,70 @@ export function formatLessonRange(startName?: string | null, endName?: string | 
 }
 
 /**
- * 生徒の前回までの完了状況に基づき、次回授業日の開始授業 (From: 直近の未完了授業) を特定する
+ * 生徒の指定教科における最新の単元テスト合否状況（合格/不合格）を取得する
+ */
+export function getLatestUnitTestStatusForSubject(params: {
+  studentId: string;
+  subject: string;
+  miniTestResults?: MiniTestResult[];
+}): {
+  hasFailedUnitTest: boolean;
+  failedUnitTest: MiniTestResult | null;
+  completedUnitTestKeys: Set<string>;
+} {
+  const { studentId, subject, miniTestResults } = params;
+  const results = miniTestResults || db.getMiniTestResults();
+
+  const targetSub = subject;
+  const studentResults = results
+    .filter(r =>
+      r.student_id === studentId &&
+      (r.test_type === 'unit_test' || r.test_content.includes('テスト') || r.test_content.includes('確認')) &&
+      (r.subject === targetSub || (!r.subject && (targetSub === '算数' || targetSub === '数学')) || (targetSub === '算数' && r.subject === '数学') || (targetSub === '数学' && r.subject === '算数'))
+    )
+    .sort((a, b) => new Date(b.date || b.created_at || 0).getTime() - new Date(a.date || a.created_at || 0).getTime());
+
+  const completedUnitTestKeys = new Set<string>();
+  let failedUnitTest: MiniTestResult | null = null;
+
+  const latestByContent = new Map<string, MiniTestResult>();
+  studentResults.forEach(r => {
+    const key = r.unit_name || r.test_content;
+    if (!latestByContent.has(key)) {
+      latestByContent.set(key, r);
+    }
+  });
+
+  for (const [key, result] of latestByContent.entries()) {
+    let passScore = 80;
+    if (result.passing_line) {
+      const match = result.passing_line.match(/\d+/);
+      if (match) passScore = parseInt(match[0], 10);
+    }
+
+    const isPassed = result.passed === true || (result.score !== null && result.score !== undefined && result.score >= passScore);
+    const isFailed = result.passed === false || (result.score !== null && result.score !== undefined && result.score < passScore);
+
+    if (isPassed) {
+      completedUnitTestKeys.add(key);
+      if (result.unit_name) completedUnitTestKeys.add(result.unit_name);
+      completedUnitTestKeys.add(result.test_content);
+    } else if (isFailed) {
+      if (!failedUnitTest) {
+        failedUnitTest = result;
+      }
+    }
+  }
+
+  return {
+    hasFailedUnitTest: Boolean(failedUnitTest),
+    failedUnitTest,
+    completedUnitTestKeys
+  };
+}
+
+/**
+ * 生徒の前回までの完了状況および単元テスト合否に基づき、次回授業日の開始授業 (From: 直近の未完了授業 / 再テスト) を特定する
  */
 export function findNextUncompletedLessonForSubject(params: {
   student?: Student | null;
@@ -26,10 +89,13 @@ export function findNextUncompletedLessonForSubject(params: {
   curriculumUnits?: CurriculumUnit[];
   schoolId?: string;
   lessonProgressList?: StudentLessonProgress[];
+  miniTestResults?: MiniTestResult[];
 }): {
   lessonId: string | null;
   lessonName: string | null;
   masterIndex: number;
+  hasFailedUnitTest?: boolean;
+  failedUnitTest?: MiniTestResult | null;
 } {
   const {
     student,
@@ -38,7 +104,8 @@ export function findNextUncompletedLessonForSubject(params: {
     curriculumMasters: rawMasters = [],
     curriculumUnits: rawUnits = [],
     schoolId = student?.school_id,
-    lessonProgressList = []
+    lessonProgressList = [],
+    miniTestResults = []
   } = params;
 
   const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
@@ -189,7 +256,29 @@ export function findNextUncompletedLessonForSubject(params: {
     if (t.end_lesson_name) completedIds.add(t.end_lesson_name);
   });
 
-  // 3. スタート位置設定があれば、その位置より前の授業はスキップ扱い（探索開始位置とする）
+  // 3. 単元テスト合否判定（不合格時は新単元への進行をストップして再テスト・復習位置に固定）
+  const unitTestStatus = getLatestUnitTestStatusForSubject({
+    studentId: student.id,
+    subject,
+    miniTestResults
+  });
+
+  if (unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest) {
+    const failedTest = unitTestStatus.failedUnitTest;
+    const testKey = failedTest.unit_name || failedTest.test_content;
+    const failedIdx = masterLessons.findIndex(m => m.name.includes(testKey) || (failedTest.unit_name && m.name.includes(failedTest.unit_name)));
+    if (failedIdx >= 0) {
+      return {
+        lessonId: masterLessons[failedIdx].id,
+        lessonName: masterLessons[failedIdx].name,
+        masterIndex: failedIdx,
+        hasFailedUnitTest: true,
+        failedUnitTest: failedTest
+      };
+    }
+  }
+
+  // 4. スタート位置設定があれば、その位置より前の授業はスキップ扱い（探索開始位置とする）
   const startUnitId = getStudentStartUnitIdForSubject(student, subject);
   let startThresholdIdx = 0;
   if (startUnitId) {
@@ -197,14 +286,16 @@ export function findNextUncompletedLessonForSubject(params: {
     if (sIdx >= 0) startThresholdIdx = sIdx;
   }
 
-  // 4. masterLessons の中で、startThresholdIdx 以降でまだ完了していない最初の授業を探す
+  // 5. masterLessons の中で、startThresholdIdx 以降でまだ完了していない最初の授業を探す
   for (let i = startThresholdIdx; i < masterLessons.length; i++) {
     const l = masterLessons[i];
     if (!completedIds.has(l.id) && !completedIds.has(String(l.id)) && !completedIds.has(l.name)) {
       return {
         lessonId: l.id,
         lessonName: l.name,
-        masterIndex: i
+        masterIndex: i,
+        hasFailedUnitTest: unitTestStatus.hasFailedUnitTest,
+        failedUnitTest: unitTestStatus.failedUnitTest
       };
     }
   }
@@ -214,7 +305,9 @@ export function findNextUncompletedLessonForSubject(params: {
   return {
     lessonId: lastLesson.id,
     lessonName: lastLesson.name,
-    masterIndex: masterLessons.length - 1
+    masterIndex: masterLessons.length - 1,
+    hasFailedUnitTest: unitTestStatus.hasFailedUnitTest,
+    failedUnitTest: unitTestStatus.failedUnitTest
   };
 }
 
@@ -308,6 +401,7 @@ export function calculateLessonRangeForSlot(params: {
   tasks?: LearningTask[];
   branchRules?: BranchAIRules | null;
   lessonProgressList?: StudentLessonProgress[];
+  miniTestResults?: MiniTestResult[];
 }): {
   start_lesson_id: string | null;
   end_lesson_id: string | null;
@@ -327,7 +421,8 @@ export function calculateLessonRangeForSlot(params: {
     student,
     tasks = [],
     branchRules,
-    lessonProgressList = []
+    lessonProgressList = [],
+    miniTestResults = []
   } = params;
 
   const isElem = Boolean(
@@ -409,6 +504,9 @@ export function calculateLessonRangeForSlot(params: {
     };
   }
 
+  let hasFailed = false;
+  let failedTestObj: MiniTestResult | null = null;
+
   // 2. 開始授業の特定 (startLessonId がなければ直近の未完了授業を自動特定)
   let startIdx = 0;
   if (startLessonId) {
@@ -424,10 +522,15 @@ export function calculateLessonRangeForSlot(params: {
       curriculumMasters,
       curriculumUnits,
       schoolId,
-      lessonProgressList
+      lessonProgressList,
+      miniTestResults
     });
     if (nextUncompleted.masterIndex >= 0) {
       startIdx = nextUncompleted.masterIndex;
+    }
+    if (nextUncompleted.hasFailedUnitTest && nextUncompleted.failedUnitTest) {
+      hasFailed = true;
+      failedTestObj = nextUncompleted.failedUnitTest;
     }
   }
 
@@ -450,9 +553,17 @@ export function calculateLessonRangeForSlot(params: {
   const startItem = masterLessons[startIdx];
   const endItem = masterLessons[endIdx];
 
-  const startName = startItem?.name || null;
-  const endName = endItem?.name || startName;
-  const rangeStr = formatLessonRange(startName, endName);
+  let startName = startItem?.name || null;
+  let endName = endItem?.name || startName;
+  let rangeStr = formatLessonRange(startName, endName);
+
+  if (hasFailed && failedTestObj) {
+    const unitLabel = failedTestObj.unit_name || failedTestObj.test_content;
+    startName = `【再テスト対策・総復習】${unitLabel}`;
+    endName = `【再テスト対策・総復習】${unitLabel}`;
+    rangeStr = `【弱点補強】${unitLabel} 総復習＆再テスト対策`;
+    paceReason = `単元テスト不合格のため新単元進行をストップし、${unitLabel}の総復習を割り当てました`;
+  }
 
   return {
     start_lesson_id: startItem?.id || null,
