@@ -2602,14 +2602,8 @@ export default function TeacherDashboard({
     if (!selectedStudent) return;
     if (confirm(`「${unitName}」をこの生徒のカリキュラムから除外（スキップ）しますか？`)) {
       const currentExcluded = selectedStudent.excluded_lesson_ids || [];
-      const keysToAdd = [unitId, String(unitId), unitName];
-      if (unitObj) {
-        if (unitObj.lesson_name) keysToAdd.push(unitObj.lesson_name);
-        if (unitObj.unit_name) keysToAdd.push(unitObj.unit_name);
-        if (unitObj.unit_name && unitObj.lesson_name) keysToAdd.push(`${unitObj.unit_name} - ${unitObj.lesson_name}`);
-        if (unitObj.sort_order !== undefined) keysToAdd.push(String(unitObj.sort_order));
-      }
-      const updatedExcluded = Array.from(new Set([...currentExcluded, ...keysToAdd]));
+      // 一意なステップID（unitId）のみを追加（他の同一単元授業・テストが巻き込まれるのを防止）
+      const updatedExcluded = Array.from(new Set([...currentExcluded, String(unitId)]));
       const updatedStudent = {
         ...selectedStudent,
         excluded_lesson_ids: updatedExcluded
@@ -5561,15 +5555,9 @@ export default function TeacherDashboard({
 
                   const excludedIdsSet = new Set((selectedStudent.excluded_lesson_ids || []).map(id => String(id).trim()));
 
-                  // 除外されたアイテムをタイムラインから除外（STEP番号も即時再番号付け）
+                  // 除外されたアイテムをタイムラインから除外（一意のステップIDのみで判定し、巻き込みを防止。STEP番号も即時再採番）
                   const timelineUnits = rawTimelineUnits
-                    .filter(u => 
-                      !excludedIdsSet.has(String(u.id)) && 
-                      !excludedIdsSet.has(u.name) && 
-                      !excludedIdsSet.has((u as any).lesson_name) &&
-                      !excludedIdsSet.has(`${(u as any).unit_name} - ${(u as any).lesson_name}`) &&
-                      !excludedIdsSet.has(String((u as any).sort_order))
-                    )
+                    .filter(u => !excludedIdsSet.has(String(u.id)))
                     .map((u, idx) => ({
                       ...u,
                       sequence_order: idx + 1

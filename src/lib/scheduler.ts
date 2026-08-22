@@ -82,7 +82,35 @@ export function getLatestUnitTestStatusForSubject(params: {
  * 生徒の前回までの完了状況および単元テスト合否に基づき、次回授業日の開始授業 (From: 直近の未完了授業 / 再テスト) を特定する
  */
 /**
+ * 学年表記の表記揺れを統一正規化する ("1年生", "小学1年" -> "小1" 等)
+ */
+export function normalizeGrade(grade?: string): string {
+  if (!grade) return '';
+  const g = grade.trim();
+  if (g.includes('1') || g.includes('１')) {
+    if (g.startsWith('中')) return '中1';
+    if (g.startsWith('高')) return '高1';
+    return '小1';
+  }
+  if (g.includes('2') || g.includes('２')) {
+    if (g.startsWith('中')) return '中2';
+    if (g.startsWith('高')) return '高2';
+    return '小2';
+  }
+  if (g.includes('3') || g.includes('３')) {
+    if (g.startsWith('中')) return '中3';
+    if (g.startsWith('高')) return '高3';
+    return '小3';
+  }
+  if (g.includes('4') || g.includes('４')) return '小4';
+  if (g.includes('5') || g.includes('５')) return '小5';
+  if (g.includes('6') || g.includes('６')) return '小6';
+  return g;
+}
+
+/**
  * 算数・英語などの全単元末尾に単元テストが未設置の場合、自動的に単元確認テストアイテムを補完・組み込む
+ * 重複したテスト（STEP 2, 3, 4等に複数並ぶ不具合）を徹底排除してユニーク化する
  */
 export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): CurriculumMaster[] {
   if (!masters || masters.length === 0) return masters;
@@ -91,7 +119,8 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
   const unitGroups = new Map<string, CurriculumMaster[]>();
 
   masters.forEach(m => {
-    const key = `${m.subject}_${m.grade || ''}_${m.unit_name || ''}`;
+    const normGrade = normalizeGrade(m.grade);
+    const key = `${m.subject}_${normGrade}_${m.unit_name || ''}`;
     if (!unitGroups.has(key)) {
       unitGroups.set(key, []);
     }
@@ -102,35 +131,46 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
     group.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
     const firstItem = group[0];
+    const normGrade = normalizeGrade(firstItem.grade);
     const isTargetSubject = firstItem.subject === '算数' || firstItem.subject === '数学' || firstItem.subject === '英語';
-    
-    // グループ内にすでに単元テストまたはテスト系アイテムが存在するかチェック
-    const hasUnitTest = group.some(m => 
-      m.item_type === 'unit_test' || 
-      m.lesson_name.includes('単元確認テスト') || 
-      m.lesson_name.includes('テスト') || 
-      (m.unit_name && m.unit_name.includes('テスト'))
-    );
 
-    // 既存の単元テストの名称を「[単元名] - 単元確認テスト」のフォーマットに整調
-    const formattedGroup = group.map(m => {
-      if (m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト')) {
-        const cleanLessonName = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
-        return {
-          ...m,
-          lesson_name: m.unit_name ? `${m.unit_name} - ${cleanLessonName.includes('単元確認テスト') ? '単元確認テスト' : cleanLessonName}` : m.lesson_name
-        };
+    // 授業アイテムとテストアイテムを分離
+    const lessons: CurriculumMaster[] = [];
+    const unitTests: CurriculumMaster[] = [];
+
+    group.forEach(m => {
+      const isTest = m.item_type === 'unit_test' || 
+                     m.lesson_name.includes('単元確認テスト') || 
+                     m.lesson_name.includes('テスト') || 
+                     (m.unit_name && m.unit_name.includes('テスト'));
+      if (isTest) {
+        unitTests.push(m);
+      } else {
+        lessons.push(m);
       }
-      return m;
     });
 
-    result.push(...formattedGroup);
+    // 授業アイテムを追加
+    result.push(...lessons);
 
-    if (isTargetSubject && !hasUnitTest && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
+    if (unitTests.length > 0) {
+      // 既にテストアイテムがある場合は最初の1件のみ採用（二重三重の重複を完全デデュプリケーション）
+      const primaryTest = unitTests[0];
+      const cleanName = primaryTest.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+      const formattedLessonName = primaryTest.unit_name 
+        ? `${primaryTest.unit_name} - ${cleanName.includes('単元確認テスト') || cleanName.includes('テスト') ? '単元確認テスト' : cleanName}`
+        : primaryTest.lesson_name;
+
+      result.push({
+        ...primaryTest,
+        lesson_name: formattedLessonName
+      });
+    } else if (isTargetSubject && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
+      // テストアイテムが存在しない算数・英語単元には末尾に1件のみ自動生成
       const lastItem = group[group.length - 1];
       const autoUnitTest: CurriculumMaster = {
-        id: `cm-auto-ut-${firstItem.subject}-${firstItem.unit_name}`,
-        grade: firstItem.grade,
+        id: `cm-auto-ut-${firstItem.subject}-${normGrade}-${firstItem.unit_name}`,
+        grade: normGrade || firstItem.grade,
         subject: firstItem.subject,
         unit_name: firstItem.unit_name,
         lesson_name: `${firstItem.unit_name} - 単元確認テスト`,

@@ -52,6 +52,43 @@ describe('Unit Test Auto Insertion and Curriculum Exclusion Feature', () => {
     expect(test2?.lesson_name).toBe('割算の筆算 - 単元確認テスト');
   });
 
+  it('normalizes grade labels and deduplicates multiple test items in the same unit', () => {
+    const sampleMasters: CurriculumMaster[] = [
+      {
+        id: 'm1',
+        grade: '小学1年',
+        subject: '算数',
+        unit_name: 'たしざん',
+        lesson_name: 'たしざん STEP 1',
+        sort_order: 10
+      },
+      {
+        id: 'm2',
+        grade: '1年生',
+        subject: '算数',
+        unit_name: 'たしざん',
+        lesson_name: 'たしざん テスト 1',
+        item_type: 'unit_test',
+        sort_order: 20
+      },
+      {
+        id: 'm3',
+        grade: '小1',
+        subject: '算数',
+        unit_name: 'たしざん',
+        lesson_name: 'たしざん テスト 2',
+        item_type: 'unit_test',
+        sort_order: 30
+      }
+    ];
+
+    const processed = ensureMathEnglishUnitTests(sampleMasters);
+
+    // 学年表記揺れ（小学1年 / 1年生 / 小1）が正規化され、重複テストがデデュプリケーションされて「授業1件＋テスト1件」の合計2件に納まること
+    expect(processed.length).toBe(2);
+    expect(processed[1].lesson_name).toBe('たしざん - 単元確認テスト');
+  });
+
   it('prevents duplicate unit test creation when unit test already exists in the unit group', () => {
     const sampleMasters: CurriculumMaster[] = [
       {
