@@ -87,10 +87,6 @@ export function getLatestUnitTestStatusForSubject(params: {
 export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): CurriculumMaster[] {
   if (!masters || masters.length === 0) return masters;
 
-  // 全マスター内に手動定義された unit_test が存在する場合は自動挿入をスキップして完全互換を保つ
-  const hasExistingUnitTestsInList = masters.some(m => m.item_type === 'unit_test');
-  if (hasExistingUnitTestsInList) return masters;
-
   const result: CurriculumMaster[] = [];
   const unitGroups = new Map<string, CurriculumMaster[]>();
 
@@ -104,12 +100,31 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
 
   for (const [, group] of unitGroups.entries()) {
     group.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    result.push(...group);
 
     const firstItem = group[0];
     const isTargetSubject = firstItem.subject === '算数' || firstItem.subject === '数学' || firstItem.subject === '英語';
-    // グループ内または該当単元の中にすでにテスト系アイテムがあるか検証
-    const hasUnitTest = group.some(m => m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('テスト') || (m.unit_name && m.unit_name.includes('テスト')));
+    
+    // グループ内にすでに単元テストまたはテスト系アイテムが存在するかチェック
+    const hasUnitTest = group.some(m => 
+      m.item_type === 'unit_test' || 
+      m.lesson_name.includes('単元確認テスト') || 
+      m.lesson_name.includes('テスト') || 
+      (m.unit_name && m.unit_name.includes('テスト'))
+    );
+
+    // 既存の単元テストの名称を「[単元名] - 単元確認テスト」のフォーマットに整調
+    const formattedGroup = group.map(m => {
+      if (m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト')) {
+        const cleanLessonName = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+        return {
+          ...m,
+          lesson_name: m.unit_name ? `${m.unit_name} - ${cleanLessonName.includes('単元確認テスト') ? '単元確認テスト' : cleanLessonName}` : m.lesson_name
+        };
+      }
+      return m;
+    });
+
+    result.push(...formattedGroup);
 
     if (isTargetSubject && !hasUnitTest && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
       const lastItem = group[group.length - 1];
@@ -118,7 +133,7 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
         grade: firstItem.grade,
         subject: firstItem.subject,
         unit_name: firstItem.unit_name,
-        lesson_name: `${firstItem.unit_name} 単元確認テスト`,
+        lesson_name: `${firstItem.unit_name} - 単元確認テスト`,
         sort_order: (lastItem.sort_order ?? 0) + 0.5,
         item_type: 'unit_test',
         passing_line: '80%以上',

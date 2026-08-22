@@ -45,11 +45,38 @@ describe('Unit Test Auto Insertion and Curriculum Exclusion Feature', () => {
 
     const test1 = processed.find(p => p.unit_name === '小数のかけ算' && p.item_type === 'unit_test');
     expect(test1).toBeDefined();
-    expect(test1?.lesson_name).toBe('小数のかけ算 単元確認テスト');
+    expect(test1?.lesson_name).toBe('小数のかけ算 - 単元確認テスト');
 
     const test2 = processed.find(p => p.unit_name === '割算の筆算' && p.item_type === 'unit_test');
     expect(test2).toBeDefined();
-    expect(test2?.lesson_name).toBe('割算の筆算 単元確認テスト');
+    expect(test2?.lesson_name).toBe('割算の筆算 - 単元確認テスト');
+  });
+
+  it('prevents duplicate unit test creation when unit test already exists in the unit group', () => {
+    const sampleMasters: CurriculumMaster[] = [
+      {
+        id: 'm1',
+        grade: '小5',
+        subject: '算数',
+        unit_name: '図形の性質',
+        lesson_name: '図形 STEP 1',
+        sort_order: 10
+      },
+      {
+        id: 'm2',
+        grade: '小5',
+        subject: '算数',
+        unit_name: '図形の性質',
+        lesson_name: '図形の性質 - 単元確認テスト',
+        item_type: 'unit_test',
+        sort_order: 20
+      }
+    ];
+
+    const processed = ensureMathEnglishUnitTests(sampleMasters);
+
+    // 既に単元テストが存在するため二重追加されず合計2件に収まること
+    expect(processed.length).toBe(2);
   });
 
   it('skips excluded lessons when finding next uncompleted lesson and calculating slots', () => {

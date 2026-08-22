@@ -2598,17 +2598,26 @@ export default function TeacherDashboard({
   };
 
   // タイムラインステップの個別除外（スキップ）機能
-  const handleExcludeLesson = async (unitId: string, unitName: string) => {
+  const handleExcludeLesson = async (unitId: string, unitName: string, unitObj?: any) => {
     if (!selectedStudent) return;
     if (confirm(`「${unitName}」をこの生徒のカリキュラムから除外（スキップ）しますか？`)) {
       const currentExcluded = selectedStudent.excluded_lesson_ids || [];
-      const updatedExcluded = Array.from(new Set([...currentExcluded, unitId, String(unitId), unitName]));
+      const keysToAdd = [unitId, String(unitId), unitName];
+      if (unitObj) {
+        if (unitObj.lesson_name) keysToAdd.push(unitObj.lesson_name);
+        if (unitObj.unit_name) keysToAdd.push(unitObj.unit_name);
+        if (unitObj.unit_name && unitObj.lesson_name) keysToAdd.push(`${unitObj.unit_name} - ${unitObj.lesson_name}`);
+        if (unitObj.sort_order !== undefined) keysToAdd.push(String(unitObj.sort_order));
+      }
+      const updatedExcluded = Array.from(new Set([...currentExcluded, ...keysToAdd]));
       const updatedStudent = {
         ...selectedStudent,
         excluded_lesson_ids: updatedExcluded
       };
       await db.saveStudent(updatedStudent);
-      setSelectedStudent(updatedStudent);
+      
+      // 即時UI更新（楽観的UI）
+      setSelectedStudent({ ...updatedStudent });
 
       // 将来タスクの自動再割り当て（スキップされた授業を飛ばして再編成）
       const allTasks = db.getLearningTasks().filter(t => t.student_id === selectedStudent.id);
@@ -5523,27 +5532,44 @@ export default function TeacherDashboard({
                   );
                   const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === targetSubject || (targetSubject === '算数' && u.subject === '数学'));
 
+                  const ensuredMasters = ensureMathEnglishUnitTests(masterUnits);
+
                   // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
-                  const rawTimelineUnits = masterUnits.length > 0
-                    ? masterUnits.map((m, idx) => ({
-                        id: m.id,
-                        name: m.item_type === 'unit_test' || m.lesson_name.includes('テスト') ? m.lesson_name : `${m.unit_name} - ${m.lesson_name}`,
-                        unit_name: m.unit_name,
-                        lesson_name: m.lesson_name,
-                        grade: m.grade,
-                        sequence_order: idx + 1,
-                        sort_order: m.sort_order ?? (idx + 1),
-                        subject: m.subject,
-                        item_type: m.item_type,
-                        school_id: ''
-                      }))
+                  const rawTimelineUnits = ensuredMasters.length > 0
+                    ? ensuredMasters.map((m, idx) => {
+                        const isUnitTest = m.item_type === 'unit_test' || m.lesson_name.includes('テスト');
+                        let formattedName = m.lesson_name;
+                        if (isUnitTest) {
+                          formattedName = m.lesson_name.includes(' - ') ? m.lesson_name : `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}`;
+                        } else {
+                          formattedName = `${m.unit_name} - ${m.lesson_name}`;
+                        }
+                        return {
+                          id: m.id,
+                          name: formattedName,
+                          unit_name: m.unit_name,
+                          lesson_name: m.lesson_name,
+                          grade: m.grade,
+                          sequence_order: idx + 1,
+                          sort_order: m.sort_order ?? (idx + 1),
+                          subject: m.subject,
+                          item_type: m.item_type,
+                          school_id: ''
+                        };
+                      })
                     : fallbackUnits;
 
                   const excludedIdsSet = new Set((selectedStudent.excluded_lesson_ids || []).map(id => String(id).trim()));
 
-                  // 除外されたアイテムをタイムラインから除外（STEP番号も再番号付け）
+                  // 除外されたアイテムをタイムラインから除外（STEP番号も即時再番号付け）
                   const timelineUnits = rawTimelineUnits
-                    .filter(u => !excludedIdsSet.has(String(u.id)) && !excludedIdsSet.has(String((u as any).sort_order)) && !excludedIdsSet.has(u.name))
+                    .filter(u => 
+                      !excludedIdsSet.has(String(u.id)) && 
+                      !excludedIdsSet.has(u.name) && 
+                      !excludedIdsSet.has((u as any).lesson_name) &&
+                      !excludedIdsSet.has(`${(u as any).unit_name} - ${(u as any).lesson_name}`) &&
+                      !excludedIdsSet.has(String((u as any).sort_order))
+                    )
                     .map((u, idx) => ({
                       ...u,
                       sequence_order: idx + 1
@@ -6217,7 +6243,7 @@ export default function TeacherDashboard({
                                         type="button"
                                         data-testid="timeline-exclude-btn"
                                         data-test-unit-id={unit.id}
-                                        onClick={() => handleExcludeLesson(unit.id, unit.name)}
+                                        onClick={() => handleExcludeLesson(unit.id, unit.name, unit)}
                                         style={{
                                           padding: '3px 8px',
                                           borderRadius: '4px',
