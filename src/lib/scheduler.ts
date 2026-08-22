@@ -81,6 +81,59 @@ export function getLatestUnitTestStatusForSubject(params: {
 /**
  * 生徒の前回までの完了状況および単元テスト合否に基づき、次回授業日の開始授業 (From: 直近の未完了授業 / 再テスト) を特定する
  */
+/**
+ * 算数・英語などの全単元末尾に単元テストが未設置の場合、自動的に単元確認テストアイテムを補完・組み込む
+ */
+export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): CurriculumMaster[] {
+  if (!masters || masters.length === 0) return masters;
+
+  // 全マスター内に手動定義された unit_test が存在する場合は自動挿入をスキップして完全互換を保つ
+  const hasExistingUnitTestsInList = masters.some(m => m.item_type === 'unit_test');
+  if (hasExistingUnitTestsInList) return masters;
+
+  const result: CurriculumMaster[] = [];
+  const unitGroups = new Map<string, CurriculumMaster[]>();
+
+  masters.forEach(m => {
+    const key = `${m.subject}_${m.grade || ''}_${m.unit_name || ''}`;
+    if (!unitGroups.has(key)) {
+      unitGroups.set(key, []);
+    }
+    unitGroups.get(key)!.push(m);
+  });
+
+  for (const [, group] of unitGroups.entries()) {
+    group.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    result.push(...group);
+
+    const firstItem = group[0];
+    const isTargetSubject = firstItem.subject === '算数' || firstItem.subject === '数学' || firstItem.subject === '英語';
+    // グループ内または該当単元の中にすでにテスト系アイテムがあるか検証
+    const hasUnitTest = group.some(m => m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('テスト') || (m.unit_name && m.unit_name.includes('テスト')));
+
+    if (isTargetSubject && !hasUnitTest && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
+      const lastItem = group[group.length - 1];
+      const autoUnitTest: CurriculumMaster = {
+        id: `cm-auto-ut-${firstItem.subject}-${firstItem.unit_name}`,
+        grade: firstItem.grade,
+        subject: firstItem.subject,
+        unit_name: firstItem.unit_name,
+        lesson_name: `${firstItem.unit_name} 単元確認テスト`,
+        sort_order: (lastItem.sort_order ?? 0) + 0.5,
+        item_type: 'unit_test',
+        passing_line: '80%以上',
+        created_at: new Date().toISOString()
+      };
+      result.push(autoUnitTest);
+    }
+  }
+
+  return result.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+}
+
+/**
+ * 生徒の前回までの完了状況および単元テスト合否に基づき、次回授業日の開始授業 (From: 直近の未完了授業 / 再テスト) を特定する
+ */
 export function findNextUncompletedLessonForSubject(params: {
   student?: Student | null;
   subject: string;
@@ -192,8 +245,14 @@ export function findNextUncompletedLessonForSubject(params: {
     };
   }
 
-  // 2. 完了した授業IDを収集
+  // 2. 完了および除外された授業IDを収集
   const completedIds = new Set<string>();
+  if (student.excluded_lesson_ids) {
+    student.excluded_lesson_ids.forEach(id => {
+      completedIds.add(id);
+      completedIds.add(String(id));
+    });
+  }
   if (student.completed_lesson_ids) {
     student.completed_lesson_ids.forEach(id => {
       completedIds.add(id);

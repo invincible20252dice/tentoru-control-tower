@@ -4304,7 +4304,7 @@ describe('UI Components Render & Interaction Tests', () => {
     await act(async () => {
       fireEvent.click(englishTabBtn);
     });
-    expect(screen.getByText(/自己紹介と日常会話/)).toBeInTheDocument();
+    expect(screen.getAllByText(/自己紹介と日常会話/)[0]).toBeInTheDocument();
 
     // Test CSV import button in sidebar
     const csvImportMenuBtn = screen.getByText('カリキュラムCSVインポート');

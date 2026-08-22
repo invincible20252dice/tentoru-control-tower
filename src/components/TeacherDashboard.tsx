@@ -58,7 +58,8 @@ import {
   inferStudentSubjectPace,
   getSortedSubjectsByProgressRate,
   generateSlotsForSelectedSubjects,
-  getLatestUnitTestStatusForSubject
+  getLatestUnitTestStatusForSubject,
+  ensureMathEnglishUnitTests
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
@@ -2594,6 +2595,69 @@ export default function TeacherDashboard({
     setMilestonePlans(updatedPlans);
     await db.saveMilestonePlans(updatedPlans);
     loadData();
+  };
+
+  // タイムラインステップの個別除外（スキップ）機能
+  const handleExcludeLesson = async (unitId: string, unitName: string) => {
+    if (!selectedStudent) return;
+    if (confirm(`「${unitName}」をこの生徒のカリキュラムから除外（スキップ）しますか？`)) {
+      const currentExcluded = selectedStudent.excluded_lesson_ids || [];
+      const updatedExcluded = Array.from(new Set([...currentExcluded, unitId, String(unitId), unitName]));
+      const updatedStudent = {
+        ...selectedStudent,
+        excluded_lesson_ids: updatedExcluded
+      };
+      await db.saveStudent(updatedStudent);
+      setSelectedStudent(updatedStudent);
+
+      // 将来タスクの自動再割り当て（スキップされた授業を飛ばして再編成）
+      const allTasks = db.getLearningTasks().filter(t => t.student_id === selectedStudent.id);
+      const todayStr = scheduleDate;
+      const futureUncompletedTasks = allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
+
+      if (futureUncompletedTasks.length > 0) {
+        const allMasters = db.getCurriculumMasters();
+        const allUnits = db.getCurriculumUnits();
+        const latestMiniResults = db.getMiniTestResults();
+
+        futureUncompletedTasks.forEach(task => {
+          const sub = task.subject || (selectedStudent.grade?.startsWith('中') ? '数学' : '算数');
+          const rangeInfo = calculateLessonRangeForSlot({
+            subject: sub,
+            student: updatedStudent,
+            tasks: allTasks,
+            curriculumMasters: allMasters,
+            curriculumUnits: allUnits,
+            lessonProgressList: [],
+            miniTestResults: latestMiniResults
+          });
+
+          task.start_lesson_name = rangeInfo.start_lesson_name || task.start_lesson_name;
+          task.end_lesson_name = rangeInfo.end_lesson_name || task.end_lesson_name;
+          task.lesson_range = rangeInfo.lesson_range || task.lesson_range;
+        });
+
+        await db.saveLearningTasks(futureUncompletedTasks);
+      }
+
+      alert(`「${unitName}」をカリキュラムから除外しました。次回コマ割りからも自動でスキップされます。`);
+      await loadData();
+    }
+  };
+
+  // 除外リストのリセット・復元機能
+  const handleResetExcludedLessons = async () => {
+    if (!selectedStudent) return;
+    if (confirm('除外された授業・テストをすべてリセットし、カリキュラムに復元しますか？')) {
+      const updatedStudent = {
+        ...selectedStudent,
+        excluded_lesson_ids: []
+      };
+      await db.saveStudent(updatedStudent);
+      setSelectedStudent(updatedStudent);
+      alert('除外設定をクリアし、カリキュラムを復元しました。');
+      await loadData();
+    }
   };
 
   // --- 単元テスト マスタCRUD（マイルストーン連動） ---
@@ -5460,19 +5524,30 @@ export default function TeacherDashboard({
                   const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === targetSubject || (targetSubject === '算数' && u.subject === '数学'));
 
                   // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
-                  const timelineUnits = masterUnits.length > 0
+                  const rawTimelineUnits = masterUnits.length > 0
                     ? masterUnits.map((m, idx) => ({
                         id: m.id,
-                        name: `${m.unit_name} - ${m.lesson_name}`,
+                        name: m.item_type === 'unit_test' || m.lesson_name.includes('テスト') ? m.lesson_name : `${m.unit_name} - ${m.lesson_name}`,
                         unit_name: m.unit_name,
                         lesson_name: m.lesson_name,
                         grade: m.grade,
                         sequence_order: idx + 1,
                         sort_order: m.sort_order ?? (idx + 1),
                         subject: m.subject,
+                        item_type: m.item_type,
                         school_id: ''
                       }))
                     : fallbackUnits;
+
+                  const excludedIdsSet = new Set((selectedStudent.excluded_lesson_ids || []).map(id => String(id).trim()));
+
+                  // 除外されたアイテムをタイムラインから除外（STEP番号も再番号付け）
+                  const timelineUnits = rawTimelineUnits
+                    .filter(u => !excludedIdsSet.has(String(u.id)) && !excludedIdsSet.has(String((u as any).sort_order)) && !excludedIdsSet.has(u.name))
+                    .map((u, idx) => ({
+                      ...u,
+                      sequence_order: idx + 1
+                    }));
                   
                   const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
                   
@@ -5988,27 +6063,48 @@ export default function TeacherDashboard({
                               <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 🚀 {selectedSubject} 無段階学習タイムライン（ステップ別カリキュラム）
                               </h4>
-                              <button
-                                type="button"
-                                data-testid="timeline-add-unittest-btn"
-                                onClick={() => handleOpenAddUnitTestModal('', selectedStudent?.grade, targetSubject)}
-                                style={{
-                                  padding: '5px 12px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  backgroundColor: '#8b5cf6',
-                                  color: '#ffffff',
-                                  fontSize: '0.8rem',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  boxShadow: '0 2px 6px rgba(139, 92, 246, 0.3)'
-                                }}
-                              >
-                                ➕ 単元テストを追加
-                              </button>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {(selectedStudent.excluded_lesson_ids || []).length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={handleResetExcludedLessons}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      backgroundColor: '#ffffff',
+                                      color: '#64748b',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer'
+                                    }}
+                                    title="除外設定を解除して全項目を復元"
+                                  >
+                                    🔄 除外リセット ({(selectedStudent.excluded_lesson_ids || []).length}件除外中)
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  data-testid="timeline-add-unittest-btn"
+                                  onClick={() => handleOpenAddUnitTestModal('', selectedStudent?.grade, targetSubject)}
+                                  style={{
+                                    padding: '5px 12px',
+                                    borderRadius: '6px',
+                                    border: 'none',
+                                    backgroundColor: '#8b5cf6',
+                                    color: '#ffffff',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    boxShadow: '0 2px 6px rgba(139, 92, 246, 0.3)'
+                                  }}
+                                >
+                                  ➕ 単元テストを追加
+                                </button>
+                              </div>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -6102,7 +6198,7 @@ export default function TeacherDashboard({
                                       </span>
                                     </div>
 
-                                    <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                       {isCompleted ? (
                                         <span style={{ fontSize: '0.78rem', backgroundColor: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: '6px', fontWeight: 700 }}>
                                           ✓ 完了
@@ -6116,6 +6212,30 @@ export default function TeacherDashboard({
                                           ○ 予定
                                         </span>
                                       )}
+
+                                      <button
+                                        type="button"
+                                        data-testid="timeline-exclude-btn"
+                                        data-test-unit-id={unit.id}
+                                        onClick={() => handleExcludeLesson(unit.id, unit.name)}
+                                        style={{
+                                          padding: '3px 8px',
+                                          borderRadius: '4px',
+                                          border: '1px solid #cbd5e1',
+                                          backgroundColor: '#ffffff',
+                                          color: '#ef4444',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '2px',
+                                          transition: 'all 0.15s ease'
+                                        }}
+                                        title="この授業/テストをこの生徒のカリキュラムから除外(スキップ)"
+                                      >
+                                        🗑️ 除外
+                                      </button>
                                     </div>
                                   </div>
                                 );

@@ -60,6 +60,7 @@ export interface Student {
   last_completed_lesson_id?: string | null;
   last_completed_at?: string | null;
   completed_lesson_ids?: string[];
+  excluded_lesson_ids?: string[];
   weekly_sessions_count?: string | null;
   weekly_duration_minutes?: string | null;
   selected_days?: string[];
