@@ -1024,7 +1024,12 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {homeworkResults.map(hw => (
                   <div key={hw.id} style={{ borderBottom: '1px dashed #dcfce7', paddingBottom: '12px' }} data-testid={`homework-item-${hw.id}`}>
-                    <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap', fontWeight: 600 }}>
+                    <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap', fontWeight: 600, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                      {hw.subject && (
+                        <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#dcfce7', color: '#166534', fontWeight: 700 }}>
+                          {hw.subject}
+                        </span>
+                      )}
                       {hw.homework_content}
                     </p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

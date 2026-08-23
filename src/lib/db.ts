@@ -359,6 +359,7 @@ export interface HomeworkResult {
   student_id: string;
   date: string; // YYYY-MM-DD
   subject?: string; // 教科 (算数, 数学, 英語, etc.)
+  homework_type?: 'drill_2nd' | 'custom' | string; // 種別 (当日2回目演習 or 自由記述)
   homework_content: string;
   homework_deadline: string; // YYYY-MM-DD
   status: 'incomplete' | 'completed' | 'skipped';
@@ -558,6 +559,7 @@ export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<stri
   const status: HomeworkResult['status'] = validStatuses.includes(hw.status as any) ? (hw.status as HomeworkResult['status']) : 'incomplete';
   const target_scope = hw.target_scope ? String(hw.target_scope).trim() : 'individual';
   const subject = hw.subject ? String(hw.subject).trim() : undefined;
+  const homework_type = hw.homework_type ? String(hw.homework_type).trim() : undefined;
   const created_at = hw.created_at ? String(hw.created_at) : new Date().toISOString();
 
   return {
@@ -569,6 +571,7 @@ export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<stri
     status,
     target_scope,
     ...(subject ? { subject } : {}),
+    ...(homework_type ? { homework_type } : {}),
     created_at
   };
 }

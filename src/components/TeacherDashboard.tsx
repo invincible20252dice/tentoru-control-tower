@@ -270,7 +270,7 @@ export default function TeacherDashboard({
     passingLine?: string;
     targetScope?: string;
   }[]>([]);
-  const [todayHomeworks, setTodayHomeworks] = useState<{ id: string; content: string; deadline: string; targetScope?: string }[]>([]);
+  const [todayHomeworks, setTodayHomeworks] = useState<{ id: string; subject?: string; type?: 'drill_2nd' | 'custom' | string; content: string; deadline: string; targetScope?: string }[]>([]);
   const [miniTestSearchQuery, setMiniTestSearchQuery] = useState('');
   const [homeworkSearchQuery, setHomeworkSearchQuery] = useState('');
   const [showApiKeySetting, setShowApiKeySetting] = useState(false);
@@ -671,12 +671,22 @@ export default function TeacherDashboard({
           }
         });
 
-        setTodayTests(mappedTodayTests);
-
         // Load HomeworkResults (multiple) for today
         const hwResults = db.getHomeworkResults();
         const todayHwResults = hwResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
-        setTodayHomeworks(todayHwResults.map(r => ({ id: r.id, content: r.homework_content, deadline: r.homework_deadline })));
+        const mappedTodayHomeworks = todayHwResults.map(r => ({
+          id: r.id,
+          subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
+          type: (r.homework_type as any) || (r.homework_content.includes('2回目演習') ? 'drill_2nd' : 'custom'),
+          content: r.homework_content,
+          deadline: r.homework_deadline || getNextAttendanceDateForStudent(scheduleDate, freshSt),
+          targetScope: r.target_scope || 'individual'
+        }));
+
+        // コマ割り情報との自動連動（単元テストの反映 ＆ 算数・英語の2回目演習宿題自動抽出 ＆ 未選択空行のクリーンアップ）
+        const { updatedTests, updatedHomeworks } = syncAutoHomeworksAndTests(newPeriods, freshSt, scheduleDate, mappedTodayTests, mappedTodayHomeworks);
+        setTodayTests(updatedTests);
+        setTodayHomeworks(updatedHomeworks);
 
         // Load test records
         const allTests = db.getTestRecords();
@@ -2125,13 +2135,152 @@ export default function TeacherDashboard({
     updateTodayTestsState(todayTests.filter(t => t.id !== id));
   };
 
-  // 宿題の動的追加・更新・削除
-  const handleAddHomework = () => {
-    setTodayHomeworks([...todayHomeworks, { id: `temp-${Date.now()}-${Math.random()}`, content: '', deadline: '', targetScope: 'individual' }]);
+  // 通塾曜日に基づく次回通塾予定日の取得ヘルパー
+  const getNextAttendanceDateForStudent = (baseDateStr?: string, st?: Student | null): string => {
+    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
+    if (!st) return validBase;
+    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
+    const futureDates = generateAttendanceDates(validBase, days, 5).filter(d => d > validBase);
+    if (futureDates.length > 0) return futureDates[0];
+    const d = new Date(validBase);
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().split('T')[0];
   };
 
-  const handleUpdateHomework = (id: string, field: 'content' | 'deadline' | 'targetScope', val: string) => {
-    setTodayHomeworks(todayHomeworks.map(h => h.id === id ? { ...h, [field]: val } : h));
+  // コマ割り内容に基づき、「本日のテスト」および「宿題（算数・英語2回目演習）」を自動連動・セット
+  const getAutoDrillHomeworkText = (sub: string, periodsObj: { [key: number]: any }): string => {
+    if (!periodsObj) return '';
+    const isMath = sub === '算数' || sub === '数学';
+    const normSub = isMath ? (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数') : '英語';
+
+    const rangeTexts: string[] = [];
+    Object.values(periodsObj).forEach((sel: any) => {
+      if (!sel || (sel.subject !== sub && sel.subject !== normSub)) return;
+      const isTest = (sel.startLessonName && sel.startLessonName.includes('テスト')) ||
+                     (sel.endLessonName && sel.endLessonName.includes('テスト')) ||
+                     (sel.lessonRange && sel.lessonRange.includes('テスト'));
+      if (isTest) return;
+
+      if (sel.lessonRange) {
+        rangeTexts.push(sel.lessonRange);
+      } else if (sel.startLessonName) {
+        rangeTexts.push(formatLessonRange(sel.startLessonName, sel.endLessonName));
+      }
+    });
+
+    if (rangeTexts.length === 0) return '';
+    const startStr = rangeTexts[0].split(/〜|~|～/)[0]?.trim() || rangeTexts[0];
+    const endStr = rangeTexts[rangeTexts.length - 1].split(/〜|~|～/)[1]?.trim() || rangeTexts[rangeTexts.length - 1];
+    const combinedRange = startStr === endStr ? startStr : `${startStr} 〜 ${endStr}`;
+    return `${normSub}: ${combinedRange}（2回目演習）`;
+  };
+
+  const syncAutoHomeworksAndTests = (
+    currentPeriods: { [key: number]: any },
+    st: Student,
+    dateStr: string,
+    existingTests: typeof todayTests,
+    existingHomeworks: typeof todayHomeworks
+  ) => {
+    const nextAttDate = getNextAttendanceDateForStudent(dateStr, st);
+
+    // 1. 本日のテストの連動 (未選択空行のクリーンアップ付き)
+    const updatedTests = [...existingTests.filter(t => t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --')];
+    Object.values(currentPeriods).forEach((sel: any) => {
+      if (!sel || !sel.subject) return;
+      const isTest = (sel.startLessonName && sel.startLessonName.includes('テスト')) ||
+                     (sel.endLessonName && sel.endLessonName.includes('テスト')) ||
+                     (sel.lessonRange && sel.lessonRange.includes('テスト'));
+      if (isTest) {
+        const testContent = sel.lessonRange || sel.startLessonName || `${sel.subject} 単元確認テスト`;
+        const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+        const fullContent = testContent.includes(' - ') ? testContent : (sel.customTheme ? `${sel.customTheme} - ${cleanContent}` : testContent);
+        
+        const exists = updatedTests.some(t => t.content === fullContent || t.content === testContent);
+        if (!exists) {
+          updatedTests.push({
+            id: `auto-test-${sel.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+            subject: sel.subject,
+            testType: 'unit_test',
+            unitName: sel.customTheme || '',
+            content: fullContent,
+            passingLine: '80%以上',
+            targetScope: 'individual'
+          });
+        }
+      }
+    });
+
+    // 2. 算数・英語の2回目演習宿題の自動連動
+    const updatedHomeworks = [...existingHomeworks.filter(h => h.content && h.content.trim() !== '')];
+    const targetSubjects = ['算数', '数学', '英語'];
+
+    targetSubjects.forEach(sub => {
+      const isMath = sub === '算数' || sub === '数学';
+      const normalizedSub = isMath ? (st.grade?.startsWith('中') ? '数学' : '算数') : '英語';
+
+      const autoText = getAutoDrillHomeworkText(normalizedSub, currentPeriods);
+      if (autoText) {
+        const existingIdx = updatedHomeworks.findIndex(h => h.type === 'drill_2nd' && (h.subject === normalizedSub || h.content.startsWith(`${normalizedSub}:`)));
+        if (existingIdx !== -1) {
+          updatedHomeworks[existingIdx] = {
+            ...updatedHomeworks[existingIdx],
+            subject: normalizedSub,
+            type: 'drill_2nd',
+            content: autoText,
+            deadline: updatedHomeworks[existingIdx].deadline || nextAttDate
+          };
+        } else {
+          updatedHomeworks.push({
+            id: `auto-hw-${normalizedSub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+            subject: normalizedSub,
+            type: 'drill_2nd',
+            content: autoText,
+            deadline: nextAttDate,
+            targetScope: 'individual'
+          });
+        }
+      }
+    });
+
+    return { updatedTests, updatedHomeworks };
+  };
+
+  // 宿題の動的追加・更新・削除
+  const handleAddHomework = () => {
+    const nextDate = getNextAttendanceDateForStudent(scheduleDate, selectedStudent);
+    const defaultSub = selectedStudent?.grade?.startsWith('中') ? '数学' : '算数';
+    setTodayHomeworks([
+      ...todayHomeworks,
+      {
+        id: `temp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        subject: defaultSub,
+        type: 'custom',
+        content: '',
+        deadline: nextDate,
+        targetScope: 'individual'
+      }
+    ]);
+  };
+
+  const handleUpdateHomework = (id: string, field: 'content' | 'deadline' | 'targetScope' | 'subject' | 'type', val: string) => {
+    setTodayHomeworks(todayHomeworks.map(h => {
+      if (h.id !== id) return h;
+      const updated = { ...h, [field]: val };
+      if (field === 'type' && val === 'drill_2nd') {
+        const autoText = getAutoDrillHomeworkText(updated.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数'), periodSelections);
+        if (autoText) {
+          updated.content = autoText;
+        }
+      }
+      if (field === 'subject' && updated.type === 'drill_2nd') {
+        const autoText = getAutoDrillHomeworkText(val, periodSelections);
+        if (autoText) {
+          updated.content = autoText;
+        }
+      }
+      return updated;
+    }));
   };
 
   const handleRemoveHomework = (id: string) => {
@@ -4161,60 +4310,110 @@ export default function TeacherDashboard({
                         </button>
                       </div>
 
-                      {/* 宿題 (複数追加対応) */}
+                      {/* 宿題 (教科選択 ＋ 種別選択 ＋ 2回目演習自動生成/自由記述 ＋ 期限 ＋ 対象) */}
                       <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0f172a' }}>宿題:</label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>宿題:<span style={{ fontSize: '0.7rem', fontWeight: 500, color: '#475569', marginLeft: '4px' }}>(教科別 ＋ 当日授業2回目演習自動入力 ＋ 提出期限 ＋ 自由記述)</span></label>
+                          <span style={{ fontSize: '0.7rem', color: '#64748b' }}>自動生成・手動編集対応</span>
+                        </div>
                         {todayHomeworks.length === 0 ? (
                           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録された宿題はありません。</div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
-                            {todayHomeworks.map((hw) => (
-                              <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', background: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <textarea
-                                    value={hw.content}
-                                    onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
-                                    placeholder="宿題の内容を入力（例：ワークP24-25）"
-                                    className={styles.textarea}
-                                    style={{ height: '40px', fontSize: '0.8rem', flex: 1, padding: '4px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveHomework(hw.id)}
-                                    className={styles.btn}
-                                    style={{ width: 'auto', padding: '4px 8px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer', alignSelf: 'flex-start' }}
-                                  >
-                                    削除
-                                  </button>
-                                </div>
-                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>期限:</span>
-                                    <input
-                                      type="date"
-                                      value={hw.deadline}
-                                      onChange={e => handleUpdateHomework(hw.id, 'deadline', e.target.value)}
-                                      className={styles.input}
-                                      style={{ fontSize: '0.75rem', padding: '4px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', width: 'auto' }}
-                                    />
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>対象:</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+                            {todayHomeworks.map((hw) => {
+                              const hwSub = hw.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
+                              const hwType = hw.type || (hw.content.includes('2回目演習') ? 'drill_2nd' : 'custom');
+
+                              return (
+                                <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    {/* 教科選択 */}
                                     <select
-                                      value={hw.targetScope || 'individual'}
-                                      onChange={e => handleUpdateHomework(hw.id, 'targetScope', e.target.value)}
+                                      value={hwSub}
+                                      onChange={e => handleUpdateHomework(hw.id, 'subject', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.75rem', padding: '4px 6px', width: 'auto' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9' }}
                                     >
-                                      <option value="individual">個人 (この生徒のみ)</option>
-                                      <option value="grade">学年全員</option>
-                                      <option value="school">中学校 (同じ中学校の同学年)</option>
-                                      <option value="level">レベル (同じ学習レベルの同学年)</option>
+                                      <option value="算数">算数</option>
+                                      <option value="数学">数学</option>
+                                      <option value="英語">英語</option>
+                                      <option value="国語">国語</option>
+                                      <option value="理科">理科</option>
+                                      <option value="社会">社会</option>
+                                      <option value="共通">共通</option>
                                     </select>
+
+                                    {/* 種別選択 */}
+                                    <select
+                                      value={hwType}
+                                      onChange={e => handleUpdateHomework(hw.id, 'type', e.target.value)}
+                                      className={styles.select}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '175px' }}
+                                    >
+                                      <option value="drill_2nd">🔄 当日授業の2回目（演習）</option>
+                                      <option value="custom">✏️ 自由記述</option>
+                                    </select>
+
+                                    {/* 内容入力 / 自動設定表示 */}
+                                    {hwType === 'drill_2nd' ? (
+                                      <input
+                                        type="text"
+                                        value={hw.content}
+                                        onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
+                                        placeholder="当日授業の2回目（演習）範囲"
+                                        className={styles.input}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #3b82f6', backgroundColor: '#eff6ff', fontWeight: 600 }}
+                                      />
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        value={hw.content}
+                                        onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
+                                        placeholder="宿題の内容を入力（例：ワークP24-25, 漢字ノート）"
+                                        className={styles.input}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                      />
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveHomework(hw.id)}
+                                      className={styles.btn}
+                                      style={{ width: 'auto', padding: '4px 10px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+
+                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', paddingTop: '2px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>提出期限:</span>
+                                      <input
+                                        type="date"
+                                        value={hw.deadline || getNextAttendanceDateForStudent(scheduleDate, selectedStudent)}
+                                        onChange={e => handleUpdateHomework(hw.id, 'deadline', e.target.value)}
+                                        className={styles.input}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', width: 'auto' }}
+                                      />
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>対象範囲:</span>
+                                      <select
+                                        value={hw.targetScope || 'individual'}
+                                        onChange={e => handleUpdateHomework(hw.id, 'targetScope', e.target.value)}
+                                        className={styles.select}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto' }}
+                                      >
+                                        <option value="individual">個人 (この生徒のみ)</option>
+                                        <option value="grade">学年全員</option>
+                                        <option value="school">中学校 (同じ中学校の同学年)</option>
+                                        <option value="level">レベル (同じ学習レベルの同学年)</option>
+                                      </select>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                         <button

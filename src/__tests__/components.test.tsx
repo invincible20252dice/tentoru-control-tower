@@ -918,21 +918,23 @@ describe('UI Components Render & Interaction Tests', () => {
     const addHwBtn = screen.getByText('➕ 宿題を追加');
     fireEvent.click(addHwBtn);
     fireEvent.click(addHwBtn);
-    const hwContentInputs = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
-    // 親要素経由で2つの日付入力フィールドを取得
-    const hwDeadlineInputs = hwContentInputs[0].closest('div')!.parentElement!.parentElement!.querySelectorAll('input[type="date"]');
-    
+    const hwContentInputs = screen.getAllByPlaceholderText(/宿題の内容を入力/i);
+    const targetCard0 = hwContentInputs[0].closest('div')!.parentElement!;
+    const dateInput0 = targetCard0.querySelector('input[type="date"]')!;
     fireEvent.change(hwContentInputs[0], { target: { value: '数学ワークP45' } });
-    fireEvent.change(hwDeadlineInputs[0], { target: { value: '2026-06-25' } });
+    fireEvent.change(dateInput0, { target: { value: '2026-06-25' } });
+
+    const targetCard1 = hwContentInputs[1].closest('div')!.parentElement!;
+    const dateInput1 = targetCard1.querySelector('input[type="date"]')!;
     fireEvent.change(hwContentInputs[1], { target: { value: '削除する宿題' } });
-    fireEvent.change(hwDeadlineInputs[1], { target: { value: '2026-06-26' } });
+    fireEvent.change(dateInput1, { target: { value: '2026-06-26' } });
     
     const deleteHwBtn = hwContentInputs[1].closest('div')!.querySelector('button')!;
     fireEvent.click(deleteHwBtn); // 2つ目の宿題を削除
 
     const testInput = testInputs[0];
     const hwContentInput = hwContentInputs[0];
-    const hwDeadlineInput = hwDeadlineInputs[0];
+    const hwDeadlineInput = dateInput0;
 
     const saveBtn = screen.getByText('時間割コマ割りを保存');
     fireEvent.click(saveBtn);
@@ -946,7 +948,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(testResult?.test_content).toBe('数学小テスト（一次方程式）');
 
     const hwResults = db.getHomeworkResults();
-    const hwResult = hwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    const hwResult = hwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19' && r.homework_content.includes('数学ワークP45'));
     expect(hwResult).toBeDefined();
     expect(hwResult?.homework_content).toBe('数学ワークP45');
     expect(hwResult?.homework_deadline).toBe('2026-06-25');
@@ -1088,7 +1090,7 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     const finalHwResults = db.getHomeworkResults();
-    const finalHwResult = finalHwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+    const finalHwResult = finalHwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19' && r.homework_content.includes('数学ワークP45'));
     expect(finalHwResult?.status).toBe('completed');
 
     // 小テスト点数の更新テスト
@@ -1161,7 +1163,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(deleteTestBtn2); // 数学小テストを削除
 
     // 既存の宿題入力欄とその削除ボタンを取得
-    const hwContentInputs2 = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    const hwContentInputs2 = screen.getAllByPlaceholderText(/宿題の内容を入力/i);
     const deleteHwBtn2 = hwContentInputs2[0].closest('div')!.querySelector('button')!;
     fireEvent.click(deleteHwBtn2); // 数学ワークP45を削除
 
@@ -2549,7 +2551,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 宿題を追加
     const addHwBtn = screen.getByText('➕ 宿題を追加');
     fireEvent.click(addHwBtn);
-    const hwTextareas = screen.getAllByPlaceholderText('宿題の内容を入力（例：ワークP24-25）');
+    const hwTextareas = screen.getAllByPlaceholderText(/宿題の内容を入力/i);
     fireEvent.change(hwTextareas[0], { target: { value: '一括宿題A' } });
 
     // テストを追加
@@ -2616,7 +2618,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(testSelectsAll[0], { target: { value: 'grade' } });
     }
     
-    const hwSection = screen.getByText('宿題:').parentElement!;
+    const hwSection = (screen.getByText('宿題:').closest('div[style*="marginTop"]') || screen.getByText('宿題:').parentElement!.parentElement)!;
     const hwScopeSelect = hwSection.querySelector('select')!;
     fireEvent.change(hwScopeSelect, { target: { value: 'school' } });
 
@@ -2769,9 +2771,9 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(addHwBtn);
 
     await waitFor(() => {
-      expect(containerOrig.querySelectorAll('textarea[placeholder="宿題の内容を入力（例：ワークP24-25）"]').length).toBeGreaterThanOrEqual(3);
+      expect(containerOrig.querySelectorAll('input[placeholder*="宿題の内容を入力"]').length).toBeGreaterThanOrEqual(3);
     });
-    const hwInputs = containerOrig.querySelectorAll('textarea[placeholder="宿題の内容を入力（例：ワークP24-25）"]');
+    const hwInputs = containerOrig.querySelectorAll('input[placeholder*="宿題の内容を入力"]');
     hwInputs.forEach((input, index) => {
       fireEvent.change(input, { target: { value: `宿題内容-${index}` } });
     });
@@ -2785,7 +2787,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(testSelects[1], { target: { value: 'level' } });
     }
 
-    const hwSection = screen.getByText('宿題:').parentElement!;
+    const hwSection = (screen.getByText('宿題:').closest('div[style*="marginTop"]') || screen.getByText('宿題:').parentElement!.parentElement)!;
     await waitFor(() => {
       expect(hwSection.querySelectorAll('select').length).toBeGreaterThanOrEqual(3);
     });
