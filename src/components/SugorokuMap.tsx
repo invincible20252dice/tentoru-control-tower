@@ -170,34 +170,18 @@ export default function SugorokuMap({
        t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
     );
     
-    const isNodeCompleted = task?.status === 'completed' || 
-      task?.test_passed === true || 
+    const isNodeCompleted = 
       Boolean(student?.completed_lesson_ids && (
         student.completed_lesson_ids.includes(node.id) || 
         student.completed_lesson_ids.includes(String(node.id)) ||
-        student.completed_lesson_ids.map(String).includes(String(node.id)) ||
-        student.completed_lesson_ids.includes(node.name) ||
-        student.completed_lesson_ids.includes(String(node.sortOrder))
+        student.completed_lesson_ids.map(String).includes(String(node.id))
       )) ||
       tasks.some(t => t.completed_lesson_ids && (
         t.completed_lesson_ids.includes(node.id) || 
         t.completed_lesson_ids.includes(String(node.id)) ||
-        t.completed_lesson_ids.map(String).includes(String(node.id)) ||
-        t.completed_lesson_ids.includes(node.name) ||
-        t.completed_lesson_ids.includes(String(node.sortOrder))
+        t.completed_lesson_ids.map(String).includes(String(node.id))
       )) ||
-      tasks.some(t => (t.status === 'completed' || t.test_passed) && (
-        t.unit_id === node.id || 
-        t.start_lesson_id === node.id || 
-        t.end_lesson_id === node.id ||
-        String(t.unit_id) === String(node.id) || 
-        String(t.start_lesson_id) === String(node.id) || 
-        String(t.end_lesson_id) === String(node.id) ||
-        t.custom_unit_name?.includes(node.name) || 
-        t.lesson_range?.includes(node.name) || 
-        t.start_lesson_name === node.name || 
-        t.end_lesson_name === node.name
-      ));
+      (task && (task.unit_id === node.id || task.start_lesson_id === node.id || String(task.unit_id) === String(node.id) || String(task.start_lesson_id) === String(node.id)) && (task.status === 'completed' || task.test_passed === true));
 
     if (isNodeCompleted || task?.status === 'skipped') {
       continue;
@@ -293,34 +277,18 @@ export default function SugorokuMap({
             );
 
             const isSkipped = task?.status === 'skipped';
-            const isCompleted = task?.status === 'completed' || 
-              task?.test_passed === true || 
+            const isCompleted = 
               Boolean(student?.completed_lesson_ids && (
                 student.completed_lesson_ids.includes(node.id) || 
                 student.completed_lesson_ids.includes(String(node.id)) ||
-                student.completed_lesson_ids.map(String).includes(String(node.id)) ||
-                student.completed_lesson_ids.includes(node.name) ||
-                student.completed_lesson_ids.includes(String(node.sortOrder))
+                student.completed_lesson_ids.map(String).includes(String(node.id))
               )) ||
               tasks.some(t => t.completed_lesson_ids && (
                 t.completed_lesson_ids.includes(node.id) || 
                 t.completed_lesson_ids.includes(String(node.id)) ||
-                t.completed_lesson_ids.map(String).includes(String(node.id)) ||
-                t.completed_lesson_ids.includes(node.name) ||
-                t.completed_lesson_ids.includes(String(node.sortOrder))
+                t.completed_lesson_ids.map(String).includes(String(node.id))
               )) ||
-              tasks.some(t => (t.status === 'completed' || t.test_passed) && (
-                t.unit_id === node.id || 
-                t.start_lesson_id === node.id || 
-                t.end_lesson_id === node.id ||
-                String(t.unit_id) === String(node.id) || 
-                String(t.start_lesson_id) === String(node.id) || 
-                String(t.end_lesson_id) === String(node.id) ||
-                t.custom_unit_name?.includes(node.name) || 
-                t.lesson_range?.includes(node.name) || 
-                t.start_lesson_name === node.name || 
-                t.end_lesson_name === node.name
-              ));
+              (task && (task.unit_id === node.id || task.start_lesson_id === node.id || String(task.unit_id) === String(node.id) || String(task.start_lesson_id) === String(node.id)) && (task.status === 'completed' || task.test_passed === true));
             const isVideoWatched = task?.video_watched || isCompleted;
             const isTestPassed = task?.test_passed || isCompleted;
 

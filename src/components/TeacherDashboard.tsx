@@ -5772,7 +5772,7 @@ export default function TeacherDashboard({
                     db.getStudentLessonProgressList(selectedStudent.id).map(p => [String(p.lesson_id), p.status])
                   );
 
-                  // 完了済みタスク（task.status === 'completed'）から完了したレッスンIDを収集
+                  // 完了済みタスク（task.status === 'completed'）から完了したレッスンIDを収集（ステップID単位の完全一致のみ）
                   const completedTaskLessonIds = new Set<string>();
                   studentTasks.filter(t => t.status === 'completed' || t.test_passed).forEach(t => {
                     if (t.unit_id) completedTaskLessonIds.add(String(t.unit_id));
@@ -5780,37 +5780,6 @@ export default function TeacherDashboard({
                     if (t.end_lesson_id) completedTaskLessonIds.add(String(t.end_lesson_id));
                     if (Array.isArray(t.completed_lesson_ids)) {
                       t.completed_lesson_ids.forEach(cid => completedTaskLessonIds.add(String(cid)));
-                    }
-                    if (t.start_lesson_id && t.end_lesson_id) {
-                      const sIdx = timelineUnits.findIndex(u => String(u.id) === String(t.start_lesson_id) || String((u as any).sort_order) === String(t.start_lesson_id));
-                      const eIdx = timelineUnits.findIndex(u => String(u.id) === String(t.end_lesson_id) || String((u as any).sort_order) === String(t.end_lesson_id));
-                      if (sIdx !== -1 && eIdx !== -1) {
-                        const fromI = Math.min(sIdx, eIdx);
-                        const toI = Math.max(sIdx, eIdx);
-                        for (let i = fromI; i <= toI; i++) {
-                          completedTaskLessonIds.add(String(timelineUnits[i].id));
-                        }
-                      }
-                    }
-                    if (t.start_lesson_name || t.end_lesson_name || t.lesson_range) {
-                      const rangeStr = t.lesson_range || t.custom_unit_name || '';
-                      const sName = t.start_lesson_name || (rangeStr.includes('〜') || rangeStr.includes('~') || rangeStr.includes('～') ? rangeStr.split(/〜|~|～/)[0]?.trim() : '');
-                      const eName = t.end_lesson_name || (rangeStr.includes('〜') || rangeStr.includes('~') || rangeStr.includes('～') ? rangeStr.split(/〜|~|～/)[1]?.trim() : '');
-                      let sIdx = -1;
-                      let eIdx = -1;
-                      if (sName) {
-                        sIdx = timelineUnits.findIndex(u => u.name === sName || (u as any).lesson_name === sName || u.name.includes(sName) || sName.includes(u.name));
-                      }
-                      if (eName) {
-                        eIdx = timelineUnits.findIndex(u => u.name === eName || (u as any).lesson_name === eName || u.name.includes(eName) || eName.includes(u.name));
-                      }
-                      if (sIdx !== -1 && eIdx !== -1) {
-                        const fromI = Math.min(sIdx, eIdx);
-                        const toI = Math.max(sIdx, eIdx);
-                        for (let i = fromI; i <= toI; i++) {
-                          completedTaskLessonIds.add(String(timelineUnits[i].id));
-                        }
-                      }
                     }
                   });
 

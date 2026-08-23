@@ -36,12 +36,24 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return todayStr;
   };
 
+  const sanitizeCompletedLessonIds = (ids?: any[]): string[] => {
+    if (!Array.isArray(ids)) return [];
+    return Array.from(new Set(
+      ids
+        .filter(Boolean)
+        .map(String)
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.includes('単元確認テスト'))
+    ));
+  };
+
   const getLatestStudent = (): Student => {
     const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
+    const rawIds = dbSt?.completed_lesson_ids || student.completed_lesson_ids || [];
     return {
       ...(dbSt || {}),
       ...student,
-      completed_lesson_ids: dbSt?.completed_lesson_ids || student.completed_lesson_ids
+      completed_lesson_ids: sanitizeCompletedLessonIds(rawIds)
     };
   };
 
@@ -65,11 +77,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   useEffect(() => {
     setCurrentStudent(prev => {
       const latest = getLatestStudent();
-      const mergedCompleted = Array.from(new Set([
-        ...(prev?.completed_lesson_ids || []).map(String),
-        ...(latest?.completed_lesson_ids || []).map(String),
-        ...(student.completed_lesson_ids || []).map(String)
-      ]));
+      const mergedCompleted = sanitizeCompletedLessonIds([
+        ...(prev?.completed_lesson_ids || []),
+        ...(latest?.completed_lesson_ids || []),
+        ...(student.completed_lesson_ids || [])
+      ]);
       return {
         ...latest,
         ...student,
@@ -254,15 +266,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         const exact = list.findIndex(m => m.name === raw || m.fullTitle === raw);
         if (exact >= 0) return exact;
 
-        // 2. 正規化一致
+        // 2. 正規化完全一致
         const normMatch = list.findIndex(m => {
           const mNorm = cleanStr(m.name);
           const fNorm = cleanStr(m.fullTitle);
-          return mNorm === norm || fNorm === norm || 
-                 (mNorm.length >= 2 && norm.includes(mNorm)) || 
-                 (norm.length >= 2 && mNorm.includes(norm)) ||
-                 (fNorm.length >= 2 && norm.includes(fNorm)) ||
-                 (norm.length >= 2 && fNorm.includes(norm));
+          return mNorm === norm || fNorm === norm;
         });
         if (normMatch >= 0) return normMatch;
       }
