@@ -77,11 +77,14 @@ describe('Today Tests Deduplication & Completed Test Filtering Tests', () => {
     }
 
     // 検証:
-    // 1. 完了済みの「たしざん - 単元確認テスト」は絶対に自動セットされない
-    expect(screen.queryByText(/たしざん - 単元確認テスト/i)).not.toBeInTheDocument();
+    // 1. 本日のテスト欄に完了済みの「たしざん - 単元確認テスト」は選択（自動セット）されない
+    const todayTestsSection = screen.getByTestId('today-tests-container');
+    const selects = todayTestsSection.querySelectorAll('select');
+    const selectedValues = Array.from(selects).map(s => (s as HTMLSelectElement).value);
+    expect(selectedValues.some(v => v.includes('たしざん'))).toBe(false);
 
-    // 2. 当日コマ割りの未完了テスト「ひきざん - 単元確認テスト」が1件だけ正しく表示される
-    expect(screen.getAllByText(/ひきざん - 単元確認テスト/i).length).toBeGreaterThan(0);
+    // 2. 当日コマ割りの未完了テスト「ひきざん - 単元確認テスト」が1件だけ正しく表示・選択される
+    expect(selectedValues.some(v => v.includes('ひきざん'))).toBe(true);
   });
 
   it('clears today tests to 0 items when schedule has no unit test', async () => {
