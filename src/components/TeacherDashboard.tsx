@@ -2314,71 +2314,64 @@ export default function TeacherDashboard({
       lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
     });
 
-    // 単元完了時の自動単元テストセット判定
-    const autoUnitTests: typeof todayTests = [];
-    const subjectsToCheck = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
-      ? freshSt.selected_subjects
-      : (freshSt.grade?.startsWith('中') ? ['数学', '英語', '理科', '社会', '国語'] : ['算数', '国語', '英語']);
-
-    for (const sub of subjectsToCheck) {
-      const subMasters = curriculumMastersList.filter(m => 
-        m.subject === sub || (sub === '算数' && m.subject === '数学') || (sub === '数学' && m.subject === '算数')
-      ).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-
-      const nextUncompleted = findNextUncompletedLessonForSubject({
-        student: freshSt,
-        subject: sub,
-        tasks: freshTasks,
-        curriculumMasters: curriculumMastersList,
-        curriculumUnits: allCurriculumUnits,
-        lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
-      });
-
-      if (nextUncompleted.masterIndex >= 0 && nextUncompleted.masterIndex < subMasters.length) {
-        const nextMaster = subMasters[nextUncompleted.masterIndex];
-        if (nextMaster && (nextMaster.item_type === 'unit_test' || nextMaster.lesson_name.includes('テスト') || nextMaster.lesson_name.includes('確認'))) {
-          const testLabel = nextMaster.unit_name ? `${nextMaster.unit_name} ${nextMaster.lesson_name}` : nextMaster.lesson_name;
-          const exists = todayTests.some(t => t.content === testLabel) || autoUnitTests.some(t => t.content === testLabel);
-          if (!exists) {
-            autoUnitTests.push({
-              id: `auto-unit-test-${sub}-${Date.now()}`,
-              subject: sub,
-              testType: 'unit_test',
-              unitName: nextMaster.unit_name || '',
-              content: testLabel,
-              passingLine: '80%以上',
-              targetScope: 'individual'
-            });
-          }
+    // 各コマの単元テスト To 固定チェック & 範囲補正
+    Object.keys(optimizedPeriods).forEach(pKey => {
+      const p = parseInt(pKey);
+      const sel = optimizedPeriods[p];
+      if (sel && sel.startLessonName) {
+        const isUnitTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
+        if (isUnitTest) {
+          sel.endLessonId = sel.startLessonId;
+          sel.endLessonName = sel.startLessonName;
+          sel.lessonRange = sel.startLessonName;
         }
       }
-    }
+    });
 
-    if (autoUnitTests.length > 0) {
-      const mergedTests = [...todayTests, ...autoUnitTests];
-      updateTodayTestsState(mergedTests);
-      for (const t of autoUnitTests) {
-        await db.saveMiniTestResult({
-          id: t.id,
-          student_id: freshSt.id,
-          date: scheduleDate,
-          subject: t.subject,
-          test_type: 'unit_test',
-          unit_name: t.unitName,
-          test_content: t.content,
-          score: null,
-          passing_line: t.passingLine,
-          target_scope: 'individual',
-          created_at: new Date().toISOString()
-        });
+    // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出
+    const extractedTodayTests: typeof todayTests = [];
+    Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
+      if (!sel || !sel.subject || !sel.startLessonName) return;
+      const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
+      if (isTest) {
+        const testContent = sel.lessonRange || sel.startLessonName;
+        const exists = extractedTodayTests.some(t => t.subject === sel.subject && t.content === testContent);
+        if (!exists) {
+          extractedTodayTests.push({
+            id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
+            subject: sel.subject,
+            testType: 'unit_test',
+            unitName: sel.startLessonName.split(' ')[0] || sel.startLessonName,
+            content: testContent,
+            passingLine: '80%以上',
+            targetScope: 'individual'
+          });
+        }
       }
+    });
+
+    // 「-- 単元テストマスタから選択 --」などの空行を完全除外
+    const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
+
+    // DBへの保存 (本日のテスト)
+    await db.deleteMiniTestResultByDate(freshSt.id, scheduleDate);
+    for (const t of cleanedTests) {
+      await db.saveMiniTestResult({
+        id: t.id,
+        student_id: freshSt.id,
+        date: scheduleDate,
+        subject: t.subject,
+        test_type: 'unit_test',
+        unit_name: t.unitName,
+        test_content: t.content,
+        score: null,
+        passing_line: t.passingLine,
+        target_scope: 'individual',
+        created_at: new Date().toISOString()
+      });
     }
 
-    // コマ割り設定画面へ即座に反映
-    setPeriodSelections(optimizedPeriods);
-    setPeriodCount(loadedPeriodCount);
-
-    // 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
+    // 3. 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
     const newDayTasks: LearningTask[] = [];
     Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
       const p = parseInt(pStr);
@@ -2409,12 +2402,40 @@ export default function TeacherDashboard({
     });
 
     if (newDayTasks.length > 0) {
-      // 対象日付の既存未完了タスクを除去し、最適化された新タスクで更新
-      const otherDayTasks = freshTasks.filter(t => !(t.student_id === freshSt.id && t.scheduled_date === scheduleDate));
-      await db.saveLearningTasks([...otherDayTasks, ...newDayTasks]);
+      await db.deleteLearningTasksForDate(freshSt.id, scheduleDate);
+      await db.saveLearningTasks(newDayTasks);
     }
 
-    // 2. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
+    // 4. 自動宿題 (2回目演習) の生成
+    const autoHwsText = getAutoDrillHomeworkText(freshSt.grade?.startsWith('中') ? '数学' : '算数', optimizedPeriods);
+    const autoHomeworks: typeof todayHomeworks = [];
+    if (autoHwsText) {
+      const hwDate = getNextAttendanceDateForStudent(scheduleDate, freshSt);
+      autoHomeworks.push({
+        id: `hw-auto-${freshSt.id}-${scheduleDate}-1`,
+        subject: freshSt.grade?.startsWith('中') ? '数学' : '算数',
+        type: 'drill_2nd',
+        content: autoHwsText,
+        deadline: hwDate,
+        targetScope: 'individual'
+      });
+
+      await db.deleteHomeworkResultsByDate(freshSt.id, scheduleDate);
+      await db.saveHomeworkResult({
+        id: autoHomeworks[0].id,
+        student_id: freshSt.id,
+        date: scheduleDate,
+        subject: autoHomeworks[0].subject,
+        homework_type: 'drill_2nd',
+        homework_content: autoHwsText,
+        homework_deadline: hwDate,
+        status: 'incomplete',
+        target_scope: 'individual',
+        created_at: new Date().toISOString()
+      });
+    }
+
+    // 5. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
     const futureDates: string[] = generateAttendanceDates(
       scheduleDate,
       freshSt.selected_days || ['tuesday', 'friday'],
@@ -2436,6 +2457,12 @@ export default function TeacherDashboard({
     await db.saveLearningTasks(updatedTasks);
     await db.saveStudent(updatedStudent);
 
+    // 6. フロントエンドフォームステートの即時強制更新（上書き再レンダリング）
+    setPeriodSelections(optimizedPeriods);
+    setPeriodCount(loadedPeriodCount);
+    setTodayTests(cleanedTests);
+    setTodayHomeworks(autoHomeworks);
+
     // 日付フォーマット
     const dObj = new Date(scheduleDate);
     const formattedDate = !isNaN(dObj.getTime())
@@ -2452,7 +2479,6 @@ export default function TeacherDashboard({
       }
     }
 
-    // 反映
     setSelectedStudent(updatedStudent);
     loadData();
   };

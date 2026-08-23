@@ -2052,6 +2052,30 @@ class DatabaseService {
     }
   }
 
+  public async deleteMiniTestResultByDate(studentId: string, date: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('mini_test_results').delete().eq('student_id', studentId).eq('date', date);
+      if (error) console.warn('deleteMiniTestResultByDate supabase error:', error);
+      return;
+    } else {
+      let list = this.getMiniTestResults();
+      list = list.filter(r => !(r.student_id === studentId && r.date === date));
+      this.saveMockData('mini_test_results', list);
+    }
+  }
+
+  public async deleteHomeworkResultsByDate(studentId: string, date: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('homework_results').delete().eq('student_id', studentId).eq('date', date);
+      if (error) console.warn('deleteHomeworkResultsByDate supabase error:', error);
+      return;
+    } else {
+      let list = this.getHomeworkResults();
+      list = list.filter(r => !(r.student_id === studentId && r.date === date));
+      this.saveMockData('homework_results', list);
+    }
+  }
+
   // 13. HomeworkResults CRUD
   public getHomeworkResults(): HomeworkResult[] {
     return this.getMockData('homework_results', []);

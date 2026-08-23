@@ -1752,15 +1752,22 @@ export function generateSlotsForSelectedSubjects(params: {
       lessonProgressList
     });
 
+    const isUnitTest = range.start_lesson_name?.includes('単元確認テスト') || range.start_lesson_name?.includes('単元テスト');
+    const startId = range.start_lesson_id || '';
+    const startName = range.start_lesson_name || '';
+    const endId = isUnitTest ? startId : (range.end_lesson_id || startId);
+    const endName = isUnitTest ? startName : (range.end_lesson_name || startName);
+    const rangeText = isUnitTest ? startName : (range.lesson_range || startName);
+
     slots[p] = {
       subject: sub,
-      unitId: range.start_lesson_id || '',
+      unitId: startId,
       customTheme: '',
-      startLessonId: range.start_lesson_id || '',
-      endLessonId: range.end_lesson_id || range.start_lesson_id || '',
-      startLessonName: range.start_lesson_name || '',
-      endLessonName: range.end_lesson_name || range.start_lesson_name || '',
-      lessonRange: range.lesson_range || ''
+      startLessonId: startId,
+      endLessonId: endId,
+      startLessonName: startName,
+      endLessonName: endName,
+      lessonRange: rangeText
     };
   }
 
