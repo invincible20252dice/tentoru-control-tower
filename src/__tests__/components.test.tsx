@@ -685,7 +685,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(dateInput, { target: { value: '2026-06-20' } });
 
     // Change Timetable selections and notes (Line 825, 840 cover)
-    const timetableContainer = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer = screen.getByTestId('timetable-planner-container');
     
     // Check initial select elements count is 2 (student's default period_count is 2)
     let periodSelects = Array.from(timetableContainer.querySelectorAll('select')).filter(s => s.getAttribute('data-testid') !== 'apply-scope-select');
@@ -2533,7 +2533,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(dateInput, { target: { value: '2026-06-21' } });
 
     // コマ割り設定
-    const timetableContainer = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer = screen.getByTestId('timetable-planner-container');
     const periodSelects = timetableContainer.querySelectorAll('select');
     fireEvent.change(periodSelects[0], { target: { value: '数学' } });
     
@@ -3013,7 +3013,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(testThemeInputs2[1], { target: { value: '小テスト2' } });
     }
 
-    const timetableContainer2 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer2 = screen.getByTestId('timetable-planner-container');
     const periodSelect2 = timetableContainer2.querySelector('select');
     if (periodSelect2) {
       fireEvent.change(periodSelect2, { target: { value: 'テスト' } });
@@ -3041,7 +3041,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
 
-    const timetableContainer3 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer3 = screen.getByTestId('timetable-planner-container');
     const periodSelect3 = timetableContainer3.querySelector('select');
     if (periodSelect3) {
       fireEvent.change(periodSelect3, { target: { value: '自由記述' } });
@@ -3223,7 +3223,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(studentItem4);
     fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
 
-    const timetableContainer4 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer4 = screen.getByTestId('timetable-planner-container');
     const periodSelects4 = timetableContainer4.querySelectorAll('select');
     const periodSelect4 = periodSelects4[0];
     fireEvent.change(periodSelect4, { target: { value: 'テスト' } });
@@ -3265,7 +3265,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(studentItem5);
     fireEvent.click(screen.getAllByText('学習計画・コマ割り')[0]);
 
-    const timetableContainer5 = screen.getByText('コマ割り設定 (標準2コマ / 最大10コマ)').parentElement!;
+    const timetableContainer5 = screen.getByTestId('timetable-planner-container');
     const periodSelect5 = timetableContainer5.querySelector('select')!;
     fireEvent.change(periodSelect5, { target: { value: 'テスト' } });
 
@@ -4398,15 +4398,10 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(scheduleMenuBtn);
     });
 
-    // 4. Verify that Tab 1 (学習計画・コマ割り) shows the start position summary box
+    // 4. Verify that Tab 1 (学習計画・コマ割り) hides the start position summary box as requested
     await waitFor(() => {
-      expect(screen.getByTestId('start-line-summary-bar')).toBeInTheDocument();
+      expect(screen.queryByTestId('start-line-summary-bar')).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/教科別スタートライン/)).toBeInTheDocument();
-    expect(screen.getByText(/数学:/)).toBeInTheDocument();
-    expect(screen.getAllByText(/文字と式/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/英語:/)).toBeInTheDocument();
-    expect(screen.getAllByText(/一般動詞/).length).toBeGreaterThan(0);
 
     // 5. Verify dropdown options have the start line marker
     const period1SubjectSelect = screen.getByTestId('period-subject-select-1');

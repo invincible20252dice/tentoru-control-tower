@@ -642,35 +642,6 @@ export default function TeacherDashboard({
           targetScope: r.target_scope || 'individual'
         }));
 
-        // もし本日のテスト結果がまだ未登録の場合、過去の不合格単元テスト（再テスト）を自動セット
-        const subjectsToCheck = freshSt.selected_subjects && freshSt.selected_subjects.length > 0
-          ? freshSt.selected_subjects
-          : [(freshSt.grade?.startsWith('中') ? '数学' : '算数')];
-
-        subjectsToCheck.forEach(sub => {
-          const status = getLatestUnitTestStatusForSubject({
-            studentId: freshSt.id,
-            subject: sub,
-            miniTestResults: miniResults
-          });
-
-          if (status.hasFailedUnitTest && status.failedUnitTest) {
-            const failedTest = status.failedUnitTest;
-            const existsInToday = mappedTodayTests.some(t => t.content === failedTest.test_content || (failedTest.unit_name && t.unitName === failedTest.unit_name));
-            if (!existsInToday) {
-              mappedTodayTests.push({
-                id: `retest-${freshSt.id}-${sub}-${Date.now()}`,
-                subject: sub,
-                testType: 'unit_test',
-                unitName: failedTest.unit_name || '',
-                content: failedTest.test_content.startsWith('【再テスト】') ? failedTest.test_content : `【再テスト】${failedTest.test_content}`,
-                passingLine: failedTest.passing_line || '80%以上',
-                targetScope: 'individual'
-              });
-            }
-          }
-        });
-
         // Load HomeworkResults (multiple) for today
         const hwResults = db.getHomeworkResults();
         const todayHwResults = hwResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
@@ -3861,8 +3832,7 @@ export default function TeacherDashboard({
 
                   {/* Timetable planner */}
                   <div className={styles.schedulerGrid}>
-                    <div>
-                      <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 700 }}>コマ割り設定 (標準2コマ / 最大10コマ)</h4>
+                    <div data-testid="timetable-planner-container">
                       <HorizontalDatePicker 
                         selectedDate={scheduleDate} 
                         onChangeDate={setScheduleDate} 
@@ -3923,80 +3893,13 @@ export default function TeacherDashboard({
                         })()}
                       </div>
                       
-                      {/* 教科別スタートライン（基準単元）設定状況 */}
-                      {(() => {
-                        const isElem = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
-                        const subjects = isElem ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語'];
-                        const startInfos = subjects.map(sub => {
-                          const sId = getStudentStartUnitIdForSubject(selectedStudent, sub);
-                          const u = sId ? allCurriculumUnits.find(unit => unit.id === sId) : null;
-                          const cm = (!u && sId) ? curriculumMastersList.find(m => m.id === sId || String(m.sort_order) === String(sId)) : null;
-                          const unitName = u ? u.name : (cm ? (cm.unit_name ? `${cm.unit_name} - ${cm.lesson_name}` : cm.lesson_name) : '最初から開始');
-                          return { subject: sub, unitName, isSet: Boolean(u || cm) };
-                        });
-
-                        return (
-                          <div 
-                            data-testid="start-line-summary-bar"
-                            style={{ 
-                              marginBottom: '16px', 
-                              padding: '10px 14px', 
-                              backgroundColor: '#f0fdf4', 
-                              borderRadius: '8px', 
-                              border: '1px solid #bbf7d0', 
-                              display: 'flex', 
-                              flexDirection: 'column', 
-                              gap: '6px' 
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span>⭐</span> 教科別スタートライン (基準単元連動中)
-                              </span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <button
-                                  type="button"
-                                  data-testid="open-branch-ai-rules-modal-btn"
-                                  onClick={handleOpenBranchAIRulesModal}
-                                  style={{
-                                    fontSize: '0.72rem',
-                                    padding: '4px 8px',
-                                    backgroundColor: '#4f46e5',
-                                    color: '#ffffff',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    fontWeight: 700,
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  ⚙️ 校舎別AI自動設定ルール
-                                </button>
-                                <span style={{ fontSize: '0.72rem', color: '#15803d' }}>
-                                  ※「基本情報・属性設定」で変更すると、スケジュール・コマ割りが自動最適化されます
-                                </span>
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                              {startInfos.map(info => (
-                                <span 
-                                  key={info.subject}
-                                  style={{
-                                    fontSize: '0.75rem',
-                                    padding: '3px 8px',
-                                    borderRadius: '6px',
-                                    backgroundColor: info.isSet ? '#dcfce7' : '#ffffff',
-                                    color: info.isSet ? '#14532d' : '#64748b',
-                                    border: info.isSet ? '1px solid #86efac' : '1px solid #e2e8f0',
-                                    fontWeight: 600
-                                  }}
-                                >
-                                  <strong>{info.subject}:</strong> {info.isSet ? `★ ${info.unitName}` : '最初から開始'}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
+                      {/* 教科別スタートライン（基準単元）設定状況 - 非表示 */}
+                      <button
+                        type="button"
+                        data-testid="open-branch-ai-rules-modal-btn"
+                        onClick={handleOpenBranchAIRulesModal}
+                        style={{ display: 'none' }}
+                      />
 
                       <div className={styles.timetableSetup}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
