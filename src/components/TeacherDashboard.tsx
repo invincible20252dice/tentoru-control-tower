@@ -632,15 +632,23 @@ export default function TeacherDashboard({
         // Load MiniTestResults (multiple) for today
         const miniResults = db.getMiniTestResults();
         const todayMiniResults = miniResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
-        let mappedTodayTests = todayMiniResults.map(r => ({
-          id: r.id,
-          subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
-          testType: r.test_type || (r.test_content.includes('単元') ? 'unit_test' : 'custom'),
-          unitName: r.unit_name || '',
-          content: r.test_content,
-          passingLine: r.passing_line || '',
-          targetScope: r.target_scope || 'individual'
-        }));
+        let mappedTodayTests = todayMiniResults
+          .filter(r => r.test_content && r.test_content.trim() !== '' && !r.test_content.includes('-- 単元テストマスタから選択 --'))
+          .filter(r => {
+            if (r.test_type === 'unit_test') {
+              return !isUnitTestCompleted(freshSt, r.test_content, r.subject);
+            }
+            return true;
+          })
+          .map(r => ({
+            id: r.id,
+            subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
+            testType: r.test_type || (r.test_content.includes('単元') ? 'unit_test' : 'custom'),
+            unitName: r.unit_name || '',
+            content: r.test_content,
+            passingLine: r.passing_line || '',
+            targetScope: r.target_scope || 'individual'
+          }));
 
         // Load HomeworkResults (multiple) for today
         const hwResults = db.getHomeworkResults();
@@ -2150,6 +2158,37 @@ export default function TeacherDashboard({
     return `${normSub}: ${combinedRange}（2回目演習）`;
   };
 
+  // 完了済み単元テストの除外判定
+  const isUnitTestCompleted = (st: Student, testTitleOrName: string, subject?: string): boolean => {
+    if (!st || !testTitleOrName) return false;
+    const completed = st.completed_lesson_ids || [];
+
+    // 1. completed_lesson_ids に直接テキストまたは類似名が含まれているか
+    if (completed.some(idOrName => idOrName && (idOrName === testTitleOrName || testTitleOrName.includes(idOrName) || idOrName.includes(testTitleOrName)))) {
+      return true;
+    }
+
+    // 2. カリキュラムマスタで同一単元・レッスンIDが completed_lesson_ids に含まれているか
+    const masters = db.getCurriculumMasters();
+    const matchingMaster = masters.find(m => 
+      m.item_type === 'unit_test' && 
+      (testTitleOrName.includes(m.lesson_name) || testTitleOrName.includes(m.unit_name) || (m.subject === subject && testTitleOrName.includes(m.unit_name)))
+    );
+    if (matchingMaster && completed.includes(matchingMaster.id)) {
+      return true;
+    }
+
+    // 3. DBの mini_test_results で過去に合格(score >= 80 または passed === true)しているか
+    const miniResults = db.getMiniTestResults().filter(r => r.student_id === st.id);
+    const passedMini = miniResults.some(r => 
+      (r.passed === true || (r.score !== null && r.score >= 80)) &&
+      (r.test_content === testTitleOrName || testTitleOrName.includes(r.test_content) || r.test_content.includes(testTitleOrName))
+    );
+    if (passedMini) return true;
+
+    return false;
+  };
+
   const syncAutoHomeworksAndTests = (
     currentPeriods: { [key: number]: any },
     st: Student,
@@ -2159,29 +2198,35 @@ export default function TeacherDashboard({
   ) => {
     const nextAttDate = getNextAttendanceDateForStudent(dateStr, st);
 
-    // 1. 本日のテストの連動 (未選択空行のクリーンアップ付き)
-    const updatedTests = [...existingTests.filter(t => t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --')];
+    // 1. 本日のテストの連動 (State完全クリア ➔ 未完了単元テストのみ1件抽出・デデュープ)
+    // 手動追加のカスタムテスト（未完了かつ内容あり）のみ保持し、自動生成テストは完全に再評価
+    const updatedTests: typeof todayTests = existingTests.filter(t => t.testType === 'custom' && t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --');
+
     Object.values(currentPeriods).forEach((sel: any) => {
       if (!sel || !sel.subject) return;
-      const isTest = (sel.startLessonName && sel.startLessonName.includes('テスト')) ||
-                     (sel.endLessonName && sel.endLessonName.includes('テスト')) ||
-                     (sel.lessonRange && sel.lessonRange.includes('テスト'));
+      const isTest = (sel.startLessonName && (sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト'))) ||
+                     (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト'))) ||
+                     (sel.lessonRange && (sel.lessonRange.includes('単元確認テスト') || sel.lessonRange.includes('単元テスト')));
+      
       if (isTest) {
         const testContent = sel.lessonRange || sel.startLessonName || `${sel.subject} 単元確認テスト`;
         const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
         const fullContent = testContent.includes(' - ') ? testContent : (sel.customTheme ? `${sel.customTheme} - ${cleanContent}` : testContent);
         
-        const exists = updatedTests.some(t => t.content === fullContent || t.content === testContent);
-        if (!exists) {
-          updatedTests.push({
-            id: `auto-test-${sel.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-            subject: sel.subject,
-            testType: 'unit_test',
-            unitName: sel.customTheme || '',
-            content: fullContent,
-            passingLine: '80%以上',
-            targetScope: 'individual'
-          });
+        // 完了済み（合格済み）テストの完全除外チェック
+        if (!isUnitTestCompleted(st, fullContent, sel.subject) && !isUnitTestCompleted(st, cleanContent, sel.subject)) {
+          const exists = updatedTests.some(t => t.subject === sel.subject && (t.content === fullContent || t.content === testContent || t.content === cleanContent));
+          if (!exists) {
+            updatedTests.push({
+              id: `auto-test-${sel.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+              subject: sel.subject,
+              testType: 'unit_test',
+              unitName: sel.customTheme || sel.startLessonName?.split(' ')[0] || '',
+              content: fullContent,
+              passingLine: '80%以上',
+              targetScope: 'individual'
+            });
+          }
         }
       }
     });
@@ -2299,29 +2344,34 @@ export default function TeacherDashboard({
       }
     });
 
-    // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出
+    // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出 (State完全リセット＆完了済みテスト除外)
     const extractedTodayTests: typeof todayTests = [];
     Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
       if (!sel || !sel.subject || !sel.startLessonName) return;
-      const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
+      const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト');
       if (isTest) {
         const testContent = sel.lessonRange || sel.startLessonName;
-        const exists = extractedTodayTests.some(t => t.subject === sel.subject && t.content === testContent);
-        if (!exists) {
-          extractedTodayTests.push({
-            id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
-            subject: sel.subject,
-            testType: 'unit_test',
-            unitName: sel.startLessonName.split(' ')[0] || sel.startLessonName,
-            content: testContent,
-            passingLine: '80%以上',
-            targetScope: 'individual'
-          });
+        const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+        
+        // 完了済み(合格済み)テストの除外判定
+        if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
+          const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
+          if (!exists) {
+            extractedTodayTests.push({
+              id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
+              subject: sel.subject,
+              testType: 'unit_test',
+              unitName: sel.startLessonName.split(' ')[0] || sel.startLessonName,
+              content: testContent,
+              passingLine: '80%以上',
+              targetScope: 'individual'
+            });
+          }
         }
       }
     });
 
-    // 「-- 単元テストマスタから選択 --」などの空行を完全除外
+    // 「-- 単元テストマスタから選択 --」などの空行および無効行を完全除外
     const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
 
     // DBへの保存 (本日のテスト)
