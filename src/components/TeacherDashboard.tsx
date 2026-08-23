@@ -1438,7 +1438,7 @@ export default function TeacherDashboard({
 
       for (const student of targetStudents) {
         // 1. 同日の既存タスクを DB (Supabase) およびローカルストレージから完全に削除（完全クリア）
-        await db.deleteLearningTasksByDate(student.id, scheduleDate);
+        await db.deleteLearningTasksForDate(student.id, scheduleDate);
 
         const newDailyTasks: LearningTask[] = [];
         let hasCustomTimetableUnit = false; // カリキュラム以外の授業がコマ割りに入ったかどうか
@@ -1545,6 +1545,7 @@ export default function TeacherDashboard({
 
         // 3. 有効なコマ割りタスクのみを新規登録（再登録）
         if (newDailyTasks.length > 0) {
+          await db.deleteLearningTasksForDate(student.id, scheduleDate);
           await db.saveLearningTasks(newDailyTasks);
         }
 

@@ -1712,6 +1712,22 @@ class DatabaseService {
     }
   }
 
+  // 指定生徒・指定日付のコマ割り学習タスクを一括削除（安全な削除 ➔ 再登録用）
+  public async deleteLearningTasksForDate(studentId: string, date: string): Promise<void> {
+    if (!studentId || !date) return;
+    let list = this.getLearningTasks();
+    list = list.filter(t => !(t.student_id === studentId && t.scheduled_date === date));
+    this.saveMockData('learning_tasks', list);
+
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('learning_tasks').delete().eq('student_id', studentId).eq('scheduled_date', date);
+      } catch (err) {
+        console.warn('deleteLearningTasksForDate error:', err);
+      }
+    }
+  }
+
   // 4. LearningTasks CRUD
   public async saveLearningTasks(tasks: LearningTask[]): Promise<LearningTask[]> {
     if (!tasks || tasks.length === 0) return [];
@@ -1727,12 +1743,48 @@ class DatabaseService {
     this.saveMockData('learning_tasks', list);
 
     if (!this.isMockMode && this.supabase) {
-      const dbPayloads = tasks.map(t => sanitizeLearningTaskForDB(t));
+      // 同一単元の複数コマで (student_id, unit_id) ユニーク制約エラーが起きないよう unit_id を個別一意化
+      const unitKeyCounts = new Map<string, number>();
+      const dbPayloads = sanitizedTasks.map((t, idx) => {
+        const raw = sanitizeLearningTaskForDB(t);
+        const groupKey = `${raw.student_id}_${raw.scheduled_date}_${raw.unit_id}`;
+        const count = (unitKeyCounts.get(groupKey) || 0) + 1;
+        unitKeyCounts.set(groupKey, count);
+
+        if (count > 1 || !raw.unit_id) {
+          const suffix = raw.period ? `_p${raw.period}` : `_${count}_${idx}`;
+          raw.unit_id = `${raw.unit_id || 'unit'}${suffix}`;
+        }
+        return raw;
+      });
+
       const { data, error } = await this.supabase.from('learning_tasks').upsert(dbPayloads).select();
       if (error) {
-        // If error is about missing column completed_lesson_ids or similar, fallback by stripping non-standard columns
-        if (error.message?.includes('completed_lesson_ids') || error.code === '42703' || (error as any).details?.includes('completed_lesson_ids') || error.code === 'PGRST204') {
-          const fallbackPayloads = dbPayloads.map(({ completed_lesson_ids, ...rest }) => rest);
+        // もしユニーク制約エラー (23505 または learning_tasks_student_id_unit_id_key) や completed_lesson_ids が原因の場合、一括削除＋強制一意化でリトライ
+        if (
+          error.code === '23505' ||
+          error.message?.includes('learning_tasks_student_id_unit_id_key') ||
+          error.message?.includes('completed_lesson_ids') ||
+          error.code === '42703' ||
+          (error as any).details?.includes('completed_lesson_ids') ||
+          error.code === 'PGRST204'
+        ) {
+          // 強制一意化ペイロードの準備
+          const fallbackPayloads = dbPayloads.map((p, idx) => {
+            const { completed_lesson_ids, ...rest } = p;
+            return {
+              ...rest,
+              unit_id: `${rest.unit_id}_p${rest.period || idx}_${Math.random().toString(36).substring(2, 5)}`
+            };
+          });
+
+          // 旧レコードの安全削除
+          const sampleStId = sanitizedTasks[0].student_id;
+          const sampleDate = sanitizedTasks[0].scheduled_date;
+          if (sampleStId && sampleDate) {
+            await this.supabase.from('learning_tasks').delete().eq('student_id', sampleStId).eq('scheduled_date', sampleDate);
+          }
+
           const retryRes = await this.supabase.from('learning_tasks').upsert(fallbackPayloads).select();
           if (!retryRes.error) {
             return (retryRes.data || sanitizedTasks) as LearningTask[];
