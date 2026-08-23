@@ -1987,15 +1987,18 @@ export default function TeacherDashboard({
 
     const startLesson = findLessonById(startId, currentConfig.subject);
     const startName = startLesson?.name || '';
+    const isUnitTestNode = startName.includes('単元確認テスト') || startName.includes('単元テスト') || (startLesson as any)?.unit_type === 'unit_test';
     
-    // 終了授業が未設定または開始授業より前なら、終了目標授業も自動計算
+    // 開始が単元確認テストの場合は、終了目標も同一の単元確認テストに強制セット（同一コマ内に新単元授業を混在させない）
     const branchRules = db.getBranchAIRules(selectedStudent?.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
     const lessonsForSubj = getLessonsForSubject(currentConfig.subject);
     const startIdx = lessonsForSubj.findIndex(l => l.id === startId);
     let endId = currentConfig.endLessonId;
     let endIdx = lessonsForSubj.findIndex(l => l.id === endId);
 
-    if (!endId || endIdx < startIdx) {
+    if (isUnitTestNode) {
+      endId = startId;
+    } else if (!endId || endIdx < startIdx) {
       const paceInfo = inferStudentSubjectPace({
         student: selectedStudent,
         subject: currentConfig.subject,

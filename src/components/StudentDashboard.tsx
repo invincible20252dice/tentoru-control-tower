@@ -660,6 +660,44 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     await db.saveLearningTasks([updated]);
     await db.saveStudent(updatedStudent);
 
+    // 合格時：次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
+    const isUnitTestTask = task.custom_unit_name?.includes('確認テスト') || task.custom_unit_name?.includes('単元テスト') || task.start_lesson_name?.includes('確認テスト');
+    if (isUnitTestTask) {
+      const nextAttendanceDate = getNextAttendanceDate(currentDateStr, updatedStudent);
+      const completedSet = new Set((updatedStudent.completed_lesson_ids || []).map(String));
+      const isElem = updatedStudent.grade.startsWith('小') || updatedStudent.grade === '園児';
+      const activeSubj = task.subject || (isElem ? '算数' : '数学');
+      
+      const candidateMasters = curriculumMasters
+        .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      
+      const nextNewMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
+      if (nextNewMaster) {
+        const nextTitle = nextNewMaster.unit_name ? `${nextNewMaster.unit_name} - ${nextNewMaster.lesson_name}` : nextNewMaster.lesson_name;
+        const nextNewTask: LearningTask = {
+          id: `task-nextunit-${updatedStudent.id}-${nextAttendanceDate}-1`,
+          student_id: updatedStudent.id,
+          unit_id: nextNewMaster.id,
+          scheduled_date: nextAttendanceDate,
+          period: 1,
+          status: 'unstarted',
+          video_watched: false,
+          test_passed: false,
+          subject: activeSubj,
+          custom_unit_name: nextTitle,
+          start_lesson_id: nextNewMaster.id,
+          end_lesson_id: nextNewMaster.id,
+          start_lesson_name: nextTitle,
+          end_lesson_name: nextTitle,
+          lesson_range: nextTitle,
+          created_at: new Date().toISOString()
+        };
+        await db.deleteLearningTasksForDate(updatedStudent.id, nextAttendanceDate);
+        await db.saveLearningTasks([nextNewTask]);
+      }
+    }
+
     const log: LearningLog = {
       id: `log-${Date.now()}`,
       student_id: student.id,
@@ -718,26 +756,136 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     loadData();
   };
 
-  // 3. テスト不合格時のアクション
+  // 次回通塾予定日の計算ヘルパー
+  const getNextAttendanceDate = (baseDateStr: string, st: Student): string => {
+    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
+    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
+    
+    const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+    const targetDayNums = days.map(d => dayMap[d.toLowerCase()]).filter(n => n !== undefined);
+    
+    const d = new Date(validBase);
+    for (let i = 1; i <= 14; i++) {
+      const future = new Date(d.getTime() + i * 24 * 60 * 60 * 1000);
+      if (targetDayNums.includes(future.getDay())) {
+        return future.toISOString().split('T')[0];
+      }
+    }
+    const fallback = new Date(d.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return fallback.toISOString().split('T')[0];
+  };
+
+  // 3. テスト不合格時のアクション（新単元ブロック ＆ 次回通塾日に再テスト自動予約）
   const handleFailTest = async (task: LearningTask) => {
-    const updated = {
+    const updatedTask: LearningTask = {
       ...task,
-      status: 'failed' as const
+      status: 'failed' as const,
+      test_passed: false
     };
-    await db.saveLearningTasks([updated]);
+    await db.saveLearningTasks([updatedTask]);
+
+    const unit = units.find(u => u.id === task.unit_id);
+    const subjectName = task.subject || (unit ? unit.subject : 'その他');
+    const unitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
+    const reTestContent = `${subjectName}: ${unitName}（再テスト）`;
+
+    const nextAttendanceDate = getNextAttendanceDate(currentDateStr, currentStudent);
+
+    // 1. 次回通塾日の「本日のテスト」に再テストを自動セット
+    const reTestResult: MiniTestResult = {
+      id: `mini-retest-${currentStudent.id}-${nextAttendanceDate}-${Date.now()}`,
+      student_id: currentStudent.id,
+      date: nextAttendanceDate,
+      subject: subjectName,
+      test_type: 'unit_test',
+      unit_name: unitName,
+      test_content: reTestContent,
+      score: null,
+      passing_line: task.passing_line || '80%以上',
+      target_scope: 'individual',
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(reTestResult);
+
+    // 2. 次回通塾日のコマ割りに「開始: 再テスト 〜 終了: 再テスト」を自動セット (新単元授業を割り当てない)
+    const reTestTask: LearningTask = {
+      id: `task-retest-${currentStudent.id}-${nextAttendanceDate}-1`,
+      student_id: currentStudent.id,
+      unit_id: task.unit_id || `retest-${Date.now()}`,
+      scheduled_date: nextAttendanceDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: subjectName,
+      custom_unit_name: reTestContent,
+      start_lesson_id: task.start_lesson_id || task.unit_id,
+      end_lesson_id: task.end_lesson_id || task.unit_id,
+      start_lesson_name: `${unitName}（再テスト）`,
+      end_lesson_name: `${unitName}（再テスト）`,
+      lesson_range: `${unitName}（再テスト）`,
+      created_at: new Date().toISOString()
+    };
+    await db.deleteLearningTasksForDate(currentStudent.id, nextAttendanceDate);
+    await db.saveLearningTasks([reTestTask]);
 
     const log: LearningLog = {
       id: `log-${Date.now()}`,
       student_id: student.id,
       unit_id: task.unit_id,
       log_type: 'test_result',
-      score: 40, // 不合格点
+      score: 40,
       total_questions: 10,
       incorrect_genres: ['計算ミス', '符号の誤り'],
       created_at: new Date().toISOString()
     };
     await db.addLearningLog(log);
 
+    showToast(`⚠️ テスト不合格のため次回通塾日（${nextAttendanceDate}）に【再テスト】を自動予約しました。次回合格を目指しましょう！`);
+    if (typeof window !== 'undefined') {
+      window.alert(`不合格のため、新単元への進行はブロックされます。\n次回通塾日（${nextAttendanceDate}）に再テスト（${reTestContent}）を自動セットしました。`);
+    }
+
+    loadData();
+  };
+
+  // 4. 当日全コマ完了後の「🚀 次の単元を先取り学習する」アクション
+  const handleStartAdvanceLearning = async () => {
+    const isElem = currentStudent.grade.startsWith('小') || currentStudent.grade === '園児';
+    const activeSubj = isElem ? '算数' : '数学';
+    
+    const completedSet = new Set((currentStudent.completed_lesson_ids || []).map(String));
+    const candidateMasters = curriculumMasters
+      .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    
+    const nextMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
+    
+    const advanceSubject = nextMaster?.subject || activeSubj;
+    const advanceTitle = nextMaster ? (nextMaster.unit_name ? `${nextMaster.unit_name} - ${nextMaster.lesson_name}` : nextMaster.lesson_name) : '新単元先取り学習';
+    
+    const nextPeriod = todayTasks.length + 1;
+    const advanceTask: LearningTask = {
+      id: `task-advance-${currentStudent.id}-${currentDateStr}-${Date.now()}`,
+      student_id: currentStudent.id,
+      unit_id: nextMaster?.id || `advance-${Date.now()}`,
+      scheduled_date: currentDateStr,
+      period: nextPeriod,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: advanceSubject,
+      custom_unit_name: `🚀 先取り: ${advanceTitle}`,
+      start_lesson_id: nextMaster?.id || '',
+      end_lesson_id: nextMaster?.id || '',
+      start_lesson_name: advanceTitle,
+      end_lesson_name: advanceTitle,
+      lesson_range: advanceTitle,
+      created_at: new Date().toISOString()
+    };
+
+    await db.saveLearningTasks([advanceTask]);
+    showToast(`🚀 【先取り学習開始】${advanceSubject}: ${advanceTitle} を今日のタスクに追加しました！`);
     loadData();
   };
 
@@ -1066,7 +1214,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             </div>
           ) : (
             <div className={styles.timetable}>
-              {todayTasks.map(task => {
+              {(() => {
+                const uniqueTaskMap = new Map<string, LearningTask>();
+                todayTasks.forEach(task => {
+                  const key = task.period != null ? `p-${task.period}` : task.id;
+                  if (!uniqueTaskMap.has(key)) {
+                    uniqueTaskMap.set(key, task);
+                  }
+                });
+                return Array.from(uniqueTaskMap.values()).sort((a, b) => (a.period || 0) - (b.period || 0));
+              })().map(task => {
                 const unit = units.find(u => u.id === task.unit_id);
                 const subjectName = task.subject || (unit ? unit.subject : 'その他');
                 const themeName = task.lesson_range 
@@ -1226,6 +1383,25 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   </div>
                 );
               })}
+              {todayTasks.length > 0 && todayTasks.every(t => t.status === 'completed') && (
+                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #10b981', textAlign: 'center' }}>
+                  <h4 style={{ margin: '0 0 8px 0', color: '#065f46', fontSize: '1rem', fontWeight: 800 }}>
+                    🎉 本日の学習予定をすべて完了しました！お疲れ様でした！
+                  </h4>
+                  <p style={{ margin: '0 0 12px 0', color: '#047857', fontSize: '0.8rem' }}>
+                    時間に余力がある場合は、次の単元を先取りしてさらにステップアップしましょう！
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleStartAdvanceLearning}
+                    className={styles.btn}
+                    style={{ width: 'auto', padding: '8px 20px', background: '#10b981', color: '#fff', fontSize: '0.85rem', fontWeight: 700, borderRadius: '6px', border: 'none', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
+                    data-testid="advance-learning-btn"
+                  >
+                    🚀 次の単元を先取り学習する（新単元 STEP 1〜）
+                  </button>
+                </div>
+              )}
               {/* コマの最後に1つだけ今日の業務連絡を表示 */}
               {todayTasks.some(t => t.office_note) && (
                 <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '6px', borderLeft: '4px solid #d97706', fontSize: '0.85rem', color: '#78350f' }}>
