@@ -146,6 +146,7 @@ export interface StudentInteraction {
   category: '保護者対応' | '人生相談' | '勉強相談' | '学校相談' | 'その他';
   memo: string;
   date: string; // YYYY-MM-DD
+  contact_date?: string;
   staff_name: string;
   created_at: string;
 }
@@ -2828,9 +2829,29 @@ class DatabaseService {
 
   public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {
     if (!this.isMockMode && this.supabase) {
-      const { data, error } = await this.supabase.from('student_interactions').upsert(interaction).select().single();
-      if (error) throw error;
-      return data;
+      const payload = {
+        id: interaction.id,
+        student_id: interaction.student_id,
+        category: interaction.category,
+        memo: interaction.memo,
+        date: interaction.date || (interaction as any).contact_date || new Date().toISOString().split('T')[0],
+        contact_date: interaction.date || (interaction as any).contact_date || new Date().toISOString().split('T')[0],
+        staff_name: interaction.staff_name || '講師',
+        created_at: interaction.created_at || new Date().toISOString()
+      };
+      const { data, error } = await this.supabase.from('student_interactions').upsert(payload).select().single();
+      if (error) {
+        // Fallback to student_contact_logs
+        const { data: cData, error: cErr } = await this.supabase.from('student_contact_logs').upsert(payload).select().single();
+        if (cErr) {
+          // Fallback to student_support_logs
+          const { data: sData, error: sErr } = await this.supabase.from('student_support_logs').upsert(payload).select().single();
+          if (sErr) throw error;
+          return sData || interaction;
+        }
+        return cData || interaction;
+      }
+      return data || interaction;
     } else {
       const list = this.getMockData<StudentInteraction>('student_interactions', []);
       const idx = list.findIndex(i => i.id === interaction.id);

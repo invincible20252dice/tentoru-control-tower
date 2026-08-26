@@ -1199,16 +1199,17 @@ export default function TeacherDashboard({
         category: interactionCategory,
         memo: interactionMemo,
         date: interactionDate,
+        contact_date: interactionDate,
         staff_name: staffName.split(' ')[0], // 苗字部分だけを表示する
         created_at: new Date().toISOString()
       };
       
       await db.saveStudentInteraction(newInteraction);
       setInteractionMemo('');
-      // リロード
+      // 履歴一覧の即時リフレッシュ
       const listInteractions = db.getStudentInteractions(selectedStudent.id);
       setInteractions(listInteractions);
-      alert('対応内容を登録しました。');
+      alert('✅ 対応内容を登録しました');
     } catch (err) {
       console.error(err);
       alert('登録中にエラーが発生しました。');
@@ -7874,96 +7875,10 @@ export default function TeacherDashboard({
                   {/* Right Column: Interaction Logs & Test Records */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     
-                    {/* Test Results Summary Card */}
+                    {/* Interactions Card (Top Section) */}
                     <div className={styles.card}>
                       <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
-                        <span>直近のテスト・模試実績</span>
-                      </div>
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                        
-                        {/* Regular Test card */}
-                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>定期テスト（最新）</h4>
-                          {(() => {
-                            const latestRegularTest = testRecordsList
-                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'regular_test')
-                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-                            return latestRegularTest ? (
-                              <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestRegularTest.subject}</span>
-                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#4f46e5' }}>{latestRegularTest.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
-                                </div>
-                                {latestRegularTest.rank_change && (
-                                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', gap: '8px' }}>
-                                    <span>順位変動: 
-                                      <span style={{ 
-                                        color: latestRegularTest.rank_change === 'up' ? '#10b981' : latestRegularTest.rank_change === 'down' ? '#ef4444' : '#64748b',
-                                        fontWeight: 'bold',
-                                        marginLeft: '4px'
-                                      }}>
-                                        {latestRegularTest.rank_change === 'up' ? '▲ 上昇' : latestRegularTest.rank_change === 'down' ? '▼ 下降' : 'キープ'}
-                                      </span>
-                                    </span>
-                                    {latestRegularTest.rate_change && (
-                                      <span>({latestRegularTest.rate_change > 0 ? '+' : ''}{latestRegularTest.rate_change}%)</span>
-                                    )}
-                                  </div>
-                                )}
-                                {latestRegularTest.next_target_score && (
-                                  <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '6px' }}>
-                                    次回目標: <strong>{latestRegularTest.next_target_score}点</strong>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>定期テスト記録がありません。</span>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Mock Exam card */}
-                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>模試実績（最新）</h4>
-                          {(() => {
-                            const latestMockExam = testRecordsList
-                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'mock_exam')
-                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-                            return latestMockExam ? (
-                              <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestMockExam.subject}</span>
-                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#059669' }}>{latestMockExam.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
-                                </div>
-                                {latestMockExam.target_school_code && (
-                                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                    志望校: <strong>{schoolCodes.find(c => c.code === latestMockExam.target_school_code)?.name || latestMockExam.target_school_code}</strong>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>模試の記録がありません。</span>
-                            );
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* Learning Status */}
-                      <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#eef2f6', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                        <h4 style={{ margin: '0 0 6px 0', fontSize: '0.8rem', color: '#334155', fontWeight: 'bold' }}>現在の学習状況</h4>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#475569' }}>
-                          <span>完了単元数: <strong>{studentTasks.filter(t => t.status === 'completed').length}</strong> / {studentTasks.length}</span>
-                          <span>進捗率: <strong>{studentTasks.length > 0 ? Math.round((studentTasks.filter(t => t.status === 'completed').length / studentTasks.length) * 100) : 0}%</strong></span>
-                          <span>アラート失敗数: <strong style={{ color: studentTasks.filter(t => t.status === 'failed').length > 0 ? '#ef4444' : '#475569' }}>{studentTasks.filter(t => t.status === 'failed').length}</strong></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Interactions Card */}
-                    <div className={styles.card}>
-                      <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
-                        <span>対応入力</span>
+                        <span>📝 対応入力</span>
                       </div>
 
                       <form onSubmit={handleAddInteraction} style={{ marginBottom: '24px' }}>
@@ -8069,6 +7984,92 @@ export default function TeacherDashboard({
                         </div>
                       </div>
 
+                    </div>
+
+                    {/* Test Results Summary Card (Bottom Section) */}
+                    <div className={styles.card}>
+                      <div className={styles.cardTitle} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+                        <span>📊 直近のテスト・模試実績</span>
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        
+                        {/* Regular Test card */}
+                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>定期テスト（最新）</h4>
+                          {(() => {
+                            const latestRegularTest = testRecordsList
+                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'regular_test')
+                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                            return latestRegularTest ? (
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestRegularTest.subject}</span>
+                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#4f46e5' }}>{latestRegularTest.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
+                                </div>
+                                {latestRegularTest.rank_change && (
+                                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', gap: '8px' }}>
+                                    <span>順位変動: 
+                                      <span style={{ 
+                                        color: latestRegularTest.rank_change === 'up' ? '#10b981' : latestRegularTest.rank_change === 'down' ? '#ef4444' : '#64748b',
+                                        fontWeight: 'bold',
+                                        marginLeft: '4px'
+                                      }}>
+                                        {latestRegularTest.rank_change === 'up' ? '▲ 上昇' : latestRegularTest.rank_change === 'down' ? '▼ 下降' : 'キープ'}
+                                      </span>
+                                    </span>
+                                    {latestRegularTest.rate_change && (
+                                      <span>({latestRegularTest.rate_change > 0 ? '+' : ''}{latestRegularTest.rate_change}%)</span>
+                                    )}
+                                  </div>
+                                )}
+                                {latestRegularTest.next_target_score && (
+                                  <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '6px' }}>
+                                    次回目標: <strong>{latestRegularTest.next_target_score}点</strong>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>定期テスト記録がありません。</span>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Mock Exam card */}
+                        <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h4 style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#475569', fontWeight: 'bold' }}>模試実績（最新）</h4>
+                          {(() => {
+                            const latestMockExam = testRecordsList
+                              .filter(r => r.student_id === selectedStudent.id && r.record_type === 'mock_exam')
+                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                            return latestMockExam ? (
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+                                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#1e293b' }}>{latestMockExam.subject}</span>
+                                  <span style={{ fontSize: '1.8rem', fontWeight: 'extrabold', color: '#059669' }}>{latestMockExam.score}<span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: '#64748b' }}> 点</span></span>
+                                </div>
+                                {latestMockExam.target_school_code && (
+                                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    志望校: <strong>{schoolCodes.find(c => c.code === latestMockExam.target_school_code)?.name || latestMockExam.target_school_code}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>模試の記録がありません。</span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Learning Status */}
+                      <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#eef2f6', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                        <h4 style={{ margin: '0 0 6px 0', fontSize: '0.8rem', color: '#334155', fontWeight: 'bold' }}>現在の学習状況</h4>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#475569' }}>
+                          <span>完了単元数: <strong>{studentTasks.filter(t => t.status === 'completed').length}</strong> / {studentTasks.length}</span>
+                          <span>進捗率: <strong>{studentTasks.length > 0 ? Math.round((studentTasks.filter(t => t.status === 'completed').length / studentTasks.length) * 100) : 0}%</strong></span>
+                          <span>アラート失敗数: <strong style={{ color: studentTasks.filter(t => t.status === 'failed').length > 0 ? '#ef4444' : '#475569' }}>{studentTasks.filter(t => t.status === 'failed').length}</strong></span>
+                        </div>
+                      </div>
                     </div>
 
                   </div>

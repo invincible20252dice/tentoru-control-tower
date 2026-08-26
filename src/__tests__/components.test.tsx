@@ -2189,7 +2189,7 @@ describe('UI Components Render & Interaction Tests', () => {
     });
 
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('対応内容を登録しました。');
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('対応内容を登録しました'));
     });
     alertMock.mockClear();
 
