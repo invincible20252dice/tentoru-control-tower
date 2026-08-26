@@ -2822,9 +2822,77 @@ class DatabaseService {
     if (studentId) {
       return list
         .filter(i => i.student_id === studentId)
-        .sort((a, b) => new Date(b.date || (b as any).contact_date).getTime() - new Date(a.date || (a as any).contact_date).getTime());
+        .sort((a, b) => new Date(b.date || (b as any).contact_date || 0).getTime() - new Date(a.date || (a as any).contact_date || 0).getTime());
     }
     return list;
+  }
+
+  public async fetchStudentInteractions(studentId: string): Promise<StudentInteraction[]> {
+    if (!this.isMockMode && this.supabase) {
+      // Step 1: student_contact_logs
+      try {
+        const { data, error } = await this.supabase
+          .from('student_contact_logs')
+          .select('*')
+          .eq('student_id', studentId)
+          .order('contact_date', { ascending: false });
+        if (!error && data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id || `si-${studentId}-${Date.now()}`,
+            student_id: d.student_id,
+            category: d.category || d.contact_type || 'その他',
+            memo: d.memo || d.content || '',
+            date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            contact_date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            staff_name: d.staff_name || '担当講師',
+            created_at: d.created_at || new Date().toISOString()
+          }));
+        }
+      } catch (e) {}
+
+      // Step 2: student_support_logs
+      try {
+        const { data, error } = await this.supabase
+          .from('student_support_logs')
+          .select('*')
+          .eq('student_id', studentId)
+          .order('contact_date', { ascending: false });
+        if (!error && data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id || `si-${studentId}-${Date.now()}`,
+            student_id: d.student_id,
+            category: d.category || d.contact_type || 'その他',
+            memo: d.memo || d.content || '',
+            date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            contact_date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            staff_name: d.staff_name || '担当講師',
+            created_at: d.created_at || new Date().toISOString()
+          }));
+        }
+      } catch (e) {}
+
+      // Step 3: student_interactions
+      try {
+        const { data, error } = await this.supabase
+          .from('student_interactions')
+          .select('*')
+          .eq('student_id', studentId)
+          .order('date', { ascending: false });
+        if (!error && data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id || `si-${studentId}-${Date.now()}`,
+            student_id: d.student_id,
+            category: d.category || 'その他',
+            memo: d.memo || '',
+            date: d.date || d.contact_date || new Date().toISOString().split('T')[0],
+            contact_date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            staff_name: d.staff_name || '担当講師',
+            created_at: d.created_at || new Date().toISOString()
+          }));
+        }
+      } catch (e) {}
+    }
+    return this.getStudentInteractions(studentId);
   }
 
   public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {

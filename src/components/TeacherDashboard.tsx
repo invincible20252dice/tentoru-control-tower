@@ -405,6 +405,7 @@ export default function TeacherDashboard({
         // Load interactions & personality options for student detail
         const listInteractions = db.getStudentInteractions(freshSt.id);
         setInteractions(listInteractions);
+        db.fetchStudentInteractions(freshSt.id).then(res => setInteractions(res)).catch(console.error);
         const listPersonalities = db.getPersonalityOptions();
         setPersonalityOptions(listPersonalities);
         const listTeachers = db.getTeacherOptions();
@@ -1205,10 +1206,19 @@ export default function TeacherDashboard({
       };
       
       await db.saveStudentInteraction(newInteraction);
+
+      // 1. 入力欄のクリア
       setInteractionMemo('');
-      // 履歴一覧の即時リフレッシュ (登録された新しいデータを先頭に反映)
-      const listInteractions = db.getStudentInteractions(selectedStudent.id);
-      setInteractions(listInteractions);
+
+      // 2. 履歴リストの即時更新（UIへ即座に先頭追加）
+      setInteractions(prev => [newInteraction, ...prev.filter(i => i.id !== newInteraction.id)]);
+
+      // 3. 最新データを非同期再取得して完全反映
+      const listInteractions = await db.fetchStudentInteractions(selectedStudent.id);
+      if (listInteractions && listInteractions.length > 0) {
+        setInteractions(listInteractions);
+      }
+
       alert('✅ 対応内容を登録しました');
     } catch (error: any) {
       const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error, Object.getOwnPropertyNames(error)) : String(error));
