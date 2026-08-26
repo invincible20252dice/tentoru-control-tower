@@ -1192,7 +1192,7 @@ export default function TeacherDashboard({
     e.preventDefault();
     if (!selectedStudent || !interactionMemo.trim()) return;
     try {
-      const staffName = editForm.teacher_in_charge || '福田';
+      const staffName = editForm.teacher_in_charge || selectedStudent.teacher_in_charge || '塾長';
       const newInteraction: StudentInteraction = {
         id: `si-${selectedStudent.id}-${Date.now()}`,
         student_id: selectedStudent.id,
@@ -1200,7 +1200,7 @@ export default function TeacherDashboard({
         memo: interactionMemo,
         date: interactionDate,
         contact_date: interactionDate,
-        staff_name: staffName.split(' ')[0], // 苗字部分だけを表示する
+        staff_name: staffName.split(' ')[0], // 苗字部分を表示
         created_at: new Date().toISOString()
       };
       
