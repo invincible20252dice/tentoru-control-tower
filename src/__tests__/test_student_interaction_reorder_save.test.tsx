@@ -23,6 +23,7 @@ describe('Student Detail Interaction Log Reorder & Safe Save Tests', () => {
       teacher_in_charge: '福田 尚弘'
     };
     await db.saveStudent(student);
+    await db.addTeacherOption('佐藤 健');
   });
 
   it('places interaction input card at top, saves contact log safely with contact_date, clears input, and refreshes history list', async () => {
@@ -76,5 +77,61 @@ describe('Student Detail Interaction Log Reorder & Safe Save Tests', () => {
     expect(savedInteractions.length).toBeGreaterThan(0);
     expect(savedInteractions[0].memo).toBe('保護者へ次回定期テスト対策の面談を実施しました。');
     expect(savedInteractions[0].category).toBe('保護者対応');
+  });
+
+  it('supports selecting staff name dropdown, editing interaction, and deleting interaction', async () => {
+    window.confirm = vi.fn().mockReturnValue(true);
+    window.alert = vi.fn();
+
+    render(<TeacherDashboard onBackToPortal={vi.fn()} />);
+
+    // 山田 太郎カードをクリック
+    const studentCard = screen.getByText(/山田 太郎/i);
+    await act(async () => {
+      fireEvent.click(studentCard);
+    });
+
+    // 「生徒情報」タブを開く
+    const studentDetailTab = screen.getByRole('button', { name: /生徒情報/i });
+    await act(async () => {
+      fireEvent.click(studentDetailTab);
+    });
+
+    // 担当講師ドロップダウンのテスト
+    const staffSelect = screen.getByLabelText('対応者 (講師)') as HTMLSelectElement;
+    expect(staffSelect).toBeInTheDocument();
+
+    const memoTextarea = screen.getByPlaceholderText('具体的な対応メモを入力...') as HTMLTextAreaElement;
+    const submitBtn = screen.getByRole('button', { name: '対応内容を登録' });
+
+    await act(async () => {
+      fireEvent.change(staffSelect, { target: { value: '佐藤 健' } });
+      fireEvent.change(memoTextarea, { target: { value: 'テスト対策学習指導メモ' } });
+      fireEvent.click(submitBtn);
+    });
+
+    // バッジに選択した講師名が表示されること
+    expect(screen.getByText('佐藤')).toBeInTheDocument();
+    expect(screen.getByText('テスト対策学習指導メモ')).toBeInTheDocument();
+
+    // 編集ボタンを押下してインライン編集をテスト
+    const editBtn = screen.getAllByTestId(/^edit-interaction-/)[0];
+    await act(async () => {
+      fireEvent.click(editBtn);
+    });
+
+    const editSaveBtn = screen.getByRole('button', { name: '保存' });
+    await act(async () => {
+      fireEvent.click(editSaveBtn);
+    });
+    expect(window.alert).toHaveBeenCalledWith('✅ 対応履歴を更新しました');
+
+    // 削除ボタンを押下して削除をテスト
+    const deleteBtn = screen.getAllByTestId(/^delete-interaction-/)[0];
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    expect(window.alert).toHaveBeenCalledWith('✅ 対応履歴を削除しました');
   });
 });

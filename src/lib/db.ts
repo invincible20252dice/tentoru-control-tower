@@ -3028,8 +3028,28 @@ class DatabaseService {
 
   public async deleteStudentInteraction(id: string): Promise<void> {
     if (!this.isMockMode && this.supabase) {
-      const { error } = await this.supabase.from('student_interactions').delete().eq('id', id);
-      if (error) throw error;
+      let lastError: any = null;
+
+      try {
+        const res = await this.supabase.from('student_contact_logs').delete().eq('id', id);
+        if (res && res.error) lastError = res.error;
+      } catch (e) { lastError = e; }
+
+      try {
+        const res = await this.supabase.from('student_support_logs').delete().eq('id', id);
+        if (res && res.error) lastError = res.error;
+      } catch (e) { lastError = e; }
+
+      try {
+        const res = await this.supabase.from('student_interactions').delete().eq('id', id);
+        if (res && res.error) lastError = res.error;
+      } catch (e) { lastError = e; }
+
+      let list = this.getMockData<StudentInteraction>('student_interactions', []);
+      list = list.filter(i => i.id !== id);
+      this.saveMockData('student_interactions', list);
+
+      if (lastError) throw lastError;
     } else {
       let list = this.getMockData<StudentInteraction>('student_interactions', []);
       list = list.filter(i => i.id !== id);

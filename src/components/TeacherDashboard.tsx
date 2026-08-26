@@ -150,6 +150,12 @@ export default function TeacherDashboard({
   const [interactionCategory, setInteractionCategory] = useState<'保護者対応' | '人生相談' | '勉強相談' | '学校相談' | 'その他'>('その他');
   const [interactionMemo, setInteractionMemo] = useState('');
   const [interactionDate, setInteractionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [interactionStaffName, setInteractionStaffName] = useState<string>('');
+  const [customStaffName, setCustomStaffName] = useState<string>('');
+  const [editingInteractionId, setEditingInteractionId] = useState<string | null>(null);
+  const [editingMemoText, setEditingMemoText] = useState<string>('');
+  const [editingCategory, setEditingCategory] = useState<string>('その他');
+  const [editingStaffName, setEditingStaffName] = useState<string>('');
   const [newPersonalityInput, setNewPersonalityInput] = useState('');
   const [selectedPersonalityFromMaster, setSelectedPersonalityFromMaster] = useState('');
   const [newTeacherInput, setNewTeacherInput] = useState('');
@@ -401,6 +407,8 @@ export default function TeacherDashboard({
       if (freshSt) {
         setSelectedStudent(freshSt);
         setSelectedLevel(freshSt.level || 'A');
+        setInteractionStaffName(freshSt.teacher_in_charge || '福田 尚弘');
+        setCustomStaffName('');
         
         // Load interactions & personality options for student detail
         const listInteractions = db.getStudentInteractions(freshSt.id);
@@ -1193,7 +1201,10 @@ export default function TeacherDashboard({
     e.preventDefault();
     if (!selectedStudent || !interactionMemo.trim()) return;
     try {
-      const staffName = editForm.teacher_in_charge || selectedStudent.teacher_in_charge || '塾長';
+      const finalStaffName = interactionStaffName === 'other'
+        ? (customStaffName.trim() || '講師')
+        : (interactionStaffName || editForm.teacher_in_charge || selectedStudent.teacher_in_charge || '福田');
+
       const newInteraction: StudentInteraction = {
         id: `si-${selectedStudent.id}-${Date.now()}`,
         student_id: selectedStudent.id,
@@ -1201,7 +1212,7 @@ export default function TeacherDashboard({
         memo: interactionMemo,
         date: interactionDate,
         contact_date: interactionDate,
-        staff_name: staffName.split(' ')[0], // 苗字部分を表示
+        staff_name: finalStaffName.split(' ')[0], // 苗字部分を表示
         created_at: new Date().toISOString()
       };
       
@@ -1224,6 +1235,38 @@ export default function TeacherDashboard({
       const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error, Object.getOwnPropertyNames(error)) : String(error));
       console.error('詳細登録エラー:', error);
       alert(`登録失敗の詳細理由:\n${errorMsg}\n\n対象テーブルやカラム設定を確認してください。`);
+    }
+  };
+
+  // 対応履歴の削除
+  const handleDeleteInteraction = async (id: string) => {
+    if (!window.confirm('この対応履歴を削除してもよろしいですか？')) return;
+    try {
+      await db.deleteStudentInteraction(id);
+      setInteractions(prev => prev.filter(i => i.id !== id));
+      alert('✅ 対応履歴を削除しました');
+    } catch (err) {
+      console.error('Delete interaction error:', err);
+      alert('削除処理中にエラーが発生しました。');
+    }
+  };
+
+  // 対応履歴の編集保存
+  const handleSaveEditedInteraction = async (item: StudentInteraction) => {
+    try {
+      const updated: StudentInteraction = {
+        ...item,
+        category: editingCategory as any,
+        memo: editingMemoText,
+        staff_name: editingStaffName || item.staff_name
+      };
+      await db.saveStudentInteraction(updated);
+      setInteractions(prev => prev.map(i => i.id === item.id ? updated : i));
+      setEditingInteractionId(null);
+      alert('✅ 対応履歴を更新しました');
+    } catch (err) {
+      console.error('Update interaction error:', err);
+      alert('更新処理中にエラーが発生しました。');
     }
   };
 
@@ -7893,7 +7936,7 @@ export default function TeacherDashboard({
                       </div>
 
                       <form onSubmit={handleAddInteraction} style={{ marginBottom: '24px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
                           <div className={styles.formGroup}>
                             <label htmlFor="interaction-category">種別</label>
                             <select 
@@ -7918,6 +7961,36 @@ export default function TeacherDashboard({
                               onChange={e => setInteractionDate(e.target.value)}
                               className={styles.input}
                             />
+                          </div>
+                          <div className={styles.formGroup}>
+                            <label htmlFor="interaction-staff-name">対応者 (講師)</label>
+                            <select 
+                              id="interaction-staff-name"
+                              value={interactionStaffName} 
+                              onChange={e => {
+                                setInteractionStaffName(e.target.value);
+                                if (e.target.value !== 'other') setCustomStaffName('');
+                              }}
+                              className={styles.select}
+                            >
+                              {teacherOptions.map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                              {selectedStudent?.teacher_in_charge && !teacherOptions.includes(selectedStudent.teacher_in_charge) && (
+                                <option value={selectedStudent.teacher_in_charge}>{selectedStudent.teacher_in_charge}</option>
+                              )}
+                              <option value="other">その他 (自由入力)</option>
+                            </select>
+                            {interactionStaffName === 'other' && (
+                              <input 
+                                type="text"
+                                placeholder="講師名を入力..."
+                                value={customStaffName}
+                                onChange={e => setCustomStaffName(e.target.value)}
+                                className={styles.input}
+                                style={{ marginTop: '4px', fontSize: '0.75rem' }}
+                              />
+                            )}
                           </div>
                         </div>
                         <div className={styles.formGroup} style={{ marginBottom: '12px' }}>
@@ -7970,25 +8043,101 @@ export default function TeacherDashboard({
                                       {item.category}
                                     </span>
                                   </div>
-                                  <span style={{
-                                    fontSize: '0.75rem',
-                                    fontWeight: 'bold',
-                                    backgroundColor: '#3b82f6',
-                                    color: '#ffffff',
-                                    padding: '2px 8px',
-                                    borderRadius: '12px'
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    <span style={{
+                                      fontSize: '0.75rem',
+                                      fontWeight: 'bold',
+                                      backgroundColor: '#3b82f6',
+                                      color: '#ffffff',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px'
+                                    }}>
+                                      {item.staff_name}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      data-testid={`edit-interaction-${item.id}`}
+                                      onClick={() => {
+                                        setEditingInteractionId(item.id);
+                                        setEditingMemoText(item.memo);
+                                        setEditingCategory(item.category);
+                                        setEditingStaffName(item.staff_name);
+                                      }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', padding: '2px' }}
+                                      title="対応履歴を編集"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-testid={`delete-interaction-${item.id}`}
+                                      onClick={() => handleDeleteInteraction(item.id)}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', padding: '2px' }}
+                                      title="対応履歴を削除"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </div>
+                                
+                                {editingInteractionId === item.id ? (
+                                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                      <select
+                                        value={editingCategory}
+                                        onChange={e => setEditingCategory(e.target.value as any)}
+                                        className={styles.select}
+                                        style={{ fontSize: '0.75rem', padding: '2px 6px' }}
+                                      >
+                                        <option value="保護者対応">保護者対応</option>
+                                        <option value="人生相談">人生相談</option>
+                                        <option value="勉強相談">勉強相談</option>
+                                        <option value="学校相談">学校相談</option>
+                                        <option value="その他">その他</option>
+                                      </select>
+                                      <input
+                                        type="text"
+                                        value={editingStaffName}
+                                        onChange={e => setEditingStaffName(e.target.value)}
+                                        placeholder="担当講師"
+                                        className={styles.input}
+                                        style={{ fontSize: '0.75rem', width: '120px', padding: '2px 6px' }}
+                                      />
+                                    </div>
+                                    <textarea
+                                      value={editingMemoText}
+                                      onChange={e => setEditingMemoText(e.target.value)}
+                                      className={styles.textarea}
+                                      rows={3}
+                                      style={{ fontSize: '0.8rem' }}
+                                    />
+                                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingInteractionId(null)}
+                                        style={{ padding: '3px 10px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
+                                      >
+                                        キャンセル
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveEditedInteraction(item)}
+                                        style={{ padding: '3px 10px', fontSize: '0.75rem', borderRadius: '4px', border: 'none', background: '#22c55e', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}
+                                      >
+                                        保存
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div style={{ 
+                                    fontSize: '0.85rem', 
+                                    color: '#334155', 
+                                    whiteSpace: 'pre-wrap', 
+                                    lineHeight: 1.5 
                                   }}>
-                                    {item.staff_name}
-                                  </span>
-                                </div>
-                                <div style={{ 
-                                  fontSize: '0.85rem', 
-                                  color: '#334155', 
-                                  whiteSpace: 'pre-wrap', 
-                                  lineHeight: 1.5 
-                                }}>
-                                  {item.memo}
-                                </div>
+                                    {item.memo}
+                                  </div>
+                                )}
                               </div>
                             ))
                           )}
