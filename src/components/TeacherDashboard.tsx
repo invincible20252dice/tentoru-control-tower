@@ -1210,9 +1210,10 @@ export default function TeacherDashboard({
       const listInteractions = db.getStudentInteractions(selectedStudent.id);
       setInteractions(listInteractions);
       alert('✅ 対応内容を登録しました');
-    } catch (err) {
-      console.error('Save contact log error:', err);
-      alert('登録中にエラーが発生しました。');
+    } catch (error: any) {
+      const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error, Object.getOwnPropertyNames(error)) : String(error));
+      console.error('詳細登録エラー:', error);
+      alert(`登録失敗の詳細理由:\n${errorMsg}\n\n対象テーブルやカラム設定を確認してください。`);
     }
   };
 

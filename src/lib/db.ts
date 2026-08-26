@@ -2828,17 +2828,36 @@ class DatabaseService {
   }
 
   public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {
+    const studentId = interaction.student_id;
+    const category = interaction.category || 'その他';
+    const contactDate = interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0];
+    const memoText = interaction.memo || '';
+    const staffName = interaction.staff_name || '講師';
+    const createdAt = interaction.created_at || new Date().toISOString();
+
     const payload = {
-      id: interaction.id || `si-${interaction.student_id}-${Date.now()}`,
-      student_id: interaction.student_id,
-      category: interaction.category,
-      contact_type: interaction.category,
-      memo: interaction.memo,
-      content: interaction.memo,
-      date: interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0],
-      contact_date: interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0],
-      staff_name: interaction.staff_name || '講師',
-      created_at: interaction.created_at || new Date().toISOString()
+      id: interaction.id || `si-${studentId}-${Date.now()}`,
+      student_id: studentId,
+      category: category,
+      contact_type: category,
+      contact_date: contactDate,
+      date: contactDate,
+      memo: memoText,
+      content: memoText,
+      staff_name: staffName,
+      created_at: createdAt
+    };
+
+    const payloadNoId = {
+      student_id: studentId,
+      category: category,
+      contact_type: category,
+      contact_date: contactDate,
+      date: contactDate,
+      memo: memoText,
+      content: memoText,
+      staff_name: staffName,
+      created_at: createdAt
     };
 
     if (!this.isMockMode && this.supabase) {
@@ -2846,11 +2865,19 @@ class DatabaseService {
 
       // Step 1: student_contact_logs への保存試行
       try {
-        const res = await this.supabase.from('student_contact_logs').upsert(payload).select().single();
-        if (!res.error && res.data) return res.data;
-        if (res.error) lastError = res.error;
+        const query = this.supabase.from('student_contact_logs');
+        if (query && typeof query.upsert === 'function') {
+          const res = await query.upsert(payload).select().single();
+          if (!res.error && res.data) return res.data;
+          if (res.error) lastError = res.error;
+        }
       } catch (err) {
         lastError = err;
+      }
+
+      if (lastError) {
+        console.error('詳細登録エラー:', lastError);
+        throw lastError;
       }
 
       // Step 2: student_support_logs への保存試行
@@ -2858,6 +2885,9 @@ class DatabaseService {
         const res = await this.supabase.from('student_support_logs').upsert(payload).select().single();
         if (!res.error && res.data) return res.data;
         if (res.error) lastError = res.error;
+
+        const resNoId = await this.supabase.from('student_support_logs').insert(payloadNoId).select().single();
+        if (!resNoId.error && resNoId.data) return resNoId.data;
       } catch (err) {
         lastError = err;
       }
@@ -2867,19 +2897,20 @@ class DatabaseService {
         const res = await this.supabase.from('student_interactions').upsert(payload).select().single();
         if (!res.error && res.data) return res.data;
         if (res.error) lastError = res.error;
+
+        const resNoId = await this.supabase.from('student_interactions').insert(payloadNoId).select().single();
+        if (!resNoId.error && resNoId.data) return resNoId.data;
       } catch (err) {
         lastError = err;
       }
 
-      if (lastError) throw lastError;
-
       // Step 4: students テーブルの contact_logs JSONB 配列への追記更新
       try {
-        const stRes = await this.supabase.from('students').select('*').eq('id', interaction.student_id).single();
+        const stRes = await this.supabase.from('students').select('*').eq('id', studentId).single();
         if (stRes.data) {
           const currentLogs = Array.isArray(stRes.data.contact_logs) ? stRes.data.contact_logs : [];
           const updatedLogs = [payload, ...currentLogs];
-          const upRes = await this.supabase.from('students').update({ contact_logs: updatedLogs }).eq('id', interaction.student_id);
+          const upRes = await this.supabase.from('students').update({ contact_logs: updatedLogs }).eq('id', studentId);
           if (!upRes.error) return interaction;
           if (upRes.error) lastError = upRes.error;
         }
@@ -2887,7 +2918,10 @@ class DatabaseService {
         lastError = err;
       }
 
-      if (lastError) throw lastError;
+      if (lastError) {
+        console.error('詳細登録エラー:', lastError);
+        throw lastError;
+      }
       return interaction;
     } else {
       const list = this.getMockData<StudentInteraction>('student_interactions', []);

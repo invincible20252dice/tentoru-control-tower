@@ -2243,7 +2243,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.submit(addInteractionBtnError.closest('form')!);
     });
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('登録中にエラーが発生しました。');
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('登録失敗の詳細理由'));
     });
     alertMock.mockClear();
     saveInterSpy.mockRestore();
