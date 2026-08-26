@@ -2818,45 +2818,82 @@ class DatabaseService {
         created_at: '2026-06-20T19:00:00Z'
       }
     ];
-    const list = this.getMockData('student_interactions', seed);
+    const list = this.getMockData<StudentInteraction>('student_interactions', seed);
     if (studentId) {
       return list
         .filter(i => i.student_id === studentId)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        .sort((a, b) => new Date(b.date || (b as any).contact_date).getTime() - new Date(a.date || (a as any).contact_date).getTime());
     }
     return list;
   }
 
   public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {
+    const payload = {
+      id: interaction.id || `si-${interaction.student_id}-${Date.now()}`,
+      student_id: interaction.student_id,
+      category: interaction.category,
+      contact_type: interaction.category,
+      memo: interaction.memo,
+      content: interaction.memo,
+      date: interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0],
+      contact_date: interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0],
+      staff_name: interaction.staff_name || '講師',
+      created_at: interaction.created_at || new Date().toISOString()
+    };
+
     if (!this.isMockMode && this.supabase) {
-      const payload = {
-        id: interaction.id,
-        student_id: interaction.student_id,
-        category: interaction.category,
-        memo: interaction.memo,
-        date: interaction.date || (interaction as any).contact_date || new Date().toISOString().split('T')[0],
-        contact_date: interaction.date || (interaction as any).contact_date || new Date().toISOString().split('T')[0],
-        staff_name: interaction.staff_name || '講師',
-        created_at: interaction.created_at || new Date().toISOString()
-      };
-      const { data, error } = await this.supabase.from('student_interactions').upsert(payload).select().single();
-      if (error) {
-        // Fallback to student_contact_logs
-        const { data: cData, error: cErr } = await this.supabase.from('student_contact_logs').upsert(payload).select().single();
-        if (cErr) {
-          // Fallback to student_support_logs
-          const { data: sData, error: sErr } = await this.supabase.from('student_support_logs').upsert(payload).select().single();
-          if (sErr) throw error;
-          return sData || interaction;
-        }
-        return cData || interaction;
+      let lastError: any = null;
+
+      // Step 1: student_contact_logs への保存試行
+      try {
+        const res = await this.supabase.from('student_contact_logs').upsert(payload).select().single();
+        if (!res.error && res.data) return res.data;
+        if (res.error) lastError = res.error;
+      } catch (err) {
+        lastError = err;
       }
-      return data || interaction;
+
+      // Step 2: student_support_logs への保存試行
+      try {
+        const res = await this.supabase.from('student_support_logs').upsert(payload).select().single();
+        if (!res.error && res.data) return res.data;
+        if (res.error) lastError = res.error;
+      } catch (err) {
+        lastError = err;
+      }
+
+      // Step 3: student_interactions への保存試行
+      try {
+        const res = await this.supabase.from('student_interactions').upsert(payload).select().single();
+        if (!res.error && res.data) return res.data;
+        if (res.error) lastError = res.error;
+      } catch (err) {
+        lastError = err;
+      }
+
+      if (lastError) throw lastError;
+
+      // Step 4: students テーブルの contact_logs JSONB 配列への追記更新
+      try {
+        const stRes = await this.supabase.from('students').select('*').eq('id', interaction.student_id).single();
+        if (stRes.data) {
+          const currentLogs = Array.isArray(stRes.data.contact_logs) ? stRes.data.contact_logs : [];
+          const updatedLogs = [payload, ...currentLogs];
+          const upRes = await this.supabase.from('students').update({ contact_logs: updatedLogs }).eq('id', interaction.student_id);
+          if (!upRes.error) return interaction;
+          if (upRes.error) lastError = upRes.error;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      if (lastError) throw lastError;
+      return interaction;
     } else {
       const list = this.getMockData<StudentInteraction>('student_interactions', []);
       const idx = list.findIndex(i => i.id === interaction.id);
       if (idx >= 0) list[idx] = interaction;
-      else list.push(interaction);
+      else list.unshift(interaction);
       this.saveMockData('student_interactions', list);
       return interaction;
     }

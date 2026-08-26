@@ -1206,12 +1206,12 @@ export default function TeacherDashboard({
       
       await db.saveStudentInteraction(newInteraction);
       setInteractionMemo('');
-      // 履歴一覧の即時リフレッシュ
+      // 履歴一覧の即時リフレッシュ (登録された新しいデータを先頭に反映)
       const listInteractions = db.getStudentInteractions(selectedStudent.id);
       setInteractions(listInteractions);
       alert('✅ 対応内容を登録しました');
     } catch (err) {
-      console.error(err);
+      console.error('Save contact log error:', err);
       alert('登録中にエラーが発生しました。');
     }
   };
