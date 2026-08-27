@@ -1079,34 +1079,27 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(tabHomeworksBtn);
     expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
 
-    // 宿題提出状況の更新・保存テスト
+    // 宿題提出状況の自動保存テスト
     const hwRow = screen.getByText('数学ワークP45').closest('tr')!;
     const hwSelect = hwRow.querySelector('select')!;
     fireEvent.change(hwSelect, { target: { value: 'completed' } });
-    const hwSaveBtn = hwRow.querySelector('button')!;
-    fireEvent.click(hwSaveBtn);
+
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('宿題提出状況を保存しました！');
+      const finalHwResults = db.getHomeworkResults();
+      const finalHwResult = finalHwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19' && r.homework_content.includes('数学ワークP45'));
+      expect(finalHwResult?.status).toBe('completed');
     });
 
-    const finalHwResults = db.getHomeworkResults();
-    const finalHwResult = finalHwResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19' && r.homework_content.includes('数学ワークP45'));
-    expect(finalHwResult?.status).toBe('completed');
-
-    // 小テスト点数の更新テスト
+    // 小テスト点数の自動判定＆自動保存テスト
     fireEvent.click(tabMiniTestsBtn);
     const scoreCellInput = screen.getByDisplayValue('88');
-    fireEvent.change(scoreCellInput, { target: { value: '150' } });
-    const teacherSaveBtn = scoreCellInput.closest('tr')!.querySelector('button')!;
-    fireEvent.click(teacherSaveBtn);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('点数は0〜100の範囲で入力してください。');
-    });
-
     fireEvent.change(scoreCellInput, { target: { value: '95' } });
-    fireEvent.click(teacherSaveBtn);
+
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
+      const miniResults = db.getMiniTestResults();
+      const targetMini = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+      expect(targetMini?.score).toBe(95);
+      expect(targetMini?.passed).toBe(true);
     });
 
     const finalMiniResults = db.getMiniTestResults();
@@ -1129,27 +1122,30 @@ describe('UI Components Render & Interaction Tests', () => {
     // レベル変更後、テーブル表示が「レベルC (70点)」に切り替わったことを検証
     expect(tr.innerHTML).toContain('レベルC (70点)');
 
-    // 点数を 75 点（レベルCでは合格）に変更して保存
+    // 点数を 75 点（レベルCでは合格）に変更（即時自動保存）
     fireEvent.change(scoreCellInput, { target: { value: '75' } });
-    fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
+      const miniResults = db.getMiniTestResults();
+      const targetMini = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+      expect(targetMini?.score).toBe(75);
+      expect(targetMini?.passed).toBe(true);
     });
-    expect(tr.innerHTML).toContain('合格');
 
-    // 点数を 65 点（レベルCでは不合格）に変更して保存
+    // 点数を 65 点（レベルCでは不合格）に変更（即時自動保存）
     fireEvent.change(scoreCellInput, { target: { value: '65' } });
-    fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
+      const miniResults = db.getMiniTestResults();
+      const targetMini = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+      expect(targetMini?.score).toBe(65);
+      expect(targetMini?.passed).toBe(false);
     });
-    expect(tr.innerHTML).toContain('不合格');
 
     // 次のテストへの影響を避けるため、元の値 95 点に戻しておく
     fireEvent.change(scoreCellInput, { target: { value: '95' } });
-    fireEvent.click(teacherSaveBtn);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenLastCalledWith('小テスト点数・合否を保存しました！');
+      const miniResults = db.getMiniTestResults();
+      const targetMini = miniResults.find(r => r.student_id === 'std-1' && r.date === '2026-06-19');
+      expect(targetMini?.score).toBe(95);
     });
     alertMock.mockClear();
 

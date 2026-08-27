@@ -1752,15 +1752,15 @@ export default function TeacherDashboard({
     }
   };
 
-  // 小テスト結果の保存（合否分岐ロジックと将来タスク・タイムラインの即時連動）
-  const handleSaveMiniTestScore = async (result: MiniTestResult) => {
-    const scoreStr = tempScores[result.id] || '';
+  // 小テスト結果の自動保存（点数・合否判定のリアルタイムDB保存＆タイムライン連動）
+  const handleAutoSaveMiniTestScore = async (result: MiniTestResult, newScoreStr?: string, newPassedStr?: string) => {
+    const scoreStr = newScoreStr !== undefined ? newScoreStr : (tempScores[result.id] ?? (result.score !== null && result.score !== undefined ? String(result.score) : ''));
     const scoreVal = scoreStr === '' ? null : parseInt(scoreStr, 10);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
-      alert('点数は0〜100の範囲で入力してください。');
       return;
     }
-    const passedStr = tempPassedStatuses[result.id] || 'unstarted';
+    const passedStr = newPassedStr !== undefined ? newPassedStr : (tempPassedStatuses[result.id] || (result.passed === true ? 'passed' : result.passed === false ? 'failed' : 'unstarted'));
+    
     let passScore = 80;
     if (result.passing_line) {
       const match = result.passing_line.match(/\d+/);
@@ -1779,10 +1779,12 @@ export default function TeacherDashboard({
       passed: passedVal
     };
     await db.saveMiniTestResult(updated);
+    setMiniTestResultsList(prev => prev.map(r => r.id === result.id ? updated : r));
 
-    // 点数・合否変更に伴い、生徒の未来の未受講タスクをリアルタイム再計算
-    if (selectedStudent) {
-      const allTasks = db.getLearningTasks().filter(t => t.student_id === selectedStudent.id);
+    // 生徒の未来の未受講タスクをリアルタイム再計算
+    const student = students.find(s => s.id === result.student_id);
+    if (student) {
+      const allTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
       const todayStr = scheduleDate;
       const futureUncompletedTasks = allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
 
@@ -1792,10 +1794,10 @@ export default function TeacherDashboard({
         const latestMiniResults = db.getMiniTestResults();
 
         futureUncompletedTasks.forEach(task => {
-          const sub = task.subject || (selectedStudent.grade?.startsWith('中') ? '数学' : '算数');
+          const sub = task.subject || (student.grade?.startsWith('中') ? '数学' : '算数');
           const rangeInfo = calculateLessonRangeForSlot({
             subject: sub,
-            student: selectedStudent,
+            student,
             tasks: allTasks,
             curriculumMasters: allMasters,
             curriculumUnits: allUnits,
@@ -1811,9 +1813,30 @@ export default function TeacherDashboard({
         await db.saveLearningTasks(futureUncompletedTasks);
       }
     }
+  };
 
-    alert('小テスト点数・合否を保存しました！');
-    await loadData();
+  // 小テスト結果の物理削除
+  const handleDeleteMiniTestResult = async (id: string) => {
+    if (!window.confirm('この小テスト結果を削除してもよろしいですか？')) return;
+    await db.deleteMiniTestResult(id);
+    setMiniTestResultsList(prev => prev.filter(r => r.id !== id));
+  };
+
+  // 宿題提出状況の自動保存
+  const handleAutoSaveHomeworkStatus = async (result: HomeworkResult, newStatus: any) => {
+    const updated: HomeworkResult = {
+      ...result,
+      status: newStatus
+    };
+    await db.saveHomeworkResult(updated);
+    setHomeworkResultsList(prev => prev.map(h => h.id === result.id ? updated : h));
+  };
+
+  // 宿題レコードの物理削除
+  const handleDeleteHomeworkResult = async (id: string) => {
+    if (!window.confirm('この宿題レコードを削除してもよろしいですか？')) return;
+    await db.deleteHomeworkResult(id);
+    setHomeworkResultsList(prev => prev.filter(r => r.id !== id));
   };
 
   const handleSaveApiKey = () => {
@@ -5160,7 +5183,7 @@ export default function TeacherDashboard({
                               const displayPassingLine = r.passing_line ? (r.passing_line.includes('レベル') ? r.passing_line : `レベル${stLevel} (${passScore}点)`) : `レベル${stLevel} (${passScore}点)`;
 
                               return (
-                                <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                 <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                   <td style={{ padding: '10px' }}>{r.date}</td>
                                   <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
                                   <td style={{ padding: '10px' }}>{r.test_content}</td>
@@ -5171,23 +5194,24 @@ export default function TeacherDashboard({
                                         type="number"
                                         min="0"
                                         max="100"
-                                        value={tempScores[r.id] || ''}
+                                        value={tempScores[r.id] !== undefined ? tempScores[r.id] : (r.score !== null && r.score !== undefined ? String(r.score) : '')}
                                         onChange={e => {
                                           const val = e.target.value;
-                                          setTempScores({
-                                            ...tempScores,
+                                          setTempScores(prev => ({
+                                            ...prev,
                                             [r.id]: val
-                                          });
+                                          }));
 
-                                          // 点数入力時の合否自動判定
-                                          const scoreVal = parseInt(val);
+                                          // 点数入力時の合否自動判定＆自動保存
+                                          const scoreVal = parseInt(val, 10);
+                                          let autoPassedStr = 'unstarted';
                                           if (!isNaN(scoreVal)) {
                                             const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
                                             let autoPassed = scoreVal >= passScore;
                                             if (r.passing_line) {
                                               const matchNum = r.passing_line.match(/\d+/);
                                               if (matchNum) {
-                                                const limit = parseInt(matchNum[0]);
+                                                const limit = parseInt(matchNum[0], 10);
                                                 if (r.passing_line.includes('%') || r.passing_line.includes('割')) {
                                                   const threshold = r.passing_line.includes('割') ? limit * 10 : limit;
                                                   autoPassed = scoreVal >= threshold;
@@ -5196,11 +5220,15 @@ export default function TeacherDashboard({
                                                 }
                                               }
                                             }
-                                            setTempPassedStatuses(prev => ({
-                                              ...prev,
-                                              [r.id]: autoPassed ? 'passed' : 'failed'
-                                            }));
+                                            autoPassedStr = autoPassed ? 'passed' : 'failed';
                                           }
+
+                                          setTempPassedStatuses(prev => ({
+                                            ...prev,
+                                            [r.id]: autoPassedStr
+                                          }));
+
+                                          handleAutoSaveMiniTestScore(r, val, autoPassedStr);
                                         }}
                                         className={styles.input}
                                         style={{ width: '70px', padding: '4px 6px', fontSize: '0.8rem', display: 'inline-block' }}
@@ -5211,12 +5239,14 @@ export default function TeacherDashboard({
                                   </td>
                                   <td style={{ padding: '10px' }}>
                                     <select
-                                      value={tempPassedStatuses[r.id] || 'unstarted'}
+                                      value={tempPassedStatuses[r.id] || (r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted')}
                                       onChange={e => {
-                                        setTempPassedStatuses({
-                                          ...tempPassedStatuses,
-                                          [r.id]: e.target.value
-                                        });
+                                        const newPassedStr = e.target.value;
+                                        setTempPassedStatuses(prev => ({
+                                          ...prev,
+                                          [r.id]: newPassedStr
+                                        }));
+                                        handleAutoSaveMiniTestScore(r, undefined, newPassedStr);
                                       }}
                                       className={styles.select}
                                       style={{ padding: '4px 6px', fontSize: '0.8rem', width: 'auto' }}
@@ -5228,11 +5258,13 @@ export default function TeacherDashboard({
                                   </td>
                                   <td style={{ padding: '10px' }}>
                                     <button
-                                      onClick={() => handleSaveMiniTestScore(r)}
+                                      type="button"
+                                      onClick={() => handleDeleteMiniTestResult(r.id)}
                                       className={styles.btn}
-                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#3b82f6' }}
+                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#ef4444', color: '#ffffff' }}
+                                      title="削除する"
                                     >
-                                      保存
+                                      🗑️ 削除
                                     </button>
                                   </td>
                                 </tr>
@@ -5450,20 +5482,42 @@ export default function TeacherDashboard({
                             })
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id);
+                              const todayStr = new Date().toISOString().split('T')[0];
+                              const currentStatus = tempHomeworkStatuses[r.id] || r.status || 'incomplete';
+                              const deadline = r.homework_deadline || r.date || '';
+                              const isOverdue = currentStatus === 'incomplete' && !!deadline && deadline < todayStr;
+
                               return (
-                                <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <tr
+                                  key={r.id}
+                                  style={{
+                                    borderBottom: '1px solid #e2e8f0',
+                                    backgroundColor: isOverdue ? '#fef2f2' : 'transparent',
+                                    transition: 'background-color 0.15s ease'
+                                  }}
+                                >
                                   <td style={{ padding: '10px' }}>{r.date}</td>
                                   <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
                                   <td style={{ padding: '10px' }}>{r.homework_content}</td>
-                                  <td style={{ padding: '10px' }}>{r.homework_deadline || 'なし'}</td>
+                                  <td style={{ padding: '10px' }}>
+                                    {isOverdue ? (
+                                      <span style={{ color: '#ef4444', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                        ⚠️ {deadline} (期限超過)
+                                      </span>
+                                    ) : (
+                                      <span>{deadline || 'なし'}</span>
+                                    )}
+                                  </td>
                                   <td style={{ padding: '10px' }}>
                                     <select
-                                      value={tempHomeworkStatuses[r.id]}
+                                      value={currentStatus}
                                       onChange={e => {
-                                        setTempHomeworkStatuses({
-                                          ...tempHomeworkStatuses,
-                                          [r.id]: e.target.value as any
-                                        });
+                                        const newStatus = e.target.value as any;
+                                        setTempHomeworkStatuses(prev => ({
+                                          ...prev,
+                                          [r.id]: newStatus
+                                        }));
+                                        handleAutoSaveHomeworkStatus(r, newStatus);
                                       }}
                                       className={styles.select}
                                       style={{ padding: '4px 6px', fontSize: '0.8rem' }}
@@ -5475,11 +5529,13 @@ export default function TeacherDashboard({
                                   </td>
                                   <td style={{ padding: '10px' }}>
                                     <button
-                                      onClick={() => handleSaveHomeworkStatus(r)}
+                                      type="button"
+                                      onClick={() => handleDeleteHomeworkResult(r.id)}
                                       className={styles.btn}
-                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#10b981' }}
+                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#ef4444', color: '#ffffff' }}
+                                      title="削除する"
                                     >
-                                      保存
+                                      🗑️ 削除
                                     </button>
                                   </td>
                                 </tr>
