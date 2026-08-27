@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import styles from './TeacherDashboard.module.css';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 import { HorizontalDatePicker } from './HorizontalDatePicker';
@@ -127,6 +127,39 @@ export default function TeacherDashboard({
   }, [propTeacherType]);
 
   const gradeCategoryLabel = currentTeacherType === 'elementary' ? '【小学生】' : currentTeacherType === 'high_school' ? '【高校生】' : currentTeacherType === 'junior_high' ? '【中学生】' : '【中学生】';
+
+  const dynamicGradeOptions = useMemo(() => {
+    if (currentTeacherType === 'elementary') {
+      return [
+        { label: 'すべての学年', value: 'all' },
+        { label: '小学生全員', value: '小学生' },
+        { label: '園児', value: '園児' },
+        { label: '小1', value: '小1' },
+        { label: '小2', value: '小2' },
+        { label: '小3', value: '小3' },
+        { label: '小4', value: '小4' },
+        { label: '小5', value: '小5' },
+        { label: '小6', value: '小6' }
+      ];
+    }
+    if (currentTeacherType === 'high_school') {
+      return [
+        { label: 'すべての学年', value: 'all' },
+        { label: '高校生全員', value: '高校生' },
+        { label: '高1', value: '高1' },
+        { label: '高2', value: '高2' },
+        { label: '高3', value: '高3' },
+        { label: '既卒', value: '既卒' }
+      ];
+    }
+    return [
+      { label: 'すべての学年', value: 'all' },
+      { label: '中学生全員', value: '中学生' },
+      { label: '中1', value: '中1' },
+      { label: '中2', value: '中2' },
+      { label: '中3', value: '中3' }
+    ];
+  }, [currentTeacherType]);
 
   const [students, setStudents] = useState<Student[]>(() => propStudents || db.getStudents());
   const [schools, setSchools] = useState<School[]>(() => db.getSchools());
@@ -4934,12 +4967,8 @@ export default function TeacherDashboard({
                           className={styles.select}
                           style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
                         >
-                          <option value="all">すべての学年</option>
-                          <option value="小学生">小学生全員</option>
-                          <option value="中学生">中学生全員</option>
-                          <option value="高校生">高校生全員</option>
-                          {GRADES.map(g => (
-                            <option key={g} value={g}>{g}</option>
+                          {dynamicGradeOptions.map((opt: { label: string; value: string }) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
                       </div>
@@ -5027,7 +5056,7 @@ export default function TeacherDashboard({
                         if (!student) return false;
                         if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
                         if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                        if (miniTestGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                        if (miniTestGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
                         if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
                       }
 
@@ -5075,7 +5104,7 @@ export default function TeacherDashboard({
                                 if (!student) return false;
                                 if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
                                 if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                                if (miniTestGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                                if (miniTestGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
                                 if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
                               }
 
@@ -5235,12 +5264,8 @@ export default function TeacherDashboard({
                           className={styles.select}
                           style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
                         >
-                          <option value="all">すべての学年</option>
-                          <option value="小学生">小学生全員</option>
-                          <option value="中学生">中学生全員</option>
-                          <option value="高校生">高校生全員</option>
-                          {GRADES.map(g => (
-                            <option key={g} value={g}>{g}</option>
+                          {dynamicGradeOptions.map((opt: { label: string; value: string }) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
                       </div>
@@ -5328,7 +5353,7 @@ export default function TeacherDashboard({
                         if (!student) return false;
                         if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
                         if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                        if (homeworkGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                        if (homeworkGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
                         if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
                       }
 
@@ -5375,7 +5400,7 @@ export default function TeacherDashboard({
                                 if (!student) return false;
                                 if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
                                 if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                                if (homeworkGradeFilter === '高校生' && !student.grade.startsWith('高')) return false;
+                                if (homeworkGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
                                 if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
                               }
 
