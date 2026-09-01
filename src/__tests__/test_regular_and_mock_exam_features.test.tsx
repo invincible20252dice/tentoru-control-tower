@@ -149,4 +149,50 @@ describe('Regular Exam and Mock Exam Features Unit Tests', () => {
       expect(screen.queryByText('第1回 駿台模試')).not.toBeInTheDocument();
     });
   });
+
+  it('supports partial input with single subject (e.g. math 100) and auto calculated total score', async () => {
+    window.alert = vi.fn();
+
+    render(<TeacherDashboard teacherType="elementary" initialStudentId="std-exam-1" onBackToPortal={vi.fn()} />);
+
+    // 「定期テスト・模試」タブを開く
+    const testTab = screen.getByRole('button', { name: /定期テスト・模試/i });
+    await act(async () => {
+      fireEvent.click(testTab);
+    });
+
+    // テスト名に「割り算算数大会」を入力
+    const testNameInput = screen.getByPlaceholderText(/例：1学期中間テスト/i) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(testNameInput, { target: { value: '割り算算数大会' } });
+    });
+
+    // 数学/算数のみ 100 点を入力（他は空欄）
+    const inputs = screen.getAllByRole('spinbutton');
+    // 1番目が数学/算数
+    await act(async () => {
+      fireEvent.change(inputs[1], { target: { value: '100' } });
+    });
+
+    const submitBtn = screen.getByRole('button', { name: '定期テスト結果を記録' });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('✅ 定期テスト結果を記録しました'));
+
+    // 一覧画面に単一教科「数学/算数: 100点」として綺麗に表示されることを検証
+    await waitFor(() => {
+      expect(screen.getByText('割り算算数大会')).toBeInTheDocument();
+      expect(screen.getByText(/数学\/算数: 100点/i)).toBeInTheDocument();
+    });
+
+    // DB構造検証: score_math が 100、score_total が 100 (自動計算) になっていること
+    const records = db.getTestRecords();
+    const mathRecord = records.find(r => r.test_name === '割り算算数大会');
+    expect(mathRecord).toBeDefined();
+    expect(mathRecord?.score_math).toBe(100);
+    expect(mathRecord?.score_japanese).toBeNull();
+    expect(mathRecord?.score_total).toBe(100);
+  });
 });

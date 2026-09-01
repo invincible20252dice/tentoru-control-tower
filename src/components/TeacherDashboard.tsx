@@ -2690,23 +2690,34 @@ export default function TeacherDashboard({
       alert('生徒を選択してください。');
       return;
     }
-    if (!regularTestName.trim()) {
-      alert('テスト名を入力してください。');
-      return;
-    }
+
+    // テスト名が未入力の場合でも「定期テスト」などのデフォルト補完
+    const finalTestName = regularTestName.trim() || '定期テスト';
+
+    const scoreJp = regularScoreJapanese === '' ? null : parseInt(regularScoreJapanese, 10);
+    const scoreMath = regularScoreMath === '' ? null : parseInt(regularScoreMath, 10);
+    const scoreEng = regularScoreEnglish === '' ? null : parseInt(regularScoreEnglish, 10);
+    const scoreSoc = regularScoreSocial === '' ? null : parseInt(regularScoreSocial, 10);
+    const scoreSci = regularScoreScience === '' ? null : parseInt(regularScoreScience, 10);
+
+    // 入力された得点のみで合計点を自動算出
+    const validScores = [scoreJp, scoreMath, scoreEng, scoreSoc, scoreSci].filter((s): s is number => s !== null && !isNaN(s));
+    const autoSum = validScores.length > 0 ? validScores.reduce((acc, cur) => acc + cur, 0) : null;
+    const finalScoreTotal = regularScoreTotal !== '' ? parseInt(regularScoreTotal, 10) : autoSum;
 
     const record: TestRecord = {
       id: `tr-${Date.now()}`,
       student_id: selectedStudent.id,
       record_type: 'regular_test',
-      test_name: regularTestName,
-      subject: regularTestName,
-      score_japanese: regularScoreJapanese === '' ? null : parseInt(regularScoreJapanese, 10),
-      score_math: regularScoreMath === '' ? null : parseInt(regularScoreMath, 10),
-      score_english: regularScoreEnglish === '' ? null : parseInt(regularScoreEnglish, 10),
-      score_social: regularScoreSocial === '' ? null : parseInt(regularScoreSocial, 10),
-      score_science: regularScoreScience === '' ? null : parseInt(regularScoreScience, 10),
-      score_total: regularScoreTotal === '' ? null : parseInt(regularScoreTotal, 10),
+      test_name: finalTestName,
+      subject: finalTestName,
+      score_japanese: scoreJp,
+      score_math: scoreMath,
+      score_english: scoreEng,
+      score_social: scoreSoc,
+      score_science: scoreSci,
+      score_total: finalScoreTotal,
+      score: finalScoreTotal,
       class_rank: regularClassRank || 'ー',
       school_rank: regularSchoolRank || 'ー',
       deviation_value: regularDeviation === '' ? null : parseFloat(regularDeviation),
@@ -5678,14 +5689,13 @@ export default function TeacherDashboard({
                       <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>定期テスト結果記録</h4>
                       <form onSubmit={handleSaveRegularTest}>
                         <div className={styles.formGroup}>
-                          <label>テスト名</label>
+                          <label>テスト名（任意・空欄時は「定期テスト」）</label>
                           <input
                             type="text"
                             value={regularTestName}
                             onChange={e => setRegularTestName(e.target.value)}
-                            placeholder="例：1学期中間テスト、前期期末テスト"
+                            placeholder="例：1学期中間テスト、割り算算数大会"
                             className={styles.input}
-                            required
                           />
                         </div>
                         
@@ -5693,62 +5703,62 @@ export default function TeacherDashboard({
                           <thead>
                             <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
                               <th style={{ textAlign: 'left', padding: '4px' }}>項目</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>入力値</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>入力値 (任意・NULL許容)</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr>
                               <td style={{ padding: '4px' }}>国語得点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreJapanese} onChange={e => setRegularScoreJapanese(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreJapanese} onChange={e => setRegularScoreJapanese(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
-                              <td style={{ padding: '4px' }}>数学得点 (点)</td>
+                              <td style={{ padding: '4px' }}>数学/算数得点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreMath} onChange={e => setRegularScoreMath(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreMath} onChange={e => setRegularScoreMath(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>英語得点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreEnglish} onChange={e => setRegularScoreEnglish(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreEnglish} onChange={e => setRegularScoreEnglish(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>社会得点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreSocial} onChange={e => setRegularScoreSocial(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreSocial} onChange={e => setRegularScoreSocial(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>理科得点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreScience} onChange={e => setRegularScoreScience(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreScience} onChange={e => setRegularScoreScience(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>合計点 (点)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" value={regularScoreTotal} onChange={e => setRegularScoreTotal(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" value={regularScoreTotal} onChange={e => setRegularScoreTotal(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="空欄時は入力点から自動計算" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>クラス順位 (位)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="text" value={regularClassRank} onChange={e => setRegularClassRank(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="text" value={regularClassRank} onChange={e => setRegularClassRank(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>学年順位 (位)</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="text" value={regularSchoolRank} onChange={e => setRegularSchoolRank(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="text" value={regularSchoolRank} onChange={e => setRegularSchoolRank(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                             <tr>
                               <td style={{ padding: '4px' }}>偏差値</td>
                               <td style={{ padding: '4px' }}>
-                                <input type="number" step="0.1" value={regularDeviation} onChange={e => setRegularDeviation(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} />
+                                <input type="number" step="0.1" value={regularDeviation} onChange={e => setRegularDeviation(e.target.value)} style={{ width: '100%', padding: '4px' }} className={styles.input} placeholder="任意" />
                               </td>
                             </tr>
                           </tbody>
@@ -5890,9 +5900,31 @@ export default function TeacherDashboard({
                                 </td>
                                 <td style={{ padding: '10px', fontWeight: 600 }}>{tr.test_name || tr.subject || '成績記録'}</td>
                                 <td style={{ padding: '10px', fontWeight: 700 }}>
-                                  {tr.record_type === 'regular_test'
-                                    ? (tr.score_total !== null && tr.score_total !== undefined ? `${tr.score_total}点 (合計)` : (tr.score !== null && tr.score !== undefined ? `${tr.score}点` : '未入力'))
-                                    : `${tr.score}点`}
+                                  {(() => {
+                                    if (tr.record_type !== 'regular_test') {
+                                      return tr.score !== null && tr.score !== undefined ? `${tr.score}点` : '未入力';
+                                    }
+                                    const subjects = [
+                                      { name: '国', full: '国語', score: tr.score_japanese },
+                                      { name: '数', full: '数学/算数', score: tr.score_math },
+                                      { name: '英', full: '英語', score: tr.score_english },
+                                      { name: '社', full: '社会', score: tr.score_social },
+                                      { name: '理', full: '理科', score: tr.score_science },
+                                    ];
+                                    const filled = subjects.filter(s => s.score !== null && s.score !== undefined && !isNaN(s.score));
+                                    if (filled.length === 1) {
+                                      return `${filled[0].full}: ${filled[0].score}点`;
+                                    }
+                                    if (filled.length > 1) {
+                                      const breakdown = filled.map(s => `${s.name}:${s.score}`).join(' / ');
+                                      const totalStr = tr.score_total !== null && tr.score_total !== undefined ? ` (合計: ${tr.score_total}点)` : '';
+                                      return `${breakdown}${totalStr}`;
+                                    }
+                                    if (tr.score_total !== null && tr.score_total !== undefined) {
+                                      return `合計: ${tr.score_total}点`;
+                                    }
+                                    return tr.score !== null && tr.score !== undefined ? `${tr.score}点` : '未入力';
+                                  })()}
                                 </td>
                                 <td style={{ padding: '10px' }}>
                                   {tr.record_type === 'regular_test' ? (

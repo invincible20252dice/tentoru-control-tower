@@ -515,6 +515,12 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(upBtns[0]);
     }
 
+    // 生徒を選択してから「定期テスト・模試」タブへ
+    const studentCard = screen.queryByText('山田 太郎') || screen.queryByText('生徒一覧');
+    if (studentCard) {
+      fireEvent.click(studentCard);
+    }
+
     // 4. Tab: Tests and Grades
     const tabTests = screen.getByText('定期テスト・模試');
     fireEvent.click(tabTests);
@@ -525,11 +531,15 @@ describe('UI Components Render & Interaction Tests', () => {
     // Save regular test score (and fill all form values to cover handlers)
     const regularForm = screen.getByText('定期テスト結果記録').closest('div')!;
     
-    // 得点やテスト名などが空欄の状態で保存を試みてガードを通す
+    // 得点やテスト名などが空欄の状態で保存（テスト名「定期テスト」へのデフォルト補完・NULL許容保存対応）
     const saveRegularBtn = screen.getByText('定期テスト結果を記録');
     alertMock.mockClear();
-    fireEvent.submit(saveRegularBtn.closest('form')!);
-    expect(alertMock).toHaveBeenCalledWith('テスト名を入力してください。');
+    await act(async () => {
+      fireEvent.submit(saveRegularBtn.closest('form')!);
+    });
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('✅ 定期テスト結果を記録しました');
+    });
 
     // 全ての値を埋めて保存
     const regularInputs = regularForm.querySelectorAll('input');
@@ -3798,7 +3808,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(toggleApiKeyBtn);
     fireEvent.click(screen.getByText('保存'));
 
-    const regTestNameInput = screen.getByPlaceholderText('例：1学期中間テスト、前期期末テスト');
+    const regTestNameInput = screen.getByPlaceholderText(/例：1学期中間テスト/i);
     fireEvent.change(regTestNameInput, { target: { value: '中間テスト' } });
     const saveRegTestBtn = screen.getByText('定期テスト結果を記録');
     await act(async () => {
