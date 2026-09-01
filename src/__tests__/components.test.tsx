@@ -529,7 +529,7 @@ describe('UI Components Render & Interaction Tests', () => {
     const saveRegularBtn = screen.getByText('定期テスト結果を記録');
     alertMock.mockClear();
     fireEvent.submit(saveRegularBtn.closest('form')!);
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(alertMock).toHaveBeenCalledWith('テスト名を入力してください。');
 
     // 全ての値を埋めて保存
     const regularInputs = regularForm.querySelectorAll('input');
@@ -560,7 +560,7 @@ describe('UI Components Render & Interaction Tests', () => {
 
     fireEvent.submit(saveRegularBtn.closest('form')!);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('定期テスト結果を記録しました。');
+      expect(alertMock).toHaveBeenCalledWith('✅ 定期テスト結果を記録しました');
     });
 
     // Save mock test score
@@ -570,7 +570,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 得点や志望校が空欄の状態で保存を試みてガードを通す
     alertMock.mockClear();
     fireEvent.submit(saveMockBtn.closest('form')!);
-    expect(alertMock).not.toHaveBeenCalled();
+    expect(alertMock).toHaveBeenCalledWith('模試名・総合得点・判定志望校を入力・選択してください。');
     
     // Change mock subject name (Line 1014 cover)
     const mockSubjectInput = mockForm.querySelector('input[type="text"]')!;
@@ -582,7 +582,7 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.change(selectSchool, { target: { value: 'schcode-A' } });
     fireEvent.submit(saveMockBtn.closest('form')!);
     await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('模試結果を記録しました'));
+      expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('✅ 模試結果を記録し、判定を算出しました！'));
     });
 
     // 5. Tab: AI Report

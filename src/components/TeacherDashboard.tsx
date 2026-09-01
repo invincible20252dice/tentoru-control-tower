@@ -356,6 +356,7 @@ export default function TeacherDashboard({
   const [schoolCodes, setSchoolCodes] = useState<SchoolCodeMaster[]>([]);
   const [examThresholds, setExamThresholds] = useState<ExamThresholdMaster[]>([]);
   const [testRecordsList, setTestRecordsList] = useState<TestRecord[]>([]);
+  const [lastMockPassResult, setLastMockPassResult] = useState<{ rank: string; probability: number; schoolName: string; label: string } | null>(null);
 
   // AI Report State
   const [aiPrompt, setAiPrompt] = useState<string>('');
@@ -2683,21 +2684,29 @@ export default function TeacherDashboard({
   };
 
   // 6. 定期テスト結果記録
-  const handleSaveRegularTest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStudent || !regularTestName) return;
+  const handleSaveRegularExam = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedStudent) {
+      alert('生徒を選択してください。');
+      return;
+    }
+    if (!regularTestName.trim()) {
+      alert('テスト名を入力してください。');
+      return;
+    }
 
     const record: TestRecord = {
       id: `tr-${Date.now()}`,
       student_id: selectedStudent.id,
       record_type: 'regular_test',
       test_name: regularTestName,
-      score_japanese: regularScoreJapanese === '' ? null : parseInt(regularScoreJapanese),
-      score_math: regularScoreMath === '' ? null : parseInt(regularScoreMath),
-      score_english: regularScoreEnglish === '' ? null : parseInt(regularScoreEnglish),
-      score_social: regularScoreSocial === '' ? null : parseInt(regularScoreSocial),
-      score_science: regularScoreScience === '' ? null : parseInt(regularScoreScience),
-      score_total: regularScoreTotal === '' ? null : parseInt(regularScoreTotal),
+      subject: regularTestName,
+      score_japanese: regularScoreJapanese === '' ? null : parseInt(regularScoreJapanese, 10),
+      score_math: regularScoreMath === '' ? null : parseInt(regularScoreMath, 10),
+      score_english: regularScoreEnglish === '' ? null : parseInt(regularScoreEnglish, 10),
+      score_social: regularScoreSocial === '' ? null : parseInt(regularScoreSocial, 10),
+      score_science: regularScoreScience === '' ? null : parseInt(regularScoreScience, 10),
+      score_total: regularScoreTotal === '' ? null : parseInt(regularScoreTotal, 10),
       class_rank: regularClassRank || 'ー',
       school_rank: regularSchoolRank || 'ー',
       deviation_value: regularDeviation === '' ? null : parseFloat(regularDeviation),
@@ -2707,7 +2716,7 @@ export default function TeacherDashboard({
 
     await db.saveTestRecord(record);
     
-    // クリア
+    // フォームのリセット
     setRegularTestName('');
     setRegularScoreJapanese('');
     setRegularScoreMath('');
@@ -2720,35 +2729,87 @@ export default function TeacherDashboard({
     setRegularDeviation('');
     setRegularImprovement('');
 
-    alert('定期テスト結果を記録しました。');
-    loadData();
+    alert('✅ 定期テスト結果を記録しました');
+    
+    // 成績履歴一覧の即時更新
+    const updated = db.getTestRecords().filter(tr => tr.student_id === selectedStudent.id);
+    setTestRecordsList(updated);
+    await loadData();
   };
 
-  // 7. 模試＆志望校判定の合格％自動算出
-  const handleSaveMockExam = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStudent || !mockScore || !mockTargetSchool) return;
+  // エイリアス（後方互換用）
+  const handleSaveRegularTest = handleSaveRegularExam;
 
-    const scoreNum = parseInt(mockScore);
+  // 7. 模試＆志望校判定の合格％自動算出
+  const handleSaveMockExam = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedStudent) {
+      alert('生徒を選択してください。');
+      return;
+    }
+    if (!mockScore || !mockTargetSchool) {
+      alert('模試名・総合得点・判定志望校を入力・選択してください。');
+      return;
+    }
+
+    const scoreNum = parseInt(mockScore, 10);
     
     // 合格％算出
     const probability = calculateMockExamPassRate(scoreNum, mockTargetSchool, examThresholds);
+
+    // 判定ランク算出 (A〜E)
+    let passRank = 'C';
+    let passLabel = '合格ライン';
+    if (probability >= 80) { passRank = 'A'; passLabel = '合格可能性極めて高い (80%以上)'; }
+    else if (probability >= 65) { passRank = 'B'; passLabel = '合格可能性高い (65〜79%)'; }
+    else if (probability >= 50) { passRank = 'C'; passLabel = '合格ライン (50〜64%)'; }
+    else if (probability >= 35) { passRank = 'D'; passLabel = '要努力 (35〜49%)'; }
+    else { passRank = 'E'; passLabel = '志望校再検討推奨 (35%未満)'; }
+
+    const targetSchoolObj = schoolCodes.find(sc => sc.code === mockTargetSchool);
+    const targetSchoolName = targetSchoolObj ? targetSchoolObj.name : mockTargetSchool;
+
+    const mockResultObj = {
+      rank: passRank,
+      probability,
+      schoolName: targetSchoolName,
+      label: passLabel
+    };
+    setLastMockPassResult(mockResultObj);
 
     const record: TestRecord = {
       id: `tr-${Date.now()}`,
       student_id: selectedStudent.id,
       record_type: 'mock_exam',
-      subject: mockSubject,
+      test_name: mockSubject || '模試結果',
+      subject: mockSubject || '模試結果',
       score: scoreNum,
       target_school_code: mockTargetSchool,
-      improvement_plan: `志望校合格可能性: ${probability}%`,
+      improvement_plan: `【${passRank}判定】 志望校: ${targetSchoolName} (合格可能性: ${probability}%)`,
       created_at: new Date().toISOString()
     };
 
     await db.saveTestRecord(record);
+    
+    // フォームリセット
+    setMockSubject('');
     setMockScore('');
-    alert(`模試結果を記録しました。\n判定: ${probability}%`);
-    loadData();
+
+    alert(`✅ 模試結果を記録し、判定を算出しました！\n🎯 【${passRank}判定】 合格可能性: ${probability}% (志望校: ${targetSchoolName})`);
+    
+    // 成績履歴一覧の即時更新
+    const updated = db.getTestRecords().filter(tr => tr.student_id === selectedStudent.id);
+    setTestRecordsList(updated);
+    await loadData();
+  };
+
+  // 7-2. 成績レコードの削除処理
+  const handleDeleteTestRecord = async (id: string) => {
+    if (!window.confirm('この成績レコードを削除してもよろしいですか？')) return;
+    await db.deleteTestRecord(id);
+    if (selectedStudent) {
+      setTestRecordsList(prev => prev.filter(tr => tr.id !== id));
+    }
   };
 
   // 8. AI指導報告書自動生成
@@ -5694,15 +5755,23 @@ export default function TeacherDashboard({
                         </table>
 
                         <div className={styles.formGroup}>
-                          <label>改善点</label>
+                          <label>改善点 / 対策メモ</label>
                           <textarea
                             value={regularImprovement}
                             onChange={e => setRegularImprovement(e.target.value)}
                             className={styles.textarea}
                             style={{ height: '60px' }}
+                            placeholder="例: 数学の計算ミス対策と英語の長文読解を強化"
                           ></textarea>
                         </div>
-                        <button type="submit" className={styles.btn}>定期テスト結果を記録</button>
+                        <button
+                          type="submit"
+                          onClick={handleSaveRegularExam}
+                          className={styles.btn}
+                          style={{ width: '100%', padding: '10px', fontWeight: 700 }}
+                        >
+                          定期テスト結果を記録
+                        </button>
                       </form>
                     </div>
 
@@ -5711,60 +5780,148 @@ export default function TeacherDashboard({
                       <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>模試結果 ＆ 志望校判定</h4>
                       <form onSubmit={handleSaveMockExam}>
                         <div className={styles.formGroup}>
-                          <label>模試名</label>
-                          <input type="text" value={mockSubject} onChange={e => setMockSubject(e.target.value)} className={styles.input} required />
+                          <label>模試名 / 教科</label>
+                          <input
+                            type="text"
+                            value={mockSubject}
+                            onChange={e => setMockSubject(e.target.value)}
+                            className={styles.input}
+                            placeholder="例: 全県模試 第1回, 駿台模試"
+                            required
+                          />
                         </div>
                         <div className={styles.formGroup}>
                           <label>総合得点 (点)</label>
-                          <input type="number" value={mockScore} onChange={e => setMockScore(e.target.value)} className={styles.input} required />
+                          <input
+                            type="number"
+                            value={mockScore}
+                            onChange={e => setMockScore(e.target.value)}
+                            className={styles.input}
+                            placeholder="例: 380"
+                            required
+                          />
                         </div>
                         <div className={styles.formGroup}>
                           <label>判定志望校</label>
-                          <select value={mockTargetSchool} onChange={e => setMockTargetSchool(e.target.value)} className={styles.select} required>
+                          <select
+                            value={mockTargetSchool}
+                            onChange={e => setMockTargetSchool(e.target.value)}
+                            className={styles.select}
+                            required
+                          >
                             <option value="">-- 志望校を選択 --</option>
                             {schoolCodes.map(sc => (
                               <option key={sc.code} value={sc.code}>{sc.name}</option>
                             ))}
                           </select>
                         </div>
-                        <button type="submit" className={styles.btn}>模試点数を入力して合格判定算出</button>
+                        <button
+                          type="submit"
+                          onClick={handleSaveMockExam}
+                          className={styles.btn}
+                          style={{ width: '100%', padding: '10px', fontWeight: 700, background: '#3b82f6' }}
+                        >
+                          模試点数を入力して合格判定算出
+                        </button>
                       </form>
+
+                      {/* 志望校合格可能性の算出判定結果表示カード */}
+                      {lastMockPassResult && (
+                        <div style={{ marginTop: '16px', padding: '14px', borderRadius: '10px', background: '#ffffff', border: '2px solid #3b82f6', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                          <div style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>🎯 最新合格判定算出結果</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ padding: '4px 12px', borderRadius: '20px', background: lastMockPassResult.rank === 'A' ? '#10b981' : lastMockPassResult.rank === 'B' ? '#3b82f6' : lastMockPassResult.rank === 'C' ? '#f59e0b' : lastMockPassResult.rank === 'D' ? '#f97316' : '#ef4444', color: '#ffffff', fontWeight: 800, fontSize: '1.1rem' }}>
+                              【{lastMockPassResult.rank}判定】
+                            </span>
+                            <div>
+                              <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1e293b' }}>志望校: {lastMockPassResult.schoolName}</div>
+                              <div style={{ fontSize: '0.88rem', color: '#334155', fontWeight: 700 }}>合格可能性: {lastMockPassResult.probability}% （{lastMockPassResult.label}）</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Test history table */}
                   <div style={{ marginTop: '24px' }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>成績履歴一覧</h4>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontWeight: 700 }}>成績履歴一覧</h4>
+                      <span style={{ fontSize: '0.8rem', color: '#64748b' }}>全 {testRecordsList.length} 件</span>
+                    </div>
+
                     <table className={styles.table}>
                       <thead>
                         <tr>
                           <th>種類</th>
-                          <th>教科 / 模試名</th>
+                          <th>テスト名 / 模試名</th>
                           <th>得点</th>
-                          <th>順位上下 / 判定</th>
-                          <th>上昇率</th>
-                          <th>改善点 / メモ</th>
+                          <th>順位 / 判定</th>
+                          <th>偏差値</th>
+                          <th>改善点 / 対策メモ</th>
                           <th>記録日時</th>
+                          <th>操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {testRecordsList.map(tr => (
-                          <tr key={tr.id}>
-                            <td>{tr.record_type === 'regular_test' ? '定期テスト' : '模試'}</td>
-                            <td>{tr.subject}</td>
-                            <td>{tr.score}点</td>
-                            <td>
-                              {tr.record_type === 'regular_test' ? (
-                                tr.rank_change === 'up' ? '🟢 上昇' : tr.rank_change === 'down' ? '🔴 下降' : '🟡 維持'
-                              ) : (
-                                <strong>{tr.improvement_plan}</strong>
-                              )}
+                        {testRecordsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} style={{ textAlign: 'center', color: '#94a3b8', padding: '20px' }}>
+                              登録された成績履歴はまだありません。
                             </td>
-                            <td>{tr.rate_change ? `+${tr.rate_change}%` : '-'}</td>
-                            <td>{tr.record_type === 'regular_test' ? tr.improvement_plan : '-'}</td>
-                            <td>{new Date(tr.created_at).toLocaleDateString()}</td>
                           </tr>
-                        ))}
+                        ) : (
+                          testRecordsList
+                            .slice()
+                            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                            .map(tr => (
+                              <tr key={tr.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <td style={{ padding: '10px' }}>
+                                  <span style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    background: tr.record_type === 'regular_test' ? '#e0e7ff' : '#fef3c7',
+                                    color: tr.record_type === 'regular_test' ? '#3730a3' : '#92400e'
+                                  }}>
+                                    {tr.record_type === 'regular_test' ? '📝 定期テスト' : '🎯 模試'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '10px', fontWeight: 600 }}>{tr.test_name || tr.subject || '成績記録'}</td>
+                                <td style={{ padding: '10px', fontWeight: 700 }}>
+                                  {tr.record_type === 'regular_test'
+                                    ? (tr.score_total !== null && tr.score_total !== undefined ? `${tr.score_total}点 (合計)` : (tr.score !== null && tr.score !== undefined ? `${tr.score}点` : '未入力'))
+                                    : `${tr.score}点`}
+                                </td>
+                                <td style={{ padding: '10px' }}>
+                                  {tr.record_type === 'regular_test' ? (
+                                    <span>
+                                      クラス: {tr.class_rank || 'ー'}位 / 学年: {tr.school_rank || 'ー'}位
+                                    </span>
+                                  ) : (
+                                    <strong style={{ color: '#2563eb' }}>{tr.improvement_plan || '-'}</strong>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px' }}>{tr.deviation_value !== null && tr.deviation_value !== undefined ? `${tr.deviation_value}` : 'ー'}</td>
+                                <td style={{ padding: '10px', fontSize: '0.8rem' }}>{tr.record_type === 'regular_test' ? tr.improvement_plan || '-' : '-'}</td>
+                                <td style={{ padding: '10px', fontSize: '0.78rem', color: '#64748b' }}>
+                                  {new Date(tr.created_at).toLocaleDateString('ja-JP')}
+                                </td>
+                                <td style={{ padding: '10px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteTestRecord(tr.id)}
+                                    className={styles.btn}
+                                    style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#ef4444', color: '#ffffff' }}
+                                    title="この成績記録を削除"
+                                  >
+                                    🗑️ 削除
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                        )}
                       </tbody>
                     </table>
                   </div>

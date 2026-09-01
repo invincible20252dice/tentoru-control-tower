@@ -138,7 +138,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     db.saveStudent(student);
 
     // Save schedule on a non-today date
-    const futureDate = '2026-09-01';
+    const futureDate = '2026-09-10';
     const tasks: LearningTask[] = [
       {
         id: 'task-future-1',

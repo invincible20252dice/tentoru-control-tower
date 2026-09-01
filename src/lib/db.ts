@@ -1913,6 +1913,15 @@ class DatabaseService {
     }
   }
 
+  public async deleteTestRecord(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      const { error } = await this.supabase.from('test_records').delete().eq('id', id);
+      if (error) console.warn('Supabase deleteTestRecord error:', error);
+    }
+    const list = this.getTestRecords().filter(r => r.id !== id);
+    this.saveMockData('test_records', list);
+  }
+
   // 7. SchoolCodes CRUD
   public async saveSchoolCodeMaster(code: SchoolCodeMaster): Promise<SchoolCodeMaster> {
     if (!this.isMockMode && this.supabase) {
