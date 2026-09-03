@@ -227,24 +227,16 @@ export function findNextUncompletedLessonForSubject(params: {
   const isJunior = Boolean(student?.grade?.startsWith('中'));
   const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
-  // 1. 対象教科の全授業リストを抽出 (小学生はカリキュラムマスター全学年ステップを優先)
   const filteredMasters = curriculumMasters.filter(m => {
-    if (subject === '算数' || subject === '数学') {
-      if (isElem) {
-        return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
-      } else if (isJunior) {
-        return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
-      } else if (isHigh) {
-        return m.subject === '数学' && (m.grade?.startsWith('高') || !m.grade?.startsWith('小'));
-      }
-      return m.subject === subject;
+    if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+      return m.subject === '算数' || m.subject === '数学';
     }
     return m.subject === subject;
   });
 
   let masterLessons: Array<{ id: string; name: string; sort_order: number }> = [];
 
-  if (isElem && filteredMasters.length > 0) {
+  if (filteredMasters.length > 0) {
     masterLessons = filteredMasters
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map(m => ({
@@ -265,14 +257,6 @@ export function findNextUncompletedLessonForSubject(params: {
           id: u.id,
           name: u.name,
           sort_order: u.sequence_order ?? 0
-        }));
-    } else if (filteredMasters.length > 0) {
-      masterLessons = filteredMasters
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(m => ({
-          id: m.id,
-          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-          sort_order: m.sort_order ?? 0
         }));
     } else {
       const fallbackUnits = curriculumUnits
@@ -396,7 +380,17 @@ export function findNextUncompletedLessonForSubject(params: {
   const startUnitId = getStudentStartUnitIdForSubject(student, subject);
   let startThresholdIdx = 0;
   if (startUnitId) {
-    const sIdx = masterLessons.findIndex(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId));
+    const sIdx = masterLessons.findIndex(m => {
+      if (m.id === startUnitId || String(m.sort_order) === String(startUnitId)) return true;
+      if (m.name === startUnitId) return true;
+      if (typeof startUnitId === 'string' && startUnitId.trim() !== '') {
+        const cleanS = startUnitId.trim();
+        if (m.name.includes(cleanS) || cleanS.includes(m.name)) return true;
+        const mainPart = cleanS.split(/[-/]/)[0]?.trim();
+        if (mainPart && mainPart.length >= 2 && m.name.includes(mainPart)) return true;
+      }
+      return false;
+    });
     if (sIdx >= 0) startThresholdIdx = sIdx;
   }
 
@@ -529,8 +523,8 @@ export function calculateLessonRangeForSlot(params: {
     subject,
     startLessonId,
     lessonsPerSlot,
-    curriculumMasters = [],
-    curriculumUnits = [],
+    curriculumMasters: rawMasters = [],
+    curriculumUnits: rawUnits = [],
     schoolId = params.student?.school_id,
     student,
     tasks = [],
@@ -538,6 +532,9 @@ export function calculateLessonRangeForSlot(params: {
     lessonProgressList = [],
     miniTestResults = []
   } = params;
+
+  const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
+  const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
 
   const isElem = Boolean(
     student?.grade?.startsWith('小') || 
@@ -639,8 +636,19 @@ export function calculateLessonRangeForSlot(params: {
       lessonProgressList,
       miniTestResults
     });
-    if (nextUncompleted.masterIndex >= 0) {
-      startIdx = nextUncompleted.masterIndex;
+    if (nextUncompleted.lessonId || nextUncompleted.lessonName) {
+      const idx = masterLessons.findIndex(m => 
+        m.id === nextUncompleted.lessonId || 
+        String(m.sort_order) === String(nextUncompleted.lessonId) ||
+        m.name === nextUncompleted.lessonName
+      );
+      if (idx >= 0) {
+        startIdx = idx;
+      } else if (nextUncompleted.masterIndex >= 0) {
+        startIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
+      }
+    } else if (nextUncompleted.masterIndex >= 0) {
+      startIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
     }
     if (nextUncompleted.hasFailedUnitTest && nextUncompleted.failedUnitTest) {
       hasFailed = true;
@@ -911,22 +919,45 @@ export function generateAttendanceDates(
  */
 export function getStudentStartUnitIdForSubject(student?: Student | null, subject?: string): string | null {
   if (!student || !subject) return null;
-  const sub = subject;
+  const sub = subject.trim();
 
-  if (sub === '数学' || sub === '算数') {
-    return student.start_unit_math || student.subject_start_positions?.['数学'] || student.subject_start_positions?.['算数'] || student.start_unit_id || null;
+  if (sub === '数学' || sub === '算数' || sub.toLowerCase() === 'math') {
+    return student.start_unit_math || 
+           student.subject_start_positions?.['数学'] || 
+           student.subject_start_positions?.['算数'] || 
+           student.subject_start_positions?.['math'] || 
+           student.subject_start_positions?.['Math'] || 
+           student.start_unit_id || null;
   }
-  if (sub === '英語') {
-    return student.start_unit_english || student.subject_start_positions?.['英語'] || student.start_unit_id || null;
+  if (sub === '英語' || sub.toLowerCase() === 'english') {
+    return student.start_unit_english || 
+           student.subject_start_positions?.['英語'] || 
+           student.subject_start_positions?.['english'] || 
+           student.subject_start_positions?.['English'] || 
+           student.start_unit_id || null;
   }
-  if (sub === '理科') {
-    return student.start_unit_science || student.subject_start_positions?.['理科'] || student.start_unit_id || null;
+  if (sub === '理科' || sub.toLowerCase() === 'science') {
+    return student.start_unit_science || 
+           student.subject_start_positions?.['理科'] || 
+           student.subject_start_positions?.['science'] || 
+           student.subject_start_positions?.['Science'] || 
+           student.start_unit_id || null;
   }
-  if (sub === '社会' || sub === '歴史' || sub === '地理') {
-    return student.start_unit_social || student.subject_start_positions?.['社会'] || student.subject_start_positions?.['歴史'] || student.subject_start_positions?.['地理'] || student.start_unit_id || null;
+  if (sub === '社会' || sub === '歴史' || sub === '地理' || sub.toLowerCase() === 'social') {
+    return student.start_unit_social || 
+           student.subject_start_positions?.['社会'] || 
+           student.subject_start_positions?.['歴史'] || 
+           student.subject_start_positions?.['地理'] || 
+           student.subject_start_positions?.['social'] || 
+           student.subject_start_positions?.['Social'] || 
+           student.start_unit_id || null;
   }
-  if (sub === '国語') {
-    return student.start_unit_japanese || student.subject_start_positions?.['国語'] || student.start_unit_id || null;
+  if (sub === '国語' || sub.toLowerCase() === 'japanese') {
+    return student.start_unit_japanese || 
+           student.subject_start_positions?.['国語'] || 
+           student.subject_start_positions?.['japanese'] || 
+           student.subject_start_positions?.['Japanese'] || 
+           student.start_unit_id || null;
   }
   return student.subject_start_positions?.[sub] || student.start_unit_id || null;
 }
@@ -1730,6 +1761,14 @@ export function generateSlotsForSelectedSubjects(params: {
     lessonProgressList
   });
 
+  const isElem = Boolean(
+    student.grade?.startsWith('小') || 
+    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
+    student.grade === '園児'
+  );
+  const defaultSubjs = isElem ? ['英語', '算数'] : ['数学', '英語'];
+  const userSubjs = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : (student.selected_subjects && student.selected_subjects.length > 0 ? student.selected_subjects : defaultSubjs);
+
   const slots: Record<number, any> = {};
 
   for (let p = 1; p <= periodCount; p++) {
@@ -1737,7 +1776,7 @@ export function generateSlotsForSelectedSubjects(params: {
     if (p <= sortedSubjs.length) {
       sub = sortedSubjs[p - 1];
     } else {
-      sub = sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0];
+      sub = sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0] || '算数';
     }
 
     const range = calculateLessonRangeForSlot({

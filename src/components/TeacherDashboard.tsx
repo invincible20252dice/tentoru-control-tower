@@ -1915,57 +1915,72 @@ export default function TeacherDashboard({
       currentTeacherType === 'elementary'
     );
 
+    // 教科のマッチング判定関数（他教科のカリキュラム混入を完全防ぐ）
+    const matchSubject = (targetSubject?: string) => {
+      if (!targetSubject) return false;
+      const target = targetSubject.trim();
+      const s = subj.trim();
+
+      if (s === '数学' || s === '算数' || s.toLowerCase() === 'math') {
+        return target === '算数' || target === '数学' || target.toLowerCase() === 'math';
+      }
+      if (s === '英語' || s.toLowerCase() === 'english') {
+        return target === '英語' || target.toLowerCase() === 'english';
+      }
+      if (s === '理科' || s.toLowerCase() === 'science') {
+        return target === '理科' || target.toLowerCase() === 'science';
+      }
+      if (s === '社会' || s === '歴史' || s === '地理' || s === '公民' || s.toLowerCase() === 'social') {
+        return ['社会', '歴史', '地理', '公民', 'social'].includes(target) || target.toLowerCase() === 'social';
+      }
+      if (s === '国語' || s.toLowerCase() === 'japanese') {
+        return target === '国語' || target.toLowerCase() === 'japanese';
+      }
+      return target === s;
+    };
+
     const matchingSchoolUnits = allCurriculumUnits.filter(u => 
       (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-      (isElem ? u.subject === '算数' : u.subject === subj)
+      matchSubject(u.subject)
     );
 
-    if (matchingSchoolUnits.length > 0) {
-      return matchingSchoolUnits
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
-        .map(u => ({
-          id: u.id,
-          name: u.name,
-          sort_order: u.sequence_order ?? 0,
-          isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
-        }));
-    }
+    let masters = curriculumMastersList.filter(m => matchSubject(m.subject));
 
-    let masters = curriculumMastersList.filter(m => {
-      if (subj === '数学' || subj === '算数') {
-        if (isElem) {
-          return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
-        } else {
-          return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
-        }
-      }
-      return m.subject === subj;
-    });
+    const schoolUnits = matchingSchoolUnits.map(u => ({
+      id: u.id,
+      name: u.name,
+      sort_order: u.sequence_order ?? 0,
+      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+    }));
 
-    if (masters.length > 0) {
-      return masters
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(m => ({
-          id: m.id,
-          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-          sort_order: m.sort_order ?? 0,
-          isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj))
-        }));
-    }
+    const masterUnits = masters.map(m => ({
+      id: m.id,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+      sort_order: m.sort_order ?? 0,
+      isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj))
+    }));
+
+    const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean }>();
+    masterUnits.forEach(item => combinedMap.set(item.id, item));
+    schoolUnits.forEach(item => combinedMap.set(item.id, item));
 
     const fallbackUnits = allCurriculumUnits.filter(u => 
       (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-      (isElem ? u.subject === '算数' : u.subject === subj)
-    );
+      matchSubject(u.subject)
+    ).map(u => ({
+      id: u.id,
+      name: u.name,
+      sort_order: u.sequence_order ?? 0,
+      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+    }));
 
-    return fallbackUnits
-      .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
-      .map(u => ({
-        id: u.id,
-        name: u.name,
-        sort_order: u.sequence_order ?? 0,
-        isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
-      }));
+    fallbackUnits.forEach(item => {
+      if (!combinedMap.has(item.id)) {
+        combinedMap.set(item.id, item);
+      }
+    });
+
+    return Array.from(combinedMap.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   };
 
   const findLessonById = (id: string, subject?: string) => {
