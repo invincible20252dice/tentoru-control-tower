@@ -55,8 +55,16 @@ export interface Student {
   start_unit_japanese?: string | null;
   start_unit_basic_english?: string | null;
   start_unit_basic_kanji?: string | null;
-  start_unit_basic_calculation?: string | null;
   subject_start_positions?: Record<string, string>;
+  subject_start_units?: Record<string, string>;
+  start_units?: {
+    math?: string;
+    english?: string;
+    science?: string;
+    social?: string;
+    japanese?: string;
+    [key: string]: string | undefined;
+  };
   last_completed_lesson_id?: string | null;
   last_completed_at?: string | null;
   completed_lesson_ids?: string[];

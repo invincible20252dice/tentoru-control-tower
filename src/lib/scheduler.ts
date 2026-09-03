@@ -380,17 +380,19 @@ export function findNextUncompletedLessonForSubject(params: {
   const startUnitId = getStudentStartUnitIdForSubject(student, subject);
   let startThresholdIdx = 0;
   if (startUnitId) {
-    const sIdx = masterLessons.findIndex(m => {
+    const { gradeText, unitName, cleanRaw } = parseStartUnitSetting(startUnitId);
+
+    let sIdx = masterLessons.findIndex(m => {
       if (m.id === startUnitId || String(m.sort_order) === String(startUnitId)) return true;
-      if (m.name === startUnitId) return true;
-      if (typeof startUnitId === 'string' && startUnitId.trim() !== '') {
-        const cleanS = startUnitId.trim();
-        if (m.name.includes(cleanS) || cleanS.includes(m.name)) return true;
-        const mainPart = cleanS.split(/[-/]/)[0]?.trim();
-        if (mainPart && mainPart.length >= 2 && m.name.includes(mainPart)) return true;
-      }
+      if (m.name === startUnitId || m.name === cleanRaw) return true;
+      if (unitName && (m.name.includes(unitName) || cleanRaw.includes(m.name))) return true;
       return false;
     });
+
+    if (sIdx < 0 && unitName && unitName.length >= 2) {
+      sIdx = masterLessons.findIndex(m => m.name.includes(unitName) || unitName.includes(m.name));
+    }
+
     if (sIdx >= 0) startThresholdIdx = sIdx;
   }
 
@@ -915,51 +917,78 @@ export function generateAttendanceDates(
 }
 
 /**
- * 生徒の教科ごとのスタート位置（単元ID）を取得するヘルパー関数
+ * 生徒の教科ごとの設定文字列（学年/単元名）をパースするヘルパー関数
+ */
+export function parseStartUnitSetting(rawSetting: string): { gradeText: string | null; unitName: string | null; cleanRaw: string } {
+  if (!rawSetting || typeof rawSetting !== 'string') {
+    return { gradeText: null, unitName: null, cleanRaw: '' };
+  }
+  const cleanRaw = rawSetting.trim();
+  const parts = cleanRaw.split(/[\/\-—–│|]/).map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    let gradeText: string | null = null;
+    let unitName: string | null = null;
+
+    parts.forEach(p => {
+      if (p.includes('年') || p.includes('小') || p.includes('中') || p.includes('高') || p.toLowerCase().includes('grade')) {
+        gradeText = p;
+      } else {
+        unitName = p;
+      }
+    });
+
+    if (!unitName && parts.length >= 2) {
+      unitName = parts[parts.length - 1];
+    }
+
+    return { gradeText, unitName: unitName || cleanRaw, cleanRaw };
+  }
+
+  return { gradeText: null, unitName: cleanRaw, cleanRaw };
+}
+
+/**
+ * 生徒の教科ごとのスタート位置（単元ID / 設定文字列）を取得するヘルパー関数
  */
 export function getStudentStartUnitIdForSubject(student?: Student | null, subject?: string): string | null {
   if (!student || !subject) return null;
   const sub = subject.trim();
 
+  const getFromDict = (keys: string[]) => {
+    for (const k of keys) {
+      if (student.start_units && (student.start_units as any)[k]) return (student.start_units as any)[k];
+      if (student.subject_start_positions && student.subject_start_positions[k]) return student.subject_start_positions[k];
+      if (student.subject_start_units && student.subject_start_units[k]) return student.subject_start_units[k];
+    }
+    return null;
+  };
+
   if (sub === '数学' || sub === '算数' || sub.toLowerCase() === 'math') {
     return student.start_unit_math || 
-           student.subject_start_positions?.['数学'] || 
-           student.subject_start_positions?.['算数'] || 
-           student.subject_start_positions?.['math'] || 
-           student.subject_start_positions?.['Math'] || 
+           getFromDict(['math', 'Math', '算数', '数学']) || 
            student.start_unit_id || null;
   }
   if (sub === '英語' || sub.toLowerCase() === 'english') {
     return student.start_unit_english || 
-           student.subject_start_positions?.['英語'] || 
-           student.subject_start_positions?.['english'] || 
-           student.subject_start_positions?.['English'] || 
+           getFromDict(['english', 'English', '英語']) || 
            student.start_unit_id || null;
   }
   if (sub === '理科' || sub.toLowerCase() === 'science') {
     return student.start_unit_science || 
-           student.subject_start_positions?.['理科'] || 
-           student.subject_start_positions?.['science'] || 
-           student.subject_start_positions?.['Science'] || 
+           getFromDict(['science', 'Science', '理科']) || 
            student.start_unit_id || null;
   }
   if (sub === '社会' || sub === '歴史' || sub === '地理' || sub.toLowerCase() === 'social') {
     return student.start_unit_social || 
-           student.subject_start_positions?.['社会'] || 
-           student.subject_start_positions?.['歴史'] || 
-           student.subject_start_positions?.['地理'] || 
-           student.subject_start_positions?.['social'] || 
-           student.subject_start_positions?.['Social'] || 
+           getFromDict(['social', 'Social', '社会', '歴史', '地理']) || 
            student.start_unit_id || null;
   }
   if (sub === '国語' || sub.toLowerCase() === 'japanese') {
     return student.start_unit_japanese || 
-           student.subject_start_positions?.['国語'] || 
-           student.subject_start_positions?.['japanese'] || 
-           student.subject_start_positions?.['Japanese'] || 
+           getFromDict(['japanese', 'Japanese', '国語']) || 
            student.start_unit_id || null;
   }
-  return student.subject_start_positions?.[sub] || student.start_unit_id || null;
+  return getFromDict([sub]) || student.start_unit_id || null;
 }
 
 /**

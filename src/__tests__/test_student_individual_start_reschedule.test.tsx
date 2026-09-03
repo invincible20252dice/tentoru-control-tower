@@ -118,4 +118,43 @@ describe('Student Individual Start Position & Subject Strict Filter Test Suite',
     expect(engLessons.some(l => l.unit_name.includes('比とその利用'))).toBe(false);
     expect(mathLessons.some(l => l.unit_name.includes('I am ~'))).toBe(false);
   });
+
+  it('correctly parses grade-formatted start unit setting "6年生 / 比とその利用" without falling back to grade 2', () => {
+    const studentWithGradeString: Student = {
+      id: 'std-yui-02',
+      student_id: 'S_YUI02',
+      name: '鈴木 結衣 (学年表記設定)',
+      grade: '小6',
+      grade_category: '小学生',
+      level: 'A',
+      school_id: 'sch-elem-1',
+      status: 'normal',
+      period_count: 2,
+      selected_days: ['friday'],
+      selected_subjects: ['算数'],
+      start_units: {
+        math: '6年生 / 比とその利用'
+      },
+      subject_start_positions: {
+        '算数': '6年生 / 比とその利用'
+      },
+      created_at: new Date().toISOString()
+    };
+
+    const masters = db.getCurriculumMasters();
+
+    const slots = generateSlotsForSelectedSubjects({
+      student: studentWithGradeString,
+      periodCount: 1,
+      selectedSubjects: ['算数'],
+      curriculumMasters: masters,
+      tasks: [],
+      lessonProgressList: []
+    });
+
+    expect(slots[1]).toBeDefined();
+    expect(slots[1].subject).toBe('算数');
+    expect(slots[1].startLessonName).toContain('比とその利用');
+    expect(slots[1].startLessonName).not.toContain('100cm');
+  });
 });
