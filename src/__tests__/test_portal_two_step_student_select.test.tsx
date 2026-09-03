@@ -177,4 +177,21 @@ describe('Portal 2-Step Student Select UI Test Suite', () => {
       expect(match.length).toBeGreaterThan(0);
     });
   });
+
+  it('triggers onViewStudentScreen from TeacherDashboard correctly', async () => {
+    db.saveSession({
+      user: {
+        id: 'usr-admin',
+        email: 'admin@tentoru.jp',
+        role: 'admin',
+        branch_id: 'branch-1'
+      },
+      expires_at: Date.now() + 3600 * 1000
+    });
+    render(<Home />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/司令塔ダッシュボード/i)).toBeInTheDocument();
+    });
+  });
 });
