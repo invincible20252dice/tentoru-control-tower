@@ -25,7 +25,46 @@ export default function Home() {
     }
     return 'junior_high';
   });
+  const [selectedGradeCategory, setSelectedGradeCategory] = useState<'elementary' | 'junior_high' | 'high_school' | ''>('');
   const [isInitializing, setIsInitializing] = useState(true);
+
+  // Filter students based on selected grade category
+  const filteredStudentsForCategory = studentsList.filter(s => {
+    if (!selectedGradeCategory) return false;
+
+    const g = s.grade?.trim() || '';
+    const cat = s.grade_category?.trim() || '';
+
+    if (selectedGradeCategory === 'elementary') {
+      return (
+        cat === '小学生' ||
+        g === '園児' ||
+        g.startsWith('小') ||
+        ['園児', '小1', '小2', '小3', '小4', '小5', '小6'].includes(g)
+      );
+    }
+    if (selectedGradeCategory === 'junior_high') {
+      return (
+        cat === '中学生' ||
+        g.startsWith('中') ||
+        ['中1', '中2', '中3'].includes(g)
+      );
+    }
+    if (selectedGradeCategory === 'high_school') {
+      return (
+        cat === '高校生' ||
+        g.startsWith('高') ||
+        g === '既卒' ||
+        ['高1', '高2', '高3', '既卒'].includes(g)
+      );
+    }
+    return false;
+  });
+
+  const handleCategoryChange = (cat: 'elementary' | 'junior_high' | 'high_school' | '') => {
+    setSelectedGradeCategory(cat);
+    setSelectedStudentId('');
+  };
 
   // Initialize session and student list
   useEffect(() => {
@@ -294,21 +333,53 @@ export default function Home() {
               今日の時間割（Todo）、すごろくマップ、印刷物教材へのリンクを確認・受講します。
             </div>
             
-            <div className={styles.studentSelectArea}>
+            <div className={styles.studentSelectArea} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* 第1段階（校種選択） */}
+              <select
+                value={selectedGradeCategory}
+                onChange={e => handleCategoryChange(e.target.value as any)}
+                className={styles.select}
+                data-testid="portal-grade-category-select"
+                id="portal-grade-category-select"
+              >
+                <option value="">-- 校種を選択 --</option>
+                <option value="elementary">小学生（園児・小1〜小6）</option>
+                <option value="junior_high">中学生（中1〜中3）</option>
+                <option value="high_school">高校生（高1〜高3・既卒）</option>
+              </select>
+
+              {/* 第2段階（生徒選択） */}
               <select 
                 value={selectedStudentId} 
                 onChange={e => setSelectedStudentId(e.target.value)}
                 className={styles.select}
+                disabled={!selectedGradeCategory}
+                data-testid="portal-student-select"
+                id="portal-student-select"
               >
-                <option value="">-- 生徒を選択 --</option>
-                {studentsList.map(s => (
+                <option value="">
+                  {!selectedGradeCategory ? '-- 校種を先に選択してください --' : '-- 生徒を選択 --'}
+                </option>
+                {filteredStudentsForCategory.map(s => (
                   <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
                 ))}
               </select>
+
               <button 
                 onClick={handleStudentLogin}
                 className={styles.select}
-                style={{ background: 'var(--primary)', color: '#ffffff', border: 'none', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center' }}
+                disabled={!selectedStudentId}
+                data-testid="portal-enter-student-screen-btn"
+                id="portal-enter-student-screen-btn"
+                style={{ 
+                  background: !selectedStudentId ? '#94a3b8' : 'var(--primary)', 
+                  color: '#ffffff', 
+                  border: 'none', 
+                  fontWeight: 'bold', 
+                  cursor: !selectedStudentId ? 'not-allowed' : 'pointer', 
+                  textAlign: 'center',
+                  transition: 'all 0.2s ease'
+                }}
               >
                 生徒画面へ入る ➔
               </button>

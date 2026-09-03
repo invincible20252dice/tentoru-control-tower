@@ -812,8 +812,8 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('TENTORU')).toBeInTheDocument();
 
     // 3. Student select login with selection under Dark theme (covers page.tsx line 66 theme === 'dark')
-    const selectEl = screen.getByRole('combobox');
-    fireEvent.change(selectEl, { target: { value: 'std-1' } });
+    fireEvent.change(screen.getByTestId('portal-grade-category-select'), { target: { value: 'junior_high' } });
+    fireEvent.change(screen.getByTestId('portal-student-select'), { target: { value: 'std-1' } });
     
     const studentLoginBtn = screen.getByText('生徒画面へ入る ➔');
     fireEvent.click(studentLoginBtn);
@@ -840,8 +840,8 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText('TENTORU')).toBeInTheDocument();
 
     // 4c. Student login under Light theme (covers page.tsx line 66 theme === 'light')
-    const selectElLight = screen.getByRole('combobox');
-    fireEvent.change(selectElLight, { target: { value: 'std-1' } });
+    fireEvent.change(screen.getByTestId('portal-grade-category-select'), { target: { value: 'junior_high' } });
+    fireEvent.change(screen.getByTestId('portal-student-select'), { target: { value: 'std-1' } });
     const studentLoginBtnLight = screen.getByText('生徒画面へ入る ➔');
     fireEvent.click(studentLoginBtnLight);
     expect(screen.getByText(/佐藤 拓海 さんの学習画面/)).toBeInTheDocument();
@@ -854,13 +854,10 @@ describe('UI Components Render & Interaction Tests', () => {
     // 5. Student select login without student selection (error alert path cover)
     const studentLoginBtnError = screen.getByText('生徒画面へ入る ➔');
     fireEvent.click(studentLoginBtnError);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('生徒を選択してください。');
-    });
 
     // 6. Student select login with invalid student selection (if (student) false path cover)
     // Append a dummy option to select element to simulate invalid student state selection
-    const selectElError = screen.getByRole('combobox');
+    const selectElError = screen.getByTestId('portal-student-select');
     const opt = document.createElement('option');
     opt.value = 'std-invalid';
     opt.text = '無効な生徒';

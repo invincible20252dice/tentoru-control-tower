@@ -242,10 +242,13 @@ describe('Comprehensive Test Suite for High Coverage', () => {
       fireEvent.click(screen.getByText('ポータルへ戻る'));
 
       // Test Student Login
-      const studentSelect = screen.getByRole('combobox') as HTMLSelectElement;
-      const options = screen.getAllByRole('option');
-      if (options.length > 1) {
-        fireEvent.change(studentSelect, { target: { value: options[1].getAttribute('value') } });
+      const categorySelect = screen.getByTestId('portal-grade-category-select') as HTMLSelectElement;
+      fireEvent.change(categorySelect, { target: { value: 'junior_high' } });
+
+      const studentSelect = screen.getByTestId('portal-student-select') as HTMLSelectElement;
+      const options = Array.from(studentSelect.options).filter(o => o.value !== '');
+      if (options.length > 0) {
+        fireEvent.change(studentSelect, { target: { value: options[0].value } });
         const studentLoginBtn = screen.getByText('生徒画面へ入る ➔');
         fireEvent.click(studentLoginBtn);
       }
@@ -258,9 +261,8 @@ describe('Comprehensive Test Suite for High Coverage', () => {
       // Starts on dashboard, click back to portal
       fireEvent.click(screen.getByText('ポータルへ戻る'));
 
-      const studentLoginBtn = screen.getByText('生徒画面へ入る ➔');
-      fireEvent.click(studentLoginBtn);
-      expect(alertSpy).toHaveBeenCalledWith('生徒を選択してください。');
+      const studentLoginBtn = screen.getByText('生徒画面へ入る ➔') as HTMLButtonElement;
+      expect(studentLoginBtn.disabled).toBe(true);
 
       alertSpy.mockRestore();
     });

@@ -47,6 +47,7 @@ export interface Student {
   assigned_teachers?: string[];
   registered_grade?: string;
   registered_year?: number;
+  grade_category?: string;
   school_name?: string;
   start_unit_math?: string | null;
   start_unit_english?: string | null;
