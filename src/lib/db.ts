@@ -1030,68 +1030,82 @@ class DatabaseService {
     return this.getMockData('curriculum_units', seed);
   }
 
+  public getSupabase(): any {
+    return this.supabase;
+  }
+
+  public getIsMockMode(): boolean {
+    return this.isMockMode;
+  }
+
   public getStudents(): Student[] {
-    const seed: Student[] = [
-      {
-        id: 'std-1',
-        student_id: 'student101',
-        name: '佐藤 拓海',
-        email: 'student101@tentoru-student.com',
-        grade: '中3',
-        school_id: 'sch-1',
-        status: 'normal',
-        start_unit_id: 'unit-102-1',
-        period_count: 2,
-        created_at: '2026-04-01T00:00:00Z',
-        level: 'A',
-        name_kana: 'サトウ タクミ',
-        birthday: '2011-05-15',
-        club_activities: '野球部',
-        hobbies: '読書・ゲーム',
-        parent_name: '佐藤 健二',
-        contact_phone: '090-1234-5678',
-        contact_time: '18:00 - 21:00',
-        personalities: ['スイッチ入るとよく喋る', '班長'],
-        target_school: '天登星雲高校',
-        classroom: '恵比寿教室',
-        teacher_in_charge: '福田 尚弘',
-        registered_grade: '中3',
-        registered_year: 2026,
-        weekly_sessions_count: '2回',
-        weekly_duration_minutes: '120分',
-        selected_subjects: ['数学', '英語', '理科', '社会', '国語']
-      },
-      {
-        id: 'std-2',
-        student_id: 'student102',
-        name: '鈴木 結衣',
-        email: 'student102@tentoru-student.com',
-        grade: '小5',
-        school_id: 'sch-2',
-        status: 'normal',
-        start_unit_id: 'unit-301-1',
-        period_count: 2,
-        created_at: '2025-04-01T00:00:00Z', // 2025年度登録なので、2026年度時点では小6へ自動進級
-        level: 'B',
-        name_kana: 'スズキ ユイ',
-        birthday: '2015-08-20',
-        club_activities: '音楽クラブ',
-        hobbies: 'ピアノ・歌',
-        parent_name: '鈴木 陽子',
-        contact_phone: '080-9876-5432',
-        contact_time: '17:00 - 20:00',
-        personalities: ['ぱっと見大人しい', '音楽の授業は好き'],
-        target_school: 'テントル総合高校',
-        classroom: '恵比寿教室',
-        teacher_in_charge: '福田 尚弘',
-        registered_grade: '小5',
-        registered_year: 2025,
-        weekly_sessions_count: '3回',
-        weekly_duration_minutes: '90分',
-        selected_subjects: ['算数', '国語', '英語']
-      }
-    ];
-    const rawList = this.getMockData('students', seed);
+    let rawList: Student[] = [];
+    if (!this.isMockMode && this.supabase) {
+      // Supabase接続時はローカルキャッシュ（DBフェッチ結果）から取得
+      rawList = this.getMockData<Student>('students', []);
+    } else {
+      const seed: Student[] = [
+        {
+          id: 'std-1',
+          student_id: 'student101',
+          name: '佐藤 拓海',
+          email: 'student101@tentoru-student.com',
+          grade: '中3',
+          school_id: 'sch-1',
+          status: 'normal',
+          start_unit_id: 'unit-102-1',
+          period_count: 2,
+          created_at: '2026-04-01T00:00:00Z',
+          level: 'A',
+          name_kana: 'サトウ タクミ',
+          birthday: '2011-05-15',
+          club_activities: '野球部',
+          hobbies: '読書・ゲーム',
+          parent_name: '佐藤 健二',
+          contact_phone: '090-1234-5678',
+          contact_time: '18:00 - 21:00',
+          personalities: ['スイッチ入るとよく喋る', '班長'],
+          target_school: '天登星雲高校',
+          classroom: '恵比寿教室',
+          teacher_in_charge: '福田 尚弘',
+          registered_grade: '中3',
+          registered_year: 2026,
+          weekly_sessions_count: '2回',
+          weekly_duration_minutes: '120分',
+          selected_subjects: ['数学', '英語', '理科', '社会', '国語']
+        },
+        {
+          id: 'std-2',
+          student_id: 'student102',
+          name: '鈴木 結衣',
+          email: 'student102@tentoru-student.com',
+          grade: '小5',
+          school_id: 'sch-2',
+          status: 'normal',
+          start_unit_id: 'unit-301-1',
+          period_count: 2,
+          created_at: '2025-04-01T00:00:00Z',
+          level: 'B',
+          name_kana: 'スズキ ユイ',
+          birthday: '2015-08-20',
+          club_activities: '音楽クラブ',
+          hobbies: 'ピアノ・歌',
+          parent_name: '鈴木 陽子',
+          contact_phone: '080-9876-5432',
+          contact_time: '17:00 - 20:00',
+          personalities: ['ぱっと見大人しい', '音楽の授業は好き'],
+          target_school: 'テントル総合高校',
+          classroom: '恵比寿教室',
+          teacher_in_charge: '福田 尚弘',
+          registered_grade: '小5',
+          registered_year: 2025,
+          weekly_sessions_count: '3回',
+          weekly_duration_minutes: '90分',
+          selected_subjects: ['算数', '国語', '英語']
+        }
+      ];
+      rawList = this.getMockData('students', seed);
+    }
     const curYear = getSchoolYear();
     const schoolsList = this.getSchools();
     return rawList.map(s => {
@@ -1524,11 +1538,29 @@ class DatabaseService {
       // Keep school_name in payloadToSave, only strip transient properties like school, units, tasks
       const { school, units, tasks, ...payloadToSave } = toSave as any;
       console.log('[DEBUG] Save Payload:', payloadToSave);
-      const { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
+
+      let { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
       if (error) {
         console.error('Supabase saveStudent upsert error:', error);
+        
+        // UUID構文エラー (22P02) の場合のUUID自動フォールバック
+        if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
+          const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
+          const retryPayload = { ...payloadToSave };
+          if (validUUID) {
+            retryPayload.id = validUUID;
+            toSave.id = validUUID;
+          } else {
+            delete retryPayload.id;
+          }
+          const retryRes = await this.supabase.from('students').upsert(retryPayload).select().single();
+          if (!retryRes.error && retryRes.data) {
+            savedData = retryRes.data;
+          }
+        }
+
         // If column assigned_teachers or selected_subjects or school_name is not present on Supabase, fallback by saving payload without those columns
-        if (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.message?.includes('school_name') || error.code === 'PGRST204' || error.message?.includes('column')) {
+        if (!savedData && (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.message?.includes('school_name') || error.code === 'PGRST204' || error.message?.includes('column'))) {
           const { assigned_teachers, selected_subjects, school_name, ...fallbackPayload } = payloadToSave;
           const { data: fbData, error: fbError } = await this.supabase
             .from('students')

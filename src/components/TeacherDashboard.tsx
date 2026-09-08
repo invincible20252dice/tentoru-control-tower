@@ -431,6 +431,13 @@ export default function TeacherDashboard({
     db.fetchStudents().then(fetchedSt => {
       if (fetchedSt && fetchedSt.length > 0) {
         setStudents(fetchedSt);
+        if (targetStudent) {
+          const updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
+          if (updatedTarget) setSelectedStudent(updatedTarget);
+        } else if (selectedStudent) {
+          const updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
+          if (updatedCurrent) setSelectedStudent(updatedCurrent);
+        }
       }
     }).catch(err => console.warn('fetchStudents in loadData error:', err));
 
@@ -887,8 +894,9 @@ export default function TeacherDashboard({
       const currentSchoolObj = allCurrentSchools.find(s => s.id === targetSchoolId);
       const studentSchoolName = currentSchoolObj?.name || (targetSchoolId === 'add_new' ? newCustomSchoolName.trim() : '');
 
+      const generatedUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `std-${Date.now()}`;
       const newStudent: Student = {
-        id: `std-${Date.now()}`,
+        id: generatedUUID,
         student_id: studentId,
         name: newStudentName,
         email,
@@ -901,7 +909,7 @@ export default function TeacherDashboard({
         level: newStudentLevel
       };
 
-      await db.saveStudent(newStudent);
+      const savedStudent = await db.saveStudent(newStudent);
 
       // 新規生徒用の初期学習計画(学習タスク)を学校マスターから流し込む
       const allUnits = db.getCurriculumUnits();
