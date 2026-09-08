@@ -213,6 +213,7 @@ export default function TeacherDashboard({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   // 検索フィルター用のState
+  const [schoolTypeFilter, setSchoolTypeFilter] = useState<'all' | 'elementary' | 'junior_high' | 'high_school'>('all');
   const [filterSchoolName, setFilterSchoolName] = useState<string>('');
   const [filterGrade, setFilterGrade] = useState<string>('');
   const [filterName, setFilterName] = useState<string>('');
@@ -3485,6 +3486,76 @@ export default function TeacherDashboard({
               校舎権限
             </button>
           </div>
+
+          {/* Grade Category (校種) Switcher */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px', marginLeft: '4px' }}>
+            <button
+              type="button"
+              data-testid="header-teacher-type-elem"
+              onClick={() => {
+                setCurrentTeacherType('elementary');
+                setSchoolTypeFilter('elementary');
+                localStorage.setItem('tentoru_teacher_type', 'elementary');
+              }}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: currentTeacherType === 'elementary' ? '#0f766e' : 'transparent',
+                color: '#ffffff',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              小学生
+            </button>
+            <button
+              type="button"
+              data-testid="header-teacher-type-jhs"
+              onClick={() => {
+                setCurrentTeacherType('junior_high');
+                setSchoolTypeFilter('junior_high');
+                localStorage.setItem('tentoru_teacher_type', 'junior_high');
+              }}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: currentTeacherType === 'junior_high' ? '#2563eb' : 'transparent',
+                color: '#ffffff',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              中学生
+            </button>
+            <button
+              type="button"
+              data-testid="header-teacher-type-high"
+              onClick={() => {
+                setCurrentTeacherType('high_school');
+                setSchoolTypeFilter('high_school');
+                localStorage.setItem('tentoru_teacher_type', 'high_school');
+              }}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: currentTeacherType === 'high_school' ? '#7c3aed' : 'transparent',
+                color: '#ffffff',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              高校生
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -3731,6 +3802,100 @@ export default function TeacherDashboard({
 
               {/* Search Filters */}
               <div className={styles.filterArea}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>区分トグル:</span>
+                    <div style={{ display: 'inline-flex', backgroundColor: '#f1f5f9', borderRadius: '6px', padding: '2px', border: '1px solid #cbd5e1' }}>
+                      <button
+                        type="button"
+                        data-testid="filter-type-all"
+                        onClick={() => {
+                          setSchoolTypeFilter('all');
+                          setFilterGrade('');
+                        }}
+                        style={{
+                          padding: '4px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: schoolTypeFilter === 'all' ? '#0f766e' : 'transparent',
+                          color: schoolTypeFilter === 'all' ? '#ffffff' : '#475569'
+                        }}
+                      >
+                        すべて
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="filter-type-elem"
+                        onClick={() => {
+                          setSchoolTypeFilter('elementary');
+                          setCurrentTeacherType('elementary');
+                          localStorage.setItem('tentoru_teacher_type', 'elementary');
+                          setFilterGrade('');
+                        }}
+                        style={{
+                          padding: '4px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: schoolTypeFilter === 'elementary' ? '#0f766e' : 'transparent',
+                          color: schoolTypeFilter === 'elementary' ? '#ffffff' : '#475569'
+                        }}
+                      >
+                        小学生
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="filter-type-jhs"
+                        onClick={() => {
+                          setSchoolTypeFilter('junior_high');
+                          setCurrentTeacherType('junior_high');
+                          localStorage.setItem('tentoru_teacher_type', 'junior_high');
+                          setFilterGrade('');
+                        }}
+                        style={{
+                          padding: '4px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: schoolTypeFilter === 'junior_high' ? '#2563eb' : 'transparent',
+                          color: schoolTypeFilter === 'junior_high' ? '#ffffff' : '#475569'
+                        }}
+                      >
+                        中学生
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="filter-type-high"
+                        onClick={() => {
+                          setSchoolTypeFilter('high_school');
+                          setCurrentTeacherType('high_school');
+                          localStorage.setItem('tentoru_teacher_type', 'high_school');
+                          setFilterGrade('');
+                        }}
+                        style={{
+                          padding: '4px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: schoolTypeFilter === 'high_school' ? '#7c3aed' : 'transparent',
+                          color: schoolTypeFilter === 'high_school' ? '#ffffff' : '#475569'
+                        }}
+                      >
+                        高校生
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className={styles.filterGrid}>
                   <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                     <label htmlFor="filter-school-name" style={{ fontSize: '0.75rem', fontWeight: 600 }}>学校名検索</label>
@@ -3758,8 +3923,9 @@ export default function TeacherDashboard({
                       className={styles.select}
                     >
                       <option value="">すべての学年</option>
-                      {currentTeacherType === 'elementary' ? (
+                      {(schoolTypeFilter === 'elementary' || (schoolTypeFilter === 'all' && currentTeacherType === 'elementary')) ? (
                         <>
+                          <option value="園児">園児</option>
                           <option value="小1">小学1年生</option>
                           <option value="小2">小学2年生</option>
                           <option value="小3">小学3年生</option>
@@ -3767,13 +3933,14 @@ export default function TeacherDashboard({
                           <option value="小5">小学5年生</option>
                           <option value="小6">小学6年生</option>
                         </>
-                      ) : currentTeacherType === 'high_school' ? (
+                      ) : (schoolTypeFilter === 'high_school' || (schoolTypeFilter === 'all' && currentTeacherType === 'high_school')) ? (
                         <>
                           <option value="高1">高校1年生</option>
                           <option value="高2">高校2年生</option>
                           <option value="高3">高校3年生</option>
+                          <option value="既卒">既卒</option>
                         </>
-                      ) : currentTeacherType === 'junior_high' ? (
+                      ) : (schoolTypeFilter === 'junior_high' || (schoolTypeFilter === 'all' && currentTeacherType === 'junior_high')) ? (
                         <>
                           <option value="中1">中学1年生</option>
                           <option value="中2">中学2年生</option>
@@ -3781,6 +3948,7 @@ export default function TeacherDashboard({
                         </>
                       ) : (
                         <>
+                          <option value="園児">園児</option>
                           <option value="小1">小学1年生</option>
                           <option value="小2">小学2年生</option>
                           <option value="小3">小学3年生</option>
@@ -3793,6 +3961,7 @@ export default function TeacherDashboard({
                           <option value="高1">高校1年生</option>
                           <option value="高2">高校2年生</option>
                           <option value="高3">高校3年生</option>
+                          <option value="既卒">既卒</option>
                         </>
                       )}
                     </select>
@@ -3834,13 +4003,13 @@ export default function TeacherDashboard({
                     if (filterGrade && st.grade !== filterGrade) return false;
                     if (filterName && !st.name.includes(filterName)) return false;
                     
-                    const isElem = st.grade.startsWith('小') || st.grade === '園児' || school?.type === 'elementary';
-                    const isJhs = st.grade.startsWith('中') || school?.type === 'junior_high';
-                    const isHigh = st.grade.startsWith('高') || st.grade === '既卒' || school?.type === 'high_school';
+                    const isElem = st.grade?.startsWith('小') || st.grade === '園児' || st.grade_category === '小学生' || school?.type === 'elementary';
+                    const isJhs = st.grade?.startsWith('中') || st.grade_category === '中学生' || school?.type === 'junior_high';
+                    const isHigh = st.grade?.startsWith('高') || st.grade === '既卒' || st.grade_category === '高校生' || school?.type === 'high_school';
 
-                    if (currentTeacherType === 'elementary' && !isElem) return false;
-                    if (currentTeacherType === 'junior_high' && !isJhs) return false;
-                    if (currentTeacherType === 'high_school' && !isHigh) return false;
+                    if (schoolTypeFilter === 'elementary' && !isElem) return false;
+                    if (schoolTypeFilter === 'junior_high' && !isJhs) return false;
+                    if (schoolTypeFilter === 'high_school' && !isHigh) return false;
                     
                     return true;
                   })

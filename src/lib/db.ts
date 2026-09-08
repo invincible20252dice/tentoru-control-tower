@@ -622,6 +622,18 @@ class DatabaseService {
     return typeof window !== 'undefined';
   }
 
+  // Purge obsolete mock cache from localStorage
+  public clearLocalMockCache(): void {
+    if (!this.isBrowser()) return;
+    try {
+      localStorage.removeItem('tentoru_mock_students');
+      localStorage.removeItem('mock_students');
+      console.log('Local mock student cache cleared.');
+    } catch (e) {
+      console.error('Error clearing local mock cache:', e);
+    }
+  }
+
   // Load from LocalStorage or initialize with Seed Data
   private getMockData<T>(key: string, initialData: T[]): T[] {
     if (!this.isBrowser()) return initialData;

@@ -355,10 +355,10 @@ describe('Coverage Boost 95%+ Target Test Suite', () => {
       );
 
       // Elementary / Junior High Category Toggle Buttons
-      const elemToggle = screen.queryByText(/【小学生】/i) || screen.queryByText(/小学生/i);
-      if (elemToggle) {
+      const elemToggles = screen.queryAllByText(/小学生/i);
+      if (elemToggles.length > 0) {
         await act(async () => {
-          fireEvent.click(elemToggle);
+          fireEvent.click(elemToggles[0]);
         });
       }
 
