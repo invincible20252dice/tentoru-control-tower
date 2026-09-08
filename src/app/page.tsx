@@ -68,20 +68,41 @@ export default function Home() {
 
   // Initialize session and student list
   useEffect(() => {
-    const curSession = db.getSession();
-    if (curSession) {
-      setSession(curSession);
-      setCurrentView('teacher');
-    } else {
-      setCurrentView('login');
-    }
-    setStudentsList(db.getStudents());
-    setIsInitializing(false);
+    const init = async () => {
+      const curSession = db.getSession();
+      if (curSession) {
+        setSession(curSession);
+        setCurrentView('teacher');
+      } else {
+        setCurrentView('login');
+      }
+      setStudentsList(db.getStudents());
+      setIsInitializing(false);
+
+      try {
+        const fetched = await db.fetchStudents();
+        if (fetched && fetched.length > 0) {
+          setStudentsList(fetched);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch students from Supabase in page.tsx:', e);
+      }
+    };
+    init();
   }, []);
 
   // Reload students on view change
   useEffect(() => {
-    setStudentsList(db.getStudents());
+    const reload = async () => {
+      setStudentsList(db.getStudents());
+      try {
+        const fetched = await db.fetchStudents();
+        if (fetched && fetched.length > 0) {
+          setStudentsList(fetched);
+        }
+      } catch (e) {}
+    };
+    reload();
   }, [currentView]);
 
   // Set theme on body element

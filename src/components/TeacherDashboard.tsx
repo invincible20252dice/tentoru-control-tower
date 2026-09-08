@@ -427,6 +427,19 @@ export default function TeacherDashboard({
     setBranches(listBranches);
     setCurriculumMastersList(listMasters);
 
+    // 非同期で Supabase のクラウドDBから生徒・学校データを取得して同期
+    db.fetchStudents().then(fetchedSt => {
+      if (fetchedSt && fetchedSt.length > 0) {
+        setStudents(fetchedSt);
+      }
+    }).catch(err => console.warn('fetchStudents in loadData error:', err));
+
+    db.fetchSchools().then(fetchedSch => {
+      if (fetchedSch && fetchedSch.length > 0) {
+        setSchools(fetchedSch);
+      }
+    }).catch(err => console.warn('fetchSchools in loadData error:', err));
+
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
     }
