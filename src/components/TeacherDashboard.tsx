@@ -34,7 +34,11 @@ import {
   DEFAULT_BRANCH_AI_RULES,
   sanitizeLearningTask,
   sanitizeMiniTestResult,
-  sanitizeHomeworkResult
+  sanitizeHomeworkResult,
+  normalizeStandardGrade,
+  isElementaryStudent,
+  isJuniorHighStudent,
+  isHighSchoolStudent
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -174,6 +178,16 @@ export default function TeacherDashboard({
     }
     return null;
   });
+  useEffect(() => {
+    let isMounted = true;
+    db.fetchStudents().then(fetchedSt => {
+      if (isMounted && fetchedSt && fetchedSt.length > 0) {
+        setStudents(fetchedSt);
+      }
+    }).catch(err => console.warn('fetchStudents on mount warning:', err));
+    return () => { isMounted = false; };
+  }, []);
+
   const [activeTab, setActiveTab] = useState<DashboardTabType>(initialTab || 'student-list');
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
@@ -3988,11 +4002,11 @@ export default function TeacherDashboard({
                   .filter(st => {
                     // Multitenant Branch filtering
                     if (userRole === 'branch') {
-                      const isBranchStudent = st.branch_id === 'branch-1' || st.classroom === '恵比寿教室' || !st.branch_id;
+                      const isBranchStudent = !st.branch_id || st.branch_id === 'branch-1' || st.classroom === '恵比寿教室' || (st as any).school_branch === '恵比寿教室';
                       if (!isBranchStudent) return false;
                     } else if (selectedBranchId !== 'all') {
                       const targetBranch = branches.find(b => b.id === selectedBranchId);
-                      const isMatch = st.branch_id === selectedBranchId || (targetBranch && st.classroom === targetBranch.name);
+                      const isMatch = !st.branch_id || st.branch_id === selectedBranchId || (targetBranch && (st.classroom === targetBranch.name || (st as any).school_branch === targetBranch.name));
                       if (!isMatch) return false;
                     }
 
@@ -4000,16 +4014,22 @@ export default function TeacherDashboard({
                     const studentSchoolName = st.school_name || school?.name || '';
 
                     if (filterSchoolName && !studentSchoolName.includes(filterSchoolName)) return false;
-                    if (filterGrade && st.grade !== filterGrade) return false;
+                    if (filterGrade) {
+                      const stdGradeNorm = normalizeStandardGrade(st.grade);
+                      const filterGradeNorm = normalizeStandardGrade(filterGrade);
+                      if (st.grade !== filterGrade && stdGradeNorm !== filterGradeNorm) return false;
+                    }
                     if (filterName && !st.name.includes(filterName)) return false;
                     
-                    const isElem = st.grade?.startsWith('小') || st.grade === '園児' || st.grade_category === '小学生' || school?.type === 'elementary';
-                    const isJhs = st.grade?.startsWith('中') || st.grade_category === '中学生' || school?.type === 'junior_high';
-                    const isHigh = st.grade?.startsWith('高') || st.grade === '既卒' || st.grade_category === '高校生' || school?.type === 'high_school';
+                    const isElem = isElementaryStudent(st.grade, st.grade_category, school?.type);
+                    const isJhs = isJuniorHighStudent(st.grade, st.grade_category, school?.type);
+                    const isHigh = isHighSchoolStudent(st.grade, st.grade_category, school?.type);
 
-                    if (schoolTypeFilter === 'elementary' && !isElem) return false;
-                    if (schoolTypeFilter === 'junior_high' && !isJhs) return false;
-                    if (schoolTypeFilter === 'high_school' && !isHigh) return false;
+                    const effectiveSchoolType = schoolTypeFilter !== 'all' ? schoolTypeFilter : (currentTeacherType !== 'all' ? currentTeacherType : 'all');
+
+                    if (effectiveSchoolType === 'elementary' && !isElem) return false;
+                    if (effectiveSchoolType === 'junior_high' && !isJhs) return false;
+                    if (effectiveSchoolType === 'high_school' && !isHigh) return false;
                     
                     return true;
                   })

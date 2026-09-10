@@ -175,13 +175,75 @@ export function getSchoolYear(dateString?: string): number {
   return m < 3 ? y - 1 : y;
 }
 
+export function normalizeStandardGrade(g?: string): string {
+  if (!g) return '';
+  const trimmed = g.trim();
+  if (trimmed === '園児' || trimmed === '幼児' || trimmed.toLowerCase() === 'kindergarten') return '園児';
+  if (trimmed === '既卒' || trimmed.toLowerCase() === 'graduated') return '既卒';
+  
+  // 小学生
+  const elemMatch = trimmed.match(/(?:小学|小|elementary[_\s]?)([1-6])/i);
+  if (elemMatch) return `小${elemMatch[1]}`;
+  if (/^[1-6]年生?$/.test(trimmed) || /^[1-6]$/.test(trimmed)) {
+    const num = trimmed.replace(/[^1-6]/g, '');
+    if (num) return `小${num}`;
+  }
+
+  // 中学生
+  const jhsMatch = trimmed.match(/(?:中学|中|junior[_\s]?high[_\s]?|jhs[_\s]?)([1-3])/i);
+  if (jhsMatch) return `中${jhsMatch[1]}`;
+  if (/^[7-9]年生?$/.test(trimmed) || /^[7-9]$/.test(trimmed)) {
+    const num = parseInt(trimmed.replace(/[^7-9]/g, ''), 10);
+    if (!isNaN(num)) return `中${num - 6}`;
+  }
+
+  // 高校生
+  const highMatch = trimmed.match(/(?:高校|高|high[_\s]?school[_\s]?|high[_\s]?)([1-3])/i);
+  if (highMatch) return `高${highMatch[1]}`;
+  if (/^(?:10|11|12)年生?$/.test(trimmed) || /^(?:10|11|12)$/.test(trimmed)) {
+    const num = parseInt(trimmed.replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(num)) return `高${num - 9}`;
+  }
+
+  return trimmed;
+}
+
+export function isElementaryStudent(grade?: string, gradeCategory?: string, schoolType?: string): boolean {
+  if (gradeCategory === '小学生' || schoolType === 'elementary') return true;
+  if (!grade) return false;
+  const standard = normalizeStandardGrade(grade);
+  if (standard === '園児' || standard.startsWith('小')) return true;
+  const g = grade.trim().toLowerCase();
+  return g.includes('小') || g.includes('elem') || g.includes('園児') || g.includes('幼児');
+}
+
+export function isJuniorHighStudent(grade?: string, gradeCategory?: string, schoolType?: string): boolean {
+  if (gradeCategory === '中学生' || schoolType === 'junior_high') return true;
+  if (!grade) return false;
+  const standard = normalizeStandardGrade(grade);
+  if (standard.startsWith('中')) return true;
+  const g = grade.trim().toLowerCase();
+  return g.includes('中') || g.includes('jhs') || g.includes('junior');
+}
+
+export function isHighSchoolStudent(grade?: string, gradeCategory?: string, schoolType?: string): boolean {
+  if (gradeCategory === '高校生' || schoolType === 'high_school') return true;
+  if (!grade) return false;
+  const standard = normalizeStandardGrade(grade);
+  if (standard.startsWith('高') || standard === '既卒') return true;
+  const g = grade.trim().toLowerCase();
+  return g.includes('高') || g.includes('high') || g.includes('既卒');
+}
+
 export function calculateCurrentGrade(registeredGrade: string, registeredYear: number, currentYear: number): string {
   const diff = currentYear - registeredYear;
-  if (diff <= 0) return registeredGrade;
-  const idx = GRADES.indexOf(registeredGrade);
+  const normalized = normalizeStandardGrade(registeredGrade);
+  if (diff <= 0) return normalized || registeredGrade;
+  const idx = GRADES.indexOf(normalized);
   if (idx === -1) return registeredGrade;
   return GRADES[Math.min(idx + diff, GRADES.length - 1)];
 }
+
 
 
 export interface MilestonePlan {
