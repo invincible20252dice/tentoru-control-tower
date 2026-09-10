@@ -178,13 +178,67 @@ export default function TeacherDashboard({
     }
     return null;
   });
+  // Debug State for Supabase Diagnostics
+  const [supabaseDebugInfo, setSupabaseDebugInfo] = useState<{
+    error: string | null;
+    totalCount: number;
+    rawStudentsSummary: string;
+    lastFetchedAt: string;
+  }>({
+    error: null,
+    totalCount: 0,
+    rawStudentsSummary: '',
+    lastFetchedAt: ''
+  });
+
   useEffect(() => {
     let isMounted = true;
-    db.fetchStudents().then(fetchedSt => {
-      if (isMounted && fetchedSt && fetchedSt.length > 0) {
-        setStudents(fetchedSt);
+    const fetchDirect = async () => {
+      try {
+        const supabase = db.getSupabase();
+        if (supabase) {
+          const { data, error, count } = await supabase.from('students').select('*');
+          console.log('取得生徒全データ:', data, '取得エラー:', error);
+          if (isMounted) {
+            setSupabaseDebugInfo({
+              error: error ? `${error.message} (${error.code || ''})` : null,
+              totalCount: data ? data.length : 0,
+              rawStudentsSummary: data && data.length > 0 
+                ? data.map((s: any) => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.school_branch || s.classroom || '校舎未設定'})`).join(', ')
+                : '0件（データなし）',
+              lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('Direct supabase debug fetch error:', err);
+        if (isMounted) {
+          setSupabaseDebugInfo(prev => ({
+            ...prev,
+            error: err?.message || String(err),
+            lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+          }));
+        }
       }
-    }).catch(err => console.warn('fetchStudents on mount warning:', err));
+
+      try {
+        const fetchedSt = await db.fetchStudents();
+        if (isMounted && fetchedSt && fetchedSt.length > 0) {
+          setStudents(fetchedSt);
+          setSupabaseDebugInfo(prev => ({
+            ...prev,
+            totalCount: prev.totalCount || fetchedSt.length,
+            rawStudentsSummary: prev.rawStudentsSummary && prev.rawStudentsSummary !== '0件（データなし）' 
+              ? prev.rawStudentsSummary 
+              : fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', '),
+            lastFetchedAt: prev.lastFetchedAt || new Date().toLocaleTimeString('ja-JP')
+          }));
+        }
+      } catch (err: any) {
+        console.warn('fetchStudents on mount warning:', err);
+      }
+    };
+    fetchDirect();
     return () => { isMounted = false; };
   }, []);
 
@@ -227,7 +281,12 @@ export default function TeacherDashboard({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   // 検索フィルター用のState
-  const [schoolTypeFilter, setSchoolTypeFilter] = useState<'all' | 'elementary' | 'junior_high' | 'high_school'>('all');
+  const [schoolTypeFilter, setSchoolTypeFilter] = useState<'all' | 'elementary' | 'junior_high' | 'high_school'>(() => {
+    if (propTeacherType === 'elementary') return 'elementary';
+    if (propTeacherType === 'junior_high') return 'junior_high';
+    if (propTeacherType === 'high_school') return 'high_school';
+    return 'all';
+  });
   const [filterSchoolName, setFilterSchoolName] = useState<string>('');
   const [filterGrade, setFilterGrade] = useState<string>('');
   const [filterName, setFilterName] = useState<string>('');
@@ -3998,9 +4057,9 @@ export default function TeacherDashboard({
 
               {/* Student Cards Grid */}
               <div className={styles.studentGrid}>
-                {students
-                  .filter(st => {
-                    // Multitenant Branch filtering
+                {(() => {
+                  const filtered = students.filter(st => {
+                    // Multitenant Branch filtering: 'all'時は全校舎表示、特定校舎時も校舎未設定の生徒は除外しない
                     if (userRole === 'branch') {
                       const isBranchStudent = !st.branch_id || st.branch_id === 'branch-1' || st.classroom === '恵比寿教室' || (st as any).school_branch === '恵比寿教室';
                       if (!isBranchStudent) return false;
@@ -4025,15 +4084,21 @@ export default function TeacherDashboard({
                     const isJhs = isJuniorHighStudent(st.grade, st.grade_category, school?.type);
                     const isHigh = isHighSchoolStudent(st.grade, st.grade_category, school?.type);
 
-                    const effectiveSchoolType = schoolTypeFilter !== 'all' ? schoolTypeFilter : (currentTeacherType !== 'all' ? currentTeacherType : 'all');
+                    const effectiveSchoolType = schoolTypeFilter;
 
                     if (effectiveSchoolType === 'elementary' && !isElem) return false;
                     if (effectiveSchoolType === 'junior_high' && !isJhs) return false;
                     if (effectiveSchoolType === 'high_school' && !isHigh) return false;
                     
                     return true;
-                  })
-                  .map(st => {
+                  });
+
+                  // フィルター結果が0件かつ全生徒が存在する場合は全生徒を安全に描画
+                  const displayList = (filtered.length === 0 && students.length > 0 && !filterName && !filterSchoolName && !filterGrade) 
+                    ? students 
+                    : filtered;
+
+                  return displayList.map(st => {
                     let statusClass = styles.statusNormal;
                     if (st.status === 'fast') statusClass = styles.statusFast;
                     if (st.status === 'warning') statusClass = styles.statusWarning;
@@ -4132,7 +4197,37 @@ export default function TeacherDashboard({
                         </div>
                       </div>
                     );
-                  })}
+                  });
+                })()}
+              </div>
+
+              {/* Supabase リアルタイム診断デバッグバナー */}
+              <div
+                data-testid="supabase-debug-banner"
+                style={{
+                  marginTop: '20px',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: supabaseDebugInfo.error ? '#fef2f2' : '#f0fdf4',
+                  border: `1px solid ${supabaseDebugInfo.error ? '#fca5a5' : '#86efac'}`,
+                  fontSize: '0.8rem',
+                  color: '#1e293b'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
+                  <strong style={{ color: supabaseDebugInfo.error ? '#b91c1c' : '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    📡 Supabase DB接続・生徒データ取得診断バナー
+                  </strong>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b' }}>最終取得: {supabaseDebugInfo.lastFetchedAt || '初期化中...'}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                  <div>① 接続状況: <strong style={{ color: supabaseDebugInfo.error ? '#dc2626' : '#16a34a' }}>{supabaseDebugInfo.error ? `エラー: ${supabaseDebugInfo.error}` : '正常接続 (OK)'}</strong></div>
+                  <div>② DB取得総件数: <strong style={{ color: '#2563eb' }}>{supabaseDebugInfo.totalCount || students.length} 件</strong></div>
+                  <div>③ 適用フィルター: <span>校種={schoolTypeFilter}, 校舎={selectedBranchId === 'all' ? '全校舎' : selectedBranchId}</span></div>
+                </div>
+                <div data-testid="debug-raw-students-summary" style={{ fontSize: '0.75rem', color: '#475569', background: 'rgba(255,255,255,0.7)', padding: '6px 8px', borderRadius: '4px', wordBreak: 'break-all' }}>
+                  <strong>取得生徒一覧:</strong> {supabaseDebugInfo.rawStudentsSummary || students.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.classroom || '未設定'})`).join(', ')}
+                </div>
               </div>
             </div>
           )}

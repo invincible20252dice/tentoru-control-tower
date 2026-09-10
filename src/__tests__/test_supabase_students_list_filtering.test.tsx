@@ -9,9 +9,9 @@ describe("TeacherDashboard Supabase Student List & Filter Robustness", () => {
     {
       id: "std-kenshin-1",
       name: "中尾 謙信",
-      grade: "小5",
+      grade: "小1",
       school_id: "sch-elem-1",
-      school_name: "テントル小学校",
+      school_name: "川尻校",
       branch_id: null,
       classroom: null,
       level: "A" as const,
@@ -85,20 +85,28 @@ describe("TeacherDashboard Supabase Student List & Filter Robustness", () => {
     expect(isHighSchoolStudent("中1")).toBe(false);
   });
 
-  it("should render both 中尾 謙信 and 鈴木 結衣 in elementary view even when branch_id is null", async () => {
+  it("should render both 中尾 謙信 and 鈴木 結衣 in elementary view and show Supabase debug banner", async () => {
     await act(async () => {
       render(<TeacherDashboard teacherType="elementary" />);
     });
 
-    // Verify elementary students are rendered
+    // 1. Check debug banner visibility
     await waitFor(() => {
-      expect(screen.getByText(/中尾 謙信/)).toBeInTheDocument();
-      expect(screen.getByText(/鈴木 結衣/)).toBeInTheDocument();
+      expect(screen.getByTestId("supabase-debug-banner")).toBeInTheDocument();
+      expect(screen.getByText(/Supabase DB接続・生徒データ取得診断バナー/)).toBeInTheDocument();
     });
 
-    // Verify JHS and High school students are not displayed in elementary mode
-    expect(screen.queryByText(/山田 中学太郎/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/佐藤 高校花子/)).not.toBeInTheDocument();
+    // 2. Verify elementary students are rendered
+    await waitFor(() => {
+      expect(screen.getAllByText(/中尾 謙信/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/鈴木 結衣/).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("student-card-std-kenshin-1")).toBeInTheDocument();
+      expect(screen.getByTestId("student-card-std-yui-1")).toBeInTheDocument();
+    });
+
+    // 3. Verify JHS and High school students cards are not displayed in elementary mode
+    expect(screen.queryByTestId("student-card-std-taro-jhs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("student-card-std-hanako-high")).not.toBeInTheDocument();
   });
 
   it("should display all students across all grades and branches when all filter is selected", async () => {
@@ -112,12 +120,12 @@ describe("TeacherDashboard Supabase Student List & Filter Robustness", () => {
       fireEvent.click(allFilterBtn);
     });
 
-    // All students should be visible
+    // All students cards should be visible
     await waitFor(() => {
-      expect(screen.getByText(/中尾 謙信/)).toBeInTheDocument();
-      expect(screen.getByText(/鈴木 結衣/)).toBeInTheDocument();
-      expect(screen.getByText(/山田 中学太郎/)).toBeInTheDocument();
-      expect(screen.getByText(/佐藤 高校花子/)).toBeInTheDocument();
+      expect(screen.getByTestId("student-card-std-kenshin-1")).toBeInTheDocument();
+      expect(screen.getByTestId("student-card-std-yui-1")).toBeInTheDocument();
+      expect(screen.getByTestId("student-card-std-taro-jhs")).toBeInTheDocument();
+      expect(screen.getByTestId("student-card-std-hanako-high")).toBeInTheDocument();
     });
   });
 });
