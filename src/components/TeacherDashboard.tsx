@@ -184,12 +184,44 @@ export default function TeacherDashboard({
     totalCount: number;
     rawStudentsSummary: string;
     lastFetchedAt: string;
+    syncLog: string | null;
   }>({
     error: null,
     totalCount: 0,
     rawStudentsSummary: '',
-    lastFetchedAt: ''
+    lastFetchedAt: '',
+    syncLog: null
   });
+  const [isSyncingStudents, setIsSyncingStudents] = useState(false);
+
+  const handleForceSyncStudents = async () => {
+    setIsSyncingStudents(true);
+    try {
+      const fetchedSt = await db.fetchStudents();
+      if (fetchedSt && fetchedSt.length > 0) {
+        setStudents(fetchedSt);
+      }
+      setSupabaseDebugInfo({
+        error: null,
+        totalCount: fetchedSt ? fetchedSt.length : 0,
+        rawStudentsSummary: fetchedSt && fetchedSt.length > 0 
+          ? fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', ')
+          : '0件（データなし）',
+        lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
+        syncLog: db.lastSyncLog || '同期完了'
+      });
+    } catch (err: any) {
+      console.warn('handleForceSyncStudents error:', err);
+      setSupabaseDebugInfo(prev => ({
+        ...prev,
+        error: err?.message || String(err),
+        lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
+        syncLog: `同期エラー: ${err?.message || String(err)}`
+      }));
+    } finally {
+      setIsSyncingStudents(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -206,7 +238,8 @@ export default function TeacherDashboard({
               rawStudentsSummary: data && data.length > 0 
                 ? data.map((s: any) => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.school_branch || s.classroom || '校舎未設定'})`).join(', ')
                 : '0件（データなし）',
-              lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+              lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
+              syncLog: db.lastSyncLog || null
             });
           }
         }
@@ -216,7 +249,8 @@ export default function TeacherDashboard({
           setSupabaseDebugInfo(prev => ({
             ...prev,
             error: err?.message || String(err),
-            lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+            lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
+            syncLog: db.lastSyncLog || null
           }));
         }
       }
@@ -229,7 +263,8 @@ export default function TeacherDashboard({
             error: null,
             totalCount: fetchedSt.length,
             rawStudentsSummary: fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', '),
-            lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+            lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
+            syncLog: db.lastSyncLog || '同期完了'
           });
         }
       } catch (err: any) {
@@ -4216,16 +4251,41 @@ export default function TeacherDashboard({
                   <strong style={{ color: supabaseDebugInfo.error ? '#b91c1c' : '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     📡 Supabase DB接続・生徒データ取得診断バナー
                   </strong>
-                  <span style={{ fontSize: '0.72rem', color: '#64748b' }}>最終取得: {supabaseDebugInfo.lastFetchedAt || '初期化中...'}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      data-testid="force-sync-students-btn"
+                      onClick={handleForceSyncStudents}
+                      disabled={isSyncingStudents}
+                      style={{
+                        padding: '3px 10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 'bold',
+                        color: '#ffffff',
+                        backgroundColor: isSyncingStudents ? '#94a3b8' : '#2563eb',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: isSyncingStudents ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isSyncingStudents ? '⏳ 同期中...' : '🔄 DB生徒データ再取得・自動復元'}
+                    </button>
+                    <span style={{ fontSize: '0.72rem', color: '#64748b' }}>最終取得: {supabaseDebugInfo.lastFetchedAt || '初期化中...'}</span>
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginBottom: '8px' }}>
                   <div>① 接続状況: <strong style={{ color: supabaseDebugInfo.error ? '#dc2626' : '#16a34a' }}>{supabaseDebugInfo.error ? `エラー: ${supabaseDebugInfo.error}` : '正常接続 (OK)'}</strong></div>
                   <div>② DB取得総件数: <strong style={{ color: '#2563eb' }}>{supabaseDebugInfo.totalCount || students.length} 件</strong></div>
                   <div>③ 適用フィルター: <span>校種={schoolTypeFilter}, 校舎={selectedBranchId === 'all' ? '全校舎' : selectedBranchId}</span></div>
                 </div>
-                <div data-testid="debug-raw-students-summary" style={{ fontSize: '0.75rem', color: '#475569', background: 'rgba(255,255,255,0.7)', padding: '6px 8px', borderRadius: '4px', wordBreak: 'break-all' }}>
+                <div data-testid="debug-raw-students-summary" style={{ fontSize: '0.75rem', color: '#475569', background: 'rgba(255,255,255,0.7)', padding: '6px 8px', borderRadius: '4px', wordBreak: 'break-all', marginBottom: supabaseDebugInfo.syncLog ? '6px' : '0' }}>
                   <strong>取得生徒一覧:</strong> {supabaseDebugInfo.rawStudentsSummary || students.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.classroom || '未設定'})`).join(', ')}
                 </div>
+                {supabaseDebugInfo.syncLog && (
+                  <div data-testid="debug-sync-log" style={{ fontSize: '0.72rem', color: '#0369a1', background: '#e0f2fe', padding: '4px 8px', borderRadius: '4px', wordBreak: 'break-all' }}>
+                    <strong>同期ログ:</strong> {supabaseDebugInfo.syncLog}
+                  </div>
+                )}
               </div>
             </div>
           )}

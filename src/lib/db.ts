@@ -1812,11 +1812,17 @@ class DatabaseService {
     this.saveMockData('learning_tasks', tasks.filter(t => t.student_id !== id));
   }
 
+  public lastSyncLog: string = '';
+
   public async fetchStudents(): Promise<Student[]> {
+    this.lastSyncLog = '';
     if (!this.isMockMode && this.supabase) {
       try {
         const { data, error } = await this.supabase.from('students').select('*').order('created_at', { ascending: true });
-        if (error) throw error;
+        if (error) {
+          this.lastSyncLog = `Supabase取得エラー: ${error.message} (${error.code})`;
+          throw error;
+        }
         if (data) {
           const curYear = getSchoolYear();
           const schoolsList = this.getSchools();
@@ -1836,36 +1842,39 @@ class DatabaseService {
             };
           });
 
-          // If standard seed students (e.g., Nakao Kenshin) are missing from DB, auto-seed them
+          // If standard seed students (e.g., Nakao Kenshin) are missing from DB, auto-seed them via saveStudent
           const hasNakao = list.some(s => s.name?.includes('中尾') || s.student_id === 'student103');
           if (!hasNakao) {
-            const defaultSeed = this.getDefaultSeedStudents().filter(s => s.student_id === 'student103' || s.student_id === 'student104' || s.student_id === 'student105');
-            for (const newSeed of defaultSeed) {
+            const missingSeeds = this.getDefaultSeedStudents().filter(
+              seed => !list.some(existing => existing.student_id === seed.student_id || existing.name === seed.name)
+            );
+            this.lastSyncLog = `未登録生徒 ${missingSeeds.length} 件の自動シード開始: ${missingSeeds.map(s => s.name).join(', ')}`;
+            for (const newSeed of missingSeeds) {
               try {
-                const { error: seedErr } = await this.supabase.from('students').upsert({
-                  student_id: newSeed.student_id,
-                  name: newSeed.name,
-                  email: newSeed.email,
-                  grade: newSeed.grade,
-                  status: newSeed.status,
-                  period_count: newSeed.period_count || 2,
-                  level: newSeed.level || 'A',
-                  school_id: null,
-                  created_at: newSeed.created_at || new Date().toISOString()
-                }, { onConflict: 'student_id' });
-                if (!seedErr && !list.some(s => s.student_id === newSeed.student_id)) {
-                  list.push(newSeed);
+                // Generate a fresh valid UUID for Supabase
+                const seedToInsert: Student = {
+                  ...newSeed,
+                  id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `std-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+                };
+                const saved = await this.saveStudent(seedToInsert);
+                if (saved && !list.some(s => s.student_id === saved.student_id || s.name === saved.name)) {
+                  list.push(saved);
+                  this.lastSyncLog += ` | ${saved.name} 登録成功`;
                 }
-              } catch (e) {
+              } catch (e: any) {
+                this.lastSyncLog += ` | ${newSeed.name} 登録エラー: ${e?.message || String(e)}`;
                 console.warn('Auto-seed default student error:', e);
               }
             }
+          } else {
+            this.lastSyncLog = '中尾謙信を含む全生徒がDBに存在します。';
           }
 
           this.saveMockData('students', list);
           return list;
         }
-      } catch (err) {
+      } catch (err: any) {
+        this.lastSyncLog = `fetchStudents Supabase例外: ${err?.message || String(err)}`;
         console.warn('fetchStudents Supabase error, fallback to local storage:', err);
       }
     }
