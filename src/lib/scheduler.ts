@@ -228,6 +228,25 @@ export function findNextUncompletedLessonForSubject(params: {
   const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
   const filteredMasters = curriculumMasters.filter(m => {
+    if (isElem) {
+      const isMasterElem = (m.grade || '').startsWith('小') || m.grade === '園児';
+      if (!isMasterElem) return false;
+      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+        return m.subject === '算数' || m.subject === '数学';
+      }
+      return m.subject === subject;
+    } else if (isJunior) {
+      const isMasterJunior = (m.grade || '').startsWith('中');
+      if (!isMasterJunior) return false;
+      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+        return m.subject === '数学' || m.subject === '算数';
+      }
+      return m.subject === subject;
+    } else if (isHigh) {
+      const isMasterHigh = (m.grade || '').startsWith('高') || m.grade === '既卒';
+      if (!isMasterHigh) return false;
+      return m.subject === subject;
+    }
     if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
       return m.subject === '算数' || m.subject === '数学';
     }

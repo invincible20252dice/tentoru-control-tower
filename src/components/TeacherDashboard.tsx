@@ -6472,12 +6472,35 @@ export default function TeacherDashboard({
               {activeTab === 'milestones' && (
                 (() => {
                   const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児' || currentTeacherType === 'elementary';
+                  const isJuniorHigh = selectedStudent.grade.startsWith('中') || currentTeacherType === 'junior_high';
+                  const isHighSchool = selectedStudent.grade.startsWith('高') || selectedStudent.grade === '既卒' || currentTeacherType === 'high_school';
 
-                  // 小学生向け進行状況と完了予測計算（全学年カリキュラムマスターを優先取得・学年フィルター撤廃）
+                  // 小学生向け進行状況と完了予測計算（部門ごとに正確なカリキュラムマスターを抽出）
                   const targetSubject = (isElementary && selectedSubject === '数学') ? '算数' : selectedSubject;
                   const rawMasters = db.getCurriculumMasters();
                   const masterUnits = rawMasters
-                    .filter(m => m.subject === targetSubject || (targetSubject === '算数' && (m.subject === '算数' || m.subject === '数学')) || (targetSubject === '数学' && (m.subject === '数学' || m.subject === '算数')))
+                    .filter(m => {
+                      if (isElementary) {
+                        const isElemGrade = (m.grade || '').startsWith('小') || m.grade === '園児';
+                        if (!isElemGrade) return false;
+                        if (targetSubject === '算数' || targetSubject === '数学') {
+                          return m.subject === '算数' || m.subject === '数学';
+                        }
+                        return m.subject === targetSubject;
+                      } else if (isJuniorHigh) {
+                        const isJuniorGrade = (m.grade || '').startsWith('中');
+                        if (!isJuniorGrade) return false;
+                        if (targetSubject === '算数' || targetSubject === '数学') {
+                          return m.subject === '数学' || m.subject === '算数';
+                        }
+                        return m.subject === targetSubject;
+                      } else if (isHighSchool) {
+                        const isHighGrade = (m.grade || '').startsWith('高') || m.grade === '既卒';
+                        if (!isHighGrade) return false;
+                        return m.subject === targetSubject;
+                      }
+                      return m.subject === targetSubject;
+                    })
                     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 
                   const subjectUnits = allCurriculumUnits.filter(u => 
