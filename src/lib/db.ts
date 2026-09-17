@@ -1125,7 +1125,25 @@ class DatabaseService {
         school_id: 'sch-1',
         school_name: '天登第一中学校',
         status: 'normal',
-        start_unit_id: 'unit-102-1',
+        start_unit_id: 'cm-jhs-1',
+        start_unit_math: 'cm-jhs-1',
+        start_unit_english: 'cm-p-en1',
+        start_unit_japanese: 'cm-p-jp1',
+        subject_start_positions: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        subject_start_units: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        start_units: {
+          math: 'cm-jhs-1',
+          english: 'cm-p-en1',
+          japanese: 'cm-p-jp1'
+        },
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
         enrollment_date: '2026-04-01',
@@ -1138,6 +1156,7 @@ class DatabaseService {
         contact_phone: '090-1234-5678',
         contact_time: '18:00 - 21:00',
         personalities: ['スイッチ入るとよく喋る', '班長'],
+        personality_tags: ['スイッチ入るとよく喋る', '班長'],
         target_school: '天登星雲高校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
@@ -1146,6 +1165,8 @@ class DatabaseService {
         registered_year: 2026,
         weekly_sessions_count: '2回',
         weekly_duration_minutes: '120分',
+        selected_days: ['tuesday', 'friday'],
+        default_slots: 2,
         selected_subjects: ['数学', '英語', '理科', '社会', '国語']
       },
       {
@@ -1157,7 +1178,25 @@ class DatabaseService {
         school_id: 'sch-2',
         school_name: 'テントル小学校',
         status: 'normal',
-        start_unit_id: 'unit-301-1',
+        start_unit_id: 'cm-p1-m1',
+        start_unit_math: 'cm-p1-m1',
+        start_unit_english: 'cm-p-en1',
+        start_unit_japanese: 'cm-p-jp1',
+        subject_start_positions: {
+          '算数': 'cm-p1-m1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        subject_start_units: {
+          '算数': 'cm-p1-m1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        start_units: {
+          math: 'cm-p1-m1',
+          english: 'cm-p-en1',
+          japanese: 'cm-p-jp1'
+        },
         period_count: 2,
         created_at: '2025-04-01T00:00:00Z',
         enrollment_date: '2025-04-01',
@@ -1170,6 +1209,7 @@ class DatabaseService {
         contact_phone: '080-9876-5432',
         contact_time: '17:00 - 20:00',
         personalities: ['ぱっと見大人しい', '音楽の授業は好き'],
+        personality_tags: ['ぱっと見大人しい', '音楽の授業は好き'],
         target_school: 'テントル総合高校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
@@ -1178,6 +1218,8 @@ class DatabaseService {
         registered_year: 2025,
         weekly_sessions_count: '3回',
         weekly_duration_minutes: '90分',
+        selected_days: ['monday', 'wednesday', 'friday'],
+        default_slots: 2,
         selected_subjects: ['算数', '国語', '英語']
       },
       {
@@ -1189,7 +1231,25 @@ class DatabaseService {
         school_id: 'sch-2',
         school_name: 'テントル小学校',
         status: 'normal',
-        start_unit_id: 'unit-301-1',
+        start_unit_id: 'cm-p1-m1',
+        start_unit_math: 'cm-p1-m1',
+        start_unit_english: 'cm-p-en1',
+        start_unit_japanese: 'cm-p-jp1',
+        subject_start_positions: {
+          '算数': 'cm-p1-m1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        subject_start_units: {
+          '算数': 'cm-p1-m1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        start_units: {
+          math: 'cm-p1-m1',
+          english: 'cm-p-en1',
+          japanese: 'cm-p-jp1'
+        },
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
         enrollment_date: '2026-04-01',
@@ -1202,6 +1262,7 @@ class DatabaseService {
         contact_phone: '090-3344-5566',
         contact_time: '18:00 - 21:00',
         personalities: ['集中力高い', '算数が得意', '負けず嫌い'],
+        personality_tags: ['集中力高い', '算数が得意', '負けず嫌い'],
         target_school: 'テントル付属中学校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
@@ -1210,6 +1271,8 @@ class DatabaseService {
         registered_year: 2026,
         weekly_sessions_count: '2回',
         weekly_duration_minutes: '120分',
+        selected_days: ['tuesday', 'friday'],
+        default_slots: 2,
         selected_subjects: ['算数', '国語', '英語']
       },
       {
@@ -1221,7 +1284,25 @@ class DatabaseService {
         school_id: 'sch-1',
         school_name: '天登第一中学校',
         status: 'normal',
-        start_unit_id: 'unit-102-1',
+        start_unit_id: 'cm-jhs-1',
+        start_unit_math: 'cm-jhs-1',
+        start_unit_english: 'cm-p-en1',
+        start_unit_japanese: 'cm-p-jp1',
+        subject_start_positions: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        subject_start_units: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1',
+          '国語': 'cm-p-jp1'
+        },
+        start_units: {
+          math: 'cm-jhs-1',
+          english: 'cm-p-en1',
+          japanese: 'cm-p-jp1'
+        },
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
         enrollment_date: '2026-04-01',
@@ -1234,6 +1315,7 @@ class DatabaseService {
         contact_phone: '090-1122-3344',
         contact_time: '18:00 - 21:00',
         personalities: ['集中力高い', '負けず嫌い'],
+        personality_tags: ['集中力高い', '負けず嫌い'],
         target_school: '天登星雲高校',
         classroom: '渋谷教室',
         teacher_in_charge: '福田 尚弘',
@@ -1242,6 +1324,8 @@ class DatabaseService {
         registered_year: 2026,
         weekly_sessions_count: '2回',
         weekly_duration_minutes: '120分',
+        selected_days: ['tuesday', 'thursday'],
+        default_slots: 2,
         selected_subjects: ['数学', '英語', '理科', '社会', '国語']
       },
       {
@@ -1253,7 +1337,21 @@ class DatabaseService {
         school_id: 'sch-3',
         school_name: 'テントル高校',
         status: 'normal',
-        start_unit_id: null,
+        start_unit_id: 'cm-jhs-1',
+        start_unit_math: 'cm-jhs-1',
+        start_unit_english: 'cm-p-en1',
+        subject_start_positions: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1'
+        },
+        subject_start_units: {
+          '数学': 'cm-jhs-1',
+          '英語': 'cm-p-en1'
+        },
+        start_units: {
+          math: 'cm-jhs-1',
+          english: 'cm-p-en1'
+        },
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
         enrollment_date: '2026-04-01',
@@ -1266,6 +1364,7 @@ class DatabaseService {
         contact_phone: '090-5566-7788',
         contact_time: '18:00 - 21:00',
         personalities: ['自主学習が得意'],
+        personality_tags: ['自主学習が得意'],
         target_school: 'テントル大学',
         classroom: '渋谷教室',
         teacher_in_charge: '福田 尚弘',
@@ -1274,6 +1373,8 @@ class DatabaseService {
         registered_year: 2026,
         weekly_sessions_count: '2回',
         weekly_duration_minutes: '120分',
+        selected_days: ['wednesday', 'saturday'],
+        default_slots: 2,
         selected_subjects: ['数学', '英語']
       }
     ];
@@ -2093,7 +2194,44 @@ function isValidUUID(str?: string | null): boolean {
       await this.saveStudentScheduleConfig(cfg);
     }
 
-    log += `[生徒5名・年間計画・学習計画・小テスト・宿題・定期テスト・面談記録の全復元完了]`;
+    // 9. Restore Personality Options (個性マスタの復元)
+    const defaultPersonalities = [
+      '集中力高い',
+      '算数が得意',
+      '負けず嫌い',
+      'ぱっと見大人しい',
+      'スイッチ入るとよく喋る',
+      '班長',
+      '合唱実行委員長',
+      '音楽の授業は好き',
+      '礼儀正しくちゃんと敬語使える',
+      '自主学習が得意'
+    ];
+    const currentPers = this.getPersonalityOptions();
+    defaultPersonalities.forEach(p => {
+      if (!currentPers.includes(p)) currentPers.push(p);
+    });
+    this.saveMockData('personality_options', currentPers);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('personality_options').upsert(defaultPersonalities.map(name => ({ name })));
+      } catch (err) {
+        console.warn('Supabase personality_options restore warning:', err);
+      }
+    }
+
+    // 10. Restore Curriculum Masters (無段階学習タイムライン用カリキュラムマスタの復元)
+    const defaultMasters = this.getCurriculumMasters();
+    this.saveMockData('curriculum_masters', defaultMasters);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('curriculum_masters').upsert(defaultMasters);
+      } catch (err) {
+        console.warn('Supabase curriculum_masters restore warning:', err);
+      }
+    }
+
+    log += `[生徒5名・年間計画・学習計画・小テスト・宿題・定期テスト・面談記録・個性・カリキュラムマスタの全復元完了]`;
     this.lastSyncLog = `DB復元結果: ${log}`;
     return { success: true, count: defaultSeeds.length, log: this.lastSyncLog };
   }
@@ -3695,12 +3833,16 @@ function isValidUUID(str?: string | null): boolean {
   // 15. PersonalityOptions CRUD
   public getPersonalityOptions(): string[] {
     const seed = [
+      '集中力高い',
+      '算数が得意',
+      '負けず嫌い',
       'ぱっと見大人しい',
       'スイッチ入るとよく喋る',
       '班長',
       '合唱実行委員長',
       '音楽の授業は好き',
-      '礼儀正しくちゃんと敬語使える'
+      '礼儀正しくちゃんと敬語使える',
+      '自主学習が得意'
     ];
     return this.getMockData<string>('personality_options', seed);
   }
