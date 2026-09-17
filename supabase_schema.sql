@@ -332,3 +332,15 @@ CREATE TABLE IF NOT EXISTS custom_apply_scopes (
     label TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- 31. 標準初期生徒データのシード
+INSERT INTO students (student_id, name, email, grade, status, period_count, level, created_at)
+VALUES 
+  ('student101', '佐藤 拓海', 'student101@tentoru-student.com', '中3', 'normal', 2, 'A', NOW()),
+  ('student102', '鈴木 結衣', 'student102@tentoru-student.com', '小6', 'normal', 2, 'B', NOW()),
+  ('student103', '中尾 謙信', 'student103@tentoru-student.com', '小5', 'normal', 2, 'A', NOW()),
+  ('student104', '田中 颯太', 'student104@tentoru-student.com', '中2', 'normal', 2, 'A', NOW()),
+  ('student105', '高橋 蓮', 'student105@tentoru-student.com', '高1', 'normal', 2, 'A', NOW())
+ON CONFLICT (student_id) DO NOTHING;
+
+

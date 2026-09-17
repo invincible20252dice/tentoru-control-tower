@@ -59,12 +59,21 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     loadMasters();
   }, []);
 
+  const toastTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
   const showToast = (message: string, type: 'success' | 'error') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ message, type });
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setToast(null);
     }, 4000);
   };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Parse CSV text
   const parseCsvText = (text: string) => {

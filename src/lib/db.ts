@@ -1153,7 +1153,7 @@ class DatabaseService {
           student_id: 'student102',
           name: '鈴木 結衣',
           email: 'student102@tentoru-student.com',
-          grade: '小5',
+          grade: '小6',
           school_id: 'sch-2',
           status: 'normal',
           start_unit_id: 'unit-301-1',
@@ -1176,6 +1176,73 @@ class DatabaseService {
           weekly_sessions_count: '3回',
           weekly_duration_minutes: '90分',
           selected_subjects: ['算数', '国語', '英語']
+        },
+        {
+          id: 'std-3',
+          student_id: 'student103',
+          name: '中尾 謙信',
+          email: 'student103@tentoru-student.com',
+          grade: '小5',
+          school_id: 'sch-2',
+          status: 'normal',
+          start_unit_id: 'unit-301-1',
+          period_count: 2,
+          created_at: '2026-04-01T00:00:00Z',
+          level: 'A',
+          name_kana: 'ナカオ ケンシン',
+          birthday: '2015-11-03',
+          club_activities: 'サッカー部',
+          hobbies: 'プログラミング・スポーツ',
+          parent_name: '中尾 勇気',
+          contact_phone: '090-3344-5566',
+          contact_time: '18:00 - 21:00',
+          personalities: ['集中力高い', '算数が得意', '負けず嫌い'],
+          target_school: 'テントル付属中学校',
+          classroom: '恵比寿教室',
+          teacher_in_charge: '福田 尚弘',
+          registered_grade: '小5',
+          registered_year: 2026,
+          weekly_sessions_count: '2回',
+          weekly_duration_minutes: '120分',
+          selected_subjects: ['算数', '国語', '英語']
+        },
+        {
+          id: 'std-4',
+          student_id: 'student104',
+          name: '田中 颯太',
+          email: 'student104@tentoru-student.com',
+          grade: '中2',
+          school_id: 'sch-1',
+          status: 'normal',
+          start_unit_id: 'unit-102-1',
+          period_count: 2,
+          created_at: '2026-04-01T00:00:00Z',
+          level: 'A',
+          name_kana: 'タナカ ソウタ',
+          classroom: '渋谷教室',
+          teacher_in_charge: '福田 尚弘',
+          registered_grade: '中2',
+          registered_year: 2026,
+          selected_subjects: ['数学', '英語', '理科', '社会', '国語']
+        },
+        {
+          id: 'std-5',
+          student_id: 'student105',
+          name: '高橋 蓮',
+          email: 'student105@tentoru-student.com',
+          grade: '高1',
+          school_id: 'sch-3',
+          status: 'normal',
+          start_unit_id: null,
+          period_count: 2,
+          created_at: '2026-04-01T00:00:00Z',
+          level: 'A',
+          name_kana: 'タカハシ レン',
+          classroom: '渋谷教室',
+          teacher_in_charge: '福田 尚弘',
+          registered_grade: '高1',
+          registered_year: 2026,
+          selected_subjects: ['数学', '英語']
         }
       ];
       rawList = this.getMockData('students', seed);
@@ -1742,7 +1809,7 @@ class DatabaseService {
         if (data) {
           const curYear = getSchoolYear();
           const schoolsList = this.getSchools();
-          const list: Student[] = data.map((s: any) => {
+          let list: Student[] = data.map((s: any) => {
             const regYear = s.registered_year ?? getSchoolYear(s.created_at);
             const regGrade = s.registered_grade ?? s.grade;
             const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
@@ -1757,6 +1824,33 @@ class DatabaseService {
               grade: calculateCurrentGrade(regGrade, regYear, curYear)
             };
           });
+
+          // If standard seed students (e.g., Nakao Kenshin) are missing from DB, auto-seed them
+          const hasNakao = list.some(s => s.name?.includes('中尾') || s.student_id === 'student103');
+          if (!hasNakao) {
+            const defaultSeed = this.getStudents().filter(s => s.student_id === 'student103' || s.student_id === 'student104' || s.student_id === 'student105');
+            for (const newSeed of defaultSeed) {
+              try {
+                const { error: seedErr } = await this.supabase.from('students').upsert({
+                  student_id: newSeed.student_id,
+                  name: newSeed.name,
+                  email: newSeed.email,
+                  grade: newSeed.grade,
+                  status: newSeed.status,
+                  period_count: newSeed.period_count || 2,
+                  level: newSeed.level || 'A',
+                  school_id: null,
+                  created_at: newSeed.created_at || new Date().toISOString()
+                }, { onConflict: 'student_id' });
+                if (!seedErr && !list.some(s => s.student_id === newSeed.student_id)) {
+                  list.push(newSeed);
+                }
+              } catch (e) {
+                console.warn('Auto-seed default student error:', e);
+              }
+            }
+          }
+
           this.saveMockData('students', list);
           return list;
         }
