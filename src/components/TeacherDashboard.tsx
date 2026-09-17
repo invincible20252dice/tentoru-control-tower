@@ -225,14 +225,12 @@ export default function TeacherDashboard({
         const fetchedSt = await db.fetchStudents();
         if (isMounted && fetchedSt && fetchedSt.length > 0) {
           setStudents(fetchedSt);
-          setSupabaseDebugInfo(prev => ({
-            ...prev,
-            totalCount: prev.totalCount || fetchedSt.length,
-            rawStudentsSummary: prev.rawStudentsSummary && prev.rawStudentsSummary !== '0件（データなし）' 
-              ? prev.rawStudentsSummary 
-              : fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', '),
-            lastFetchedAt: prev.lastFetchedAt || new Date().toLocaleTimeString('ja-JP')
-          }));
+          setSupabaseDebugInfo({
+            error: null,
+            totalCount: fetchedSt.length,
+            rawStudentsSummary: fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', '),
+            lastFetchedAt: new Date().toLocaleTimeString('ja-JP')
+          });
         }
       } catch (err: any) {
         console.warn('fetchStudents on mount warning:', err);
