@@ -1684,11 +1684,35 @@ class DatabaseService {
       toSave.registered_year = curYear;
     }
 
+function isValidUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
     let savedData: any = null;
 
     if (!this.isMockMode && this.supabase) {
       // Keep school_name in payloadToSave, only strip transient properties like school, units, tasks
-      const { school, units, tasks, ...payloadToSave } = toSave as any;
+      const { school, units, tasks, ...rawPayload } = toSave as any;
+      const payloadToSave: any = { ...rawPayload };
+
+      // Sanitize UUID fields so non-UUID mock values (like 'unit-102-1' or 'sch-1') never cause Postgres 22P02 syntax errors
+      if (payloadToSave.school_id && !isValidUUID(payloadToSave.school_id)) {
+        payloadToSave.school_id = null;
+      }
+      if (payloadToSave.start_unit_id && !isValidUUID(payloadToSave.start_unit_id)) {
+        payloadToSave.start_unit_id = null;
+      }
+      if (payloadToSave.id && !isValidUUID(payloadToSave.id)) {
+        const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
+        if (validUUID) {
+          payloadToSave.id = validUUID;
+          toSave.id = validUUID;
+        } else {
+          delete payloadToSave.id;
+        }
+      }
+
       console.log('[DEBUG] Save Payload:', payloadToSave);
 
       let { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
@@ -1711,18 +1735,33 @@ class DatabaseService {
           }
         }
 
-        // If column assigned_teachers or selected_subjects or school_name is not present on Supabase, fallback by saving payload without those columns
-        if (!savedData && (error.message?.includes('assigned_teachers') || error.message?.includes('selected_subjects') || error.message?.includes('school_name') || error.code === 'PGRST204' || error.message?.includes('column'))) {
-          const { assigned_teachers, selected_subjects, school_name, ...fallbackPayload } = payloadToSave;
+        // If column assigned_teachers or selected_subjects or school_name is not present on Supabase, fallback by saving minimal clean payload
+        if (!savedData) {
+          const minimalCleanPayload: any = {
+            student_id: payloadToSave.student_id,
+            name: payloadToSave.name,
+            email: payloadToSave.email,
+            grade: payloadToSave.grade,
+            status: payloadToSave.status || 'normal',
+            period_count: payloadToSave.period_count || 2,
+            created_at: payloadToSave.created_at || new Date().toISOString()
+          };
+          if (payloadToSave.id && isValidUUID(payloadToSave.id)) {
+            minimalCleanPayload.id = payloadToSave.id;
+          }
+          if (payloadToSave.school_id && isValidUUID(payloadToSave.school_id)) {
+            minimalCleanPayload.school_id = payloadToSave.school_id;
+          }
           const { data: fbData, error: fbError } = await this.supabase
             .from('students')
-            .upsert(fallbackPayload)
+            .upsert(minimalCleanPayload)
             .select()
             .single();
           if (!fbError && fbData) {
             savedData = fbData;
           }
         }
+
         if (!savedData && payloadToSave.id) {
           const { data: updateData, error: updateError } = await this.supabase
             .from('students')
@@ -1814,6 +1853,56 @@ class DatabaseService {
 
   public lastSyncLog: string = '';
 
+  public async seedDefaultStudentsToSupabase(): Promise<{ success: boolean; count: number; log: string }> {
+    let log = '';
+    let successCount = 0;
+    const defaultSeeds = this.getDefaultSeedStudents();
+
+    if (!this.isMockMode && this.supabase) {
+      for (const seed of defaultSeeds) {
+        try {
+          const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
+          const minimalPayload: any = {
+            student_id: seed.student_id,
+            name: seed.name,
+            email: seed.email,
+            grade: seed.grade,
+            status: seed.status || 'normal',
+            period_count: seed.period_count || 2,
+            created_at: seed.created_at || new Date().toISOString()
+          };
+          if (validUUID) minimalPayload.id = validUUID;
+
+          const { error: upsertErr } = await this.supabase
+            .from('students')
+            .upsert(minimalPayload, { onConflict: 'student_id' });
+
+          if (upsertErr) {
+            log += `[${seed.name}: ${upsertErr.message}] `;
+          } else {
+            successCount++;
+            log += `[${seed.name}: 復元成功] `;
+          }
+        } catch (e: any) {
+          log += `[${seed.name}: ${e?.message || String(e)}] `;
+        }
+      }
+    } else {
+      const current = this.getMockData<Student>('students', []);
+      for (const seed of defaultSeeds) {
+        if (!current.some(s => s.student_id === seed.student_id || s.name === seed.name)) {
+          current.push(seed);
+          successCount++;
+        }
+      }
+      this.saveMockData('students', current);
+      log = `モック ${successCount}件追加`;
+    }
+
+    this.lastSyncLog = `DB復元結果: ${log}`;
+    return { success: successCount > 0, count: successCount, log: this.lastSyncLog };
+  }
+
   public async fetchStudents(): Promise<Student[]> {
     this.lastSyncLog = '';
     if (!this.isMockMode && this.supabase) {
@@ -1842,29 +1931,29 @@ class DatabaseService {
             };
           });
 
-          // If standard seed students (e.g., Nakao Kenshin) are missing from DB, auto-seed them via saveStudent
+          // If standard seed students (e.g., Nakao Kenshin) are missing from DB, auto-seed them via seedDefaultStudentsToSupabase
           const hasNakao = list.some(s => s.name?.includes('中尾') || s.student_id === 'student103');
           if (!hasNakao) {
-            const missingSeeds = this.getDefaultSeedStudents().filter(
-              seed => !list.some(existing => existing.student_id === seed.student_id || existing.name === seed.name)
-            );
-            this.lastSyncLog = `未登録生徒 ${missingSeeds.length} 件の自動シード開始: ${missingSeeds.map(s => s.name).join(', ')}`;
-            for (const newSeed of missingSeeds) {
-              try {
-                // Generate a fresh valid UUID for Supabase
-                const seedToInsert: Student = {
-                  ...newSeed,
-                  id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `std-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+            const seedRes = await this.seedDefaultStudentsToSupabase();
+            this.lastSyncLog = seedRes.log;
+            // Refetch after seeding to get complete list from Supabase
+            const refetch = await this.supabase.from('students').select('*').order('created_at', { ascending: true });
+            if (refetch.data && !refetch.error) {
+              list = refetch.data.map((s: any) => {
+                const regYear = s.registered_year ?? getSchoolYear(s.created_at);
+                const regGrade = s.registered_grade ?? s.grade;
+                const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+                return {
+                  ...s,
+                  school_name: resolvedSchoolName,
+                  assigned_teachers: s.assigned_teachers && Array.isArray(s.assigned_teachers) ? s.assigned_teachers : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']),
+                  teacher_in_charge: (s.assigned_teachers && s.assigned_teachers[0]) || s.teacher_in_charge || '福田 尚弘',
+                  selected_subjects: s.selected_subjects && Array.isArray(s.selected_subjects) ? s.selected_subjects : (s.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),
+                  registered_year: regYear,
+                  registered_grade: regGrade,
+                  grade: calculateCurrentGrade(regGrade, regYear, curYear)
                 };
-                const saved = await this.saveStudent(seedToInsert);
-                if (saved && !list.some(s => s.student_id === saved.student_id || s.name === saved.name)) {
-                  list.push(saved);
-                  this.lastSyncLog += ` | ${saved.name} 登録成功`;
-                }
-              } catch (e: any) {
-                this.lastSyncLog += ` | ${newSeed.name} 登録エラー: ${e?.message || String(e)}`;
-                console.warn('Auto-seed default student error:', e);
-              }
+              });
             }
           } else {
             this.lastSyncLog = '中尾謙信を含む全生徒がDBに存在します。';

@@ -197,6 +197,7 @@ export default function TeacherDashboard({
   const handleForceSyncStudents = async () => {
     setIsSyncingStudents(true);
     try {
+      const seedRes = await db.seedDefaultStudentsToSupabase();
       const fetchedSt = await db.fetchStudents();
       if (fetchedSt && fetchedSt.length > 0) {
         setStudents(fetchedSt);
@@ -208,7 +209,7 @@ export default function TeacherDashboard({
           ? fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', ')
           : '0件（データなし）',
         lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
-        syncLog: db.lastSyncLog || '同期完了'
+        syncLog: seedRes.log || db.lastSyncLog || '同期完了'
       });
     } catch (err: any) {
       console.warn('handleForceSyncStudents error:', err);
