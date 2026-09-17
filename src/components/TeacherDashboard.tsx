@@ -6816,7 +6816,7 @@ export default function TeacherDashboard({
                                   <option value="">-- テンプレートを選択 --</option>
                                   {milestoneTemplates.map(t => (
                                     <option key={t.id} value={t.id}>
-                                      {t.name} ({t.grade} {t.subject} レベル{t.level === 'A' ? 'A (発展)' : t.level === 'B' ? 'B (標準)' : 'C (基礎)'} - {t.plans.length}行)
+                                      {t.name} ({t.grade} {t.subject} レベル{t.level === 'A' ? 'A (発展)' : t.level === 'B' ? 'B (標準)' : 'C (基礎)'} - {(t.plans?.length || 0)}行)
                                     </option>
                                   ))}
                                 </select>

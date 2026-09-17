@@ -3328,13 +3328,16 @@ function isValidUUID(str?: string | null): boolean {
   public async fetchCurriculumMasters(subject?: string): Promise<CurriculumMaster[]> {
     if (!this.isMockMode && this.supabase) {
       try {
-        let query = this.supabase
+        let query: any = this.supabase
           .from('curriculum_masters')
           .select('*')
-          .order('sort_order', { ascending: true })
-          .limit(1000);
+          .order('sort_order', { ascending: true });
 
-        if (subject) {
+        if (query && typeof query.limit === 'function') {
+          query = query.limit(1000);
+        }
+
+        if (subject && query && typeof query.eq === 'function') {
           query = query.eq('subject', subject);
         }
 
