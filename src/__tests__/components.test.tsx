@@ -1099,7 +1099,8 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // 小テスト点数の自動判定＆自動保存テスト
     fireEvent.click(tabMiniTestsBtn);
-    const scoreCellInput = screen.getByDisplayValue('88');
+    const scoreCellInputs = screen.getAllByDisplayValue('88');
+    const scoreCellInput = scoreCellInputs[0];
     fireEvent.change(scoreCellInput, { target: { value: '95' } });
 
     await waitFor(() => {
@@ -1187,6 +1188,8 @@ describe('UI Components Render & Interaction Tests', () => {
   });
 
   it('should support edge cases, unit sorting, custom task updates, and AI report manual corrections in TeacherDashboard', async () => {
+    localStorage.setItem('tentoru_mini_test_results', JSON.stringify([]));
+    localStorage.setItem('tentoru_homework_results', JSON.stringify([]));
     const { container, unmount } = render(<TeacherDashboard initialDate="2026-06-19" onBackToPortal={() => {}} />);
     
     // 生徒を選択する
@@ -2337,6 +2340,7 @@ describe('UI Components Render & Interaction Tests', () => {
       <StudentDashboard 
         key="student-dashboard-c"
         student={studentDashboardData} 
+        initialDate="2026-06-19"
         onBackToPortal={() => {}} 
       />
     );
@@ -2366,6 +2370,7 @@ describe('UI Components Render & Interaction Tests', () => {
       <StudentDashboard 
         key="student-dashboard-b"
         student={studentB} 
+        initialDate="2026-06-19"
         onBackToPortal={() => {}} 
       />
     );

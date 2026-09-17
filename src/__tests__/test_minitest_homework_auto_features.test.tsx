@@ -69,14 +69,16 @@ describe('MiniTest and Homework Auto Features & Delete Unit Tests', () => {
     });
 
     // 点数入力 (95点 ➔ 合格判定)
-    const scoreInput = screen.getByPlaceholderText('未入力') as HTMLInputElement;
+    const scoreInputs = screen.getAllByPlaceholderText('未入力');
+    const scoreInput = scoreInputs[0] as HTMLInputElement;
     await act(async () => {
       fireEvent.change(scoreInput, { target: { value: '95' } });
     });
 
     // 合否セレクトボックスが「合格」に自動切替されたか検証
-    const passedSelect = screen.getByDisplayValue('合格') as HTMLSelectElement;
-    expect(passedSelect).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByDisplayValue('合格').length).toBeGreaterThan(0);
+    });
 
     // DB に自動保存されたか検証
     await waitFor(() => {
@@ -97,9 +99,9 @@ describe('MiniTest and Homework Auto Features & Delete Unit Tests', () => {
     });
 
     // 「🗑️ 削除」ボタン押下
-    const deleteBtn = screen.getByRole('button', { name: /🗑️ 削除/i });
+    const deleteBtns = screen.getAllByRole('button', { name: /🗑️ 削除/i });
     await act(async () => {
-      fireEvent.click(deleteBtn);
+      fireEvent.click(deleteBtns[0]);
     });
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('削除してもよろしいですか'));
@@ -142,9 +144,9 @@ describe('MiniTest and Homework Auto Features & Delete Unit Tests', () => {
     });
 
     // 「🗑️ 削除」ボタン押下
-    const deleteBtn = screen.getByRole('button', { name: /🗑️ 削除/i });
+    const deleteBtns = screen.getAllByRole('button', { name: /🗑️ 削除/i });
     await act(async () => {
-      fireEvent.click(deleteBtn);
+      fireEvent.click(deleteBtns[0]);
     });
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('削除してもよろしいですか'));

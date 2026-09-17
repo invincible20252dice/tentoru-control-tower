@@ -433,10 +433,12 @@ export interface HomeworkResult {
   subject?: string; // 教科 (算数, 数学, 英語, etc.)
   homework_type?: 'drill_2nd' | 'custom' | string; // 種別 (当日2回目演習 or 自由記述)
   homework_content: string;
-  homework_deadline: string; // YYYY-MM-DD
-  status: 'incomplete' | 'completed' | 'skipped';
+  homework_deadline?: string; // YYYY-MM-DD
+  status?: 'incomplete' | 'completed' | 'skipped';
+  evaluation?: string;
+  memo?: string;
   target_scope?: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface CustomClass {
@@ -1126,6 +1128,7 @@ class DatabaseService {
         start_unit_id: 'unit-102-1',
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
+        enrollment_date: '2026-04-01',
         level: 'A',
         name_kana: 'サトウ タクミ',
         birthday: '2011-05-15',
@@ -1138,6 +1141,7 @@ class DatabaseService {
         target_school: '天登星雲高校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
+        assigned_teachers: ['福田 尚弘'],
         registered_grade: '中3',
         registered_year: 2026,
         weekly_sessions_count: '2回',
@@ -1156,6 +1160,7 @@ class DatabaseService {
         start_unit_id: 'unit-301-1',
         period_count: 2,
         created_at: '2025-04-01T00:00:00Z',
+        enrollment_date: '2025-04-01',
         level: 'B',
         name_kana: 'スズキ ユイ',
         birthday: '2015-08-20',
@@ -1168,6 +1173,7 @@ class DatabaseService {
         target_school: 'テントル総合高校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
+        assigned_teachers: ['福田 尚弘'],
         registered_grade: '小5',
         registered_year: 2025,
         weekly_sessions_count: '3回',
@@ -1186,6 +1192,7 @@ class DatabaseService {
         start_unit_id: 'unit-301-1',
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
+        enrollment_date: '2026-04-01',
         level: 'A',
         name_kana: 'ナカオ ケンシン',
         birthday: '2015-11-03',
@@ -1198,6 +1205,7 @@ class DatabaseService {
         target_school: 'テントル付属中学校',
         classroom: '恵比寿教室',
         teacher_in_charge: '福田 尚弘',
+        assigned_teachers: ['福田 尚弘'],
         registered_grade: '小5',
         registered_year: 2026,
         weekly_sessions_count: '2回',
@@ -1216,12 +1224,24 @@ class DatabaseService {
         start_unit_id: 'unit-102-1',
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
+        enrollment_date: '2026-04-01',
         level: 'A',
         name_kana: 'タナカ ソウタ',
+        birthday: '2012-07-10',
+        club_activities: '陸上部',
+        hobbies: '映画鑑賞',
+        parent_name: '田中 恵一',
+        contact_phone: '090-1122-3344',
+        contact_time: '18:00 - 21:00',
+        personalities: ['集中力高い', '負けず嫌い'],
+        target_school: '天登星雲高校',
         classroom: '渋谷教室',
         teacher_in_charge: '福田 尚弘',
+        assigned_teachers: ['福田 尚弘'],
         registered_grade: '中2',
         registered_year: 2026,
+        weekly_sessions_count: '2回',
+        weekly_duration_minutes: '120分',
         selected_subjects: ['数学', '英語', '理科', '社会', '国語']
       },
       {
@@ -1236,12 +1256,24 @@ class DatabaseService {
         start_unit_id: null,
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
+        enrollment_date: '2026-04-01',
         level: 'A',
         name_kana: 'タカハシ レン',
+        birthday: '2010-09-25',
+        club_activities: 'バドミントン部',
+        hobbies: '音楽鑑賞',
+        parent_name: '高橋 誠',
+        contact_phone: '090-5566-7788',
+        contact_time: '18:00 - 21:00',
+        personalities: ['自主学習が得意'],
+        target_school: 'テントル大学',
         classroom: '渋谷教室',
         teacher_in_charge: '福田 尚弘',
+        assigned_teachers: ['福田 尚弘'],
         registered_grade: '高1',
         registered_year: 2026,
+        weekly_sessions_count: '2回',
+        weekly_duration_minutes: '120分',
         selected_subjects: ['数学', '英語']
       }
     ];
@@ -1327,10 +1359,20 @@ class DatabaseService {
       { id: 'task-6-1', student_id: 'std-1', unit_id: 'unit-202-1', scheduled_date: '2026-06-19', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-2', student_id: 'std-1', unit_id: 'unit-202-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
       { id: 'task-6-3', student_id: 'std-1', unit_id: 'unit-202-3', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
-      { id: 'task-7-1', student_id: 'std-2', unit_id: 'unit-301-1', scheduled_date: '2026-06-19', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '九九カード', created_at: new Date().toISOString() },
-      { id: 'task-7-2', student_id: 'std-2', unit_id: 'unit-301-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
-      { id: 'task-8-1', student_id: 'std-2', unit_id: 'unit-302-1', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() },
-      { id: 'task-8-2', student_id: 'std-2', unit_id: 'unit-302-2', scheduled_date: '2026-06-20', period: null, status: 'unstarted', video_watched: false, test_passed: false, office_note: '', created_at: new Date().toISOString() }
+      // 中尾謙信 (小5) 用のタスク
+      { id: 'task-nakao-1', student_id: 'std-3', unit_id: 'unit-301-1', scheduled_date: '2026-06-16', period: 1, status: 'completed', video_watched: true, test_passed: true, office_note: '小数のかけ算', actual_completed_date: '2026-06-16', created_at: new Date().toISOString() },
+      { id: 'task-nakao-2', student_id: 'std-3', unit_id: 'unit-301-2', scheduled_date: '2026-06-16', period: 2, status: 'completed', video_watched: true, test_passed: true, office_note: '小数のわり算', actual_completed_date: '2026-06-16', created_at: new Date().toISOString() },
+      { id: 'task-nakao-3', student_id: 'std-3', unit_id: 'unit-302-1', scheduled_date: '2026-06-19', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '合同な図形', created_at: new Date().toISOString() },
+      { id: 'task-nakao-4', student_id: 'std-3', unit_id: 'unit-302-2', scheduled_date: '2026-06-19', period: 2, status: 'unstarted', video_watched: false, test_passed: false, office_note: '図形の角', created_at: new Date().toISOString() },
+      { id: 'task-nakao-5', student_id: 'std-3', unit_id: 'unit-303-1', scheduled_date: '2026-06-23', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '割合とグラフ', created_at: new Date().toISOString() },
+
+      // 田中颯太 (中2) 用のタスク
+      { id: 'task-tanaka-1', student_id: 'std-4', unit_id: 'unit-102-1', scheduled_date: '2026-06-17', period: 1, status: 'completed', video_watched: true, test_passed: true, office_note: '式の計算', actual_completed_date: '2026-06-17', created_at: new Date().toISOString() },
+      { id: 'task-tanaka-2', student_id: 'std-4', unit_id: 'unit-102-2', scheduled_date: '2026-06-20', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '連立方程式', created_at: new Date().toISOString() },
+
+      // 高橋蓮 (高1) 用のタスク
+      { id: 'task-takahashi-1', student_id: 'std-5', unit_id: 'unit-201-1', scheduled_date: '2026-06-16', period: 1, status: 'completed', video_watched: true, test_passed: true, office_note: '数と式', actual_completed_date: '2026-06-16', created_at: new Date().toISOString() },
+      { id: 'task-takahashi-2', student_id: 'std-5', unit_id: 'unit-201-2', scheduled_date: '2026-06-19', period: 1, status: 'unstarted', video_watched: false, test_passed: false, office_note: '二次関数', created_at: new Date().toISOString() }
     ];
     return this.getMockData('learning_tasks', seed);
   }
@@ -1340,7 +1382,9 @@ class DatabaseService {
       { id: 'log-1', student_id: 'std-1', unit_id: 'unit-102-1', log_type: 'video_view', duration_seconds: 1200, created_at: '2026-06-18T10:00:00Z' },
       { id: 'log-2', student_id: 'std-1', unit_id: 'unit-102-1', log_type: 'test_result', score: 85, total_questions: 10, incorrect_genres: ['計算ミス'], created_at: '2026-06-18T10:20:00Z' },
       { id: 'log-3', student_id: 'std-1', unit_id: 'unit-201-1', log_type: 'video_view', duration_seconds: 900, created_at: '2026-06-18T11:00:00Z' },
-      { id: 'log-4', student_id: 'std-1', unit_id: 'unit-201-1', log_type: 'test_result', score: 100, total_questions: 5, incorrect_genres: [], created_at: '2026-06-18T11:15:00Z' }
+      { id: 'log-4', student_id: 'std-1', unit_id: 'unit-201-1', log_type: 'test_result', score: 100, total_questions: 5, incorrect_genres: [], created_at: '2026-06-18T11:15:00Z' },
+      { id: 'log-nakao-1', student_id: 'std-3', unit_id: 'unit-301-1', log_type: 'video_view', duration_seconds: 800, created_at: '2026-06-16T16:00:00Z' },
+      { id: 'log-nakao-2', student_id: 'std-3', unit_id: 'unit-301-1', log_type: 'test_result', score: 90, total_questions: 10, incorrect_genres: [], created_at: '2026-06-16T16:25:00Z' }
     ];
     return this.getMockData('learning_logs', seed);
   }
@@ -1394,7 +1438,45 @@ class DatabaseService {
         test_name: '中間測定テスト',
         created_at: new Date().toISOString()
       },
-      { id: 'tr-2', student_id: 'std-1', record_type: 'mock_exam', subject: '総合', score: 320, target_school_code: 'schcode-A', created_at: new Date().toISOString() }
+      { id: 'tr-2', student_id: 'std-1', record_type: 'mock_exam', subject: '総合', score: 320, target_school_code: 'schcode-A', created_at: new Date().toISOString() },
+      {
+        id: 'tr-nakao-1',
+        student_id: 'std-3',
+        record_type: 'regular_test',
+        test_name: '1学期まとめテスト',
+        score_japanese: 88,
+        score_math: 95,
+        score_english: 90,
+        score_total: 273,
+        class_rank: '3',
+        school_rank: '8',
+        deviation_value: 58.0,
+        rank_change: 'up',
+        rate_change: 5.0,
+        next_target_score: 95,
+        improvement_plan: '図形・文章題の応用力をさらに伸ばす',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'tr-tanaka-1',
+        student_id: 'std-4',
+        record_type: 'regular_test',
+        test_name: '1学期中間テスト',
+        score_japanese: 78,
+        score_math: 85,
+        score_english: 82,
+        score_social: 84,
+        score_science: 80,
+        score_total: 409,
+        class_rank: '5',
+        school_rank: '18',
+        deviation_value: 60.5,
+        rank_change: 'up',
+        rate_change: 6.0,
+        next_target_score: 90,
+        improvement_plan: '連立方程式の応用文章題を復習',
+        created_at: new Date().toISOString()
+      }
     ];
     const list = this.getMockData('test_records', seed);
     return list.map(tr => {
@@ -1853,11 +1935,12 @@ function isValidUUID(str?: string | null): boolean {
 
   public lastSyncLog: string = '';
 
-  public async seedDefaultStudentsToSupabase(): Promise<{ success: boolean; count: number; log: string }> {
+  public async restoreAllDefaultData(): Promise<{ success: boolean; count: number; log: string }> {
     let log = '';
     let successCount = 0;
     const defaultSeeds = this.getDefaultSeedStudents();
 
+    // 1. Restore Students (生徒基本情報・属性の完全復元)
     if (!this.isMockMode && this.supabase) {
       for (const seed of defaultSeeds) {
         try {
@@ -1878,29 +1961,145 @@ function isValidUUID(str?: string | null): boolean {
             .upsert(minimalPayload, { onConflict: 'student_id' });
 
           if (upsertErr) {
-            log += `[${seed.name}: ${upsertErr.message}] `;
+            log += `[生徒 ${seed.name}: ${upsertErr.message}] `;
           } else {
             successCount++;
-            log += `[${seed.name}: 復元成功] `;
+            log += `[生徒 ${seed.name}: 復元成功] `;
           }
         } catch (e: any) {
-          log += `[${seed.name}: ${e?.message || String(e)}] `;
+          log += `[生徒 ${seed.name}: ${e?.message || String(e)}] `;
         }
       }
-    } else {
-      const current = this.getMockData<Student>('students', []);
-      for (const seed of defaultSeeds) {
-        if (!current.some(s => s.student_id === seed.student_id || s.name === seed.name)) {
-          current.push(seed);
-          successCount++;
-        }
-      }
-      this.saveMockData('students', current);
-      log = `モック ${successCount}件追加`;
     }
 
+    // Always merge & restore full rich student profiles into local storage
+    const currentStudents = this.getMockData<Student>('students', []);
+    for (const seed of defaultSeeds) {
+      const idx = currentStudents.findIndex(s => s.student_id === seed.student_id || s.name === seed.name || s.id === seed.id);
+      if (idx >= 0) {
+        currentStudents[idx] = { ...seed, ...currentStudents[idx], ...seed };
+      } else {
+        currentStudents.push(seed);
+        if (this.isMockMode || !this.supabase) successCount++;
+      }
+    }
+    this.saveMockData('students', currentStudents);
+
+    // 2. Restore Learning Tasks (学習計画・コマ割りタスクの復元)
+    const defaultTasks = this.getLearningTasks();
+    const currentTasks = this.getMockData<LearningTask>('learning_tasks', []);
+    for (const task of defaultTasks) {
+      const idx = currentTasks.findIndex(t => t.id === task.id);
+      if (idx >= 0) currentTasks[idx] = task;
+      else currentTasks.push(task);
+    }
+    this.saveMockData('learning_tasks', currentTasks);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('learning_tasks').upsert(defaultTasks);
+      } catch (err) {
+        console.warn('Supabase learning_tasks restore warning:', err);
+      }
+    }
+
+    // 3. Restore Milestone Plans (年間計画・マイルストーンの復元)
+    const defaultPlans = this.getMilestonePlans();
+    const currentPlans = this.getMockData<MilestonePlan>('milestone_plans', []);
+    for (const plan of defaultPlans) {
+      const idx = currentPlans.findIndex(p => p.id === plan.id);
+      if (idx >= 0) currentPlans[idx] = plan;
+      else currentPlans.push(plan);
+    }
+    this.saveMockData('milestone_plans', currentPlans);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('milestone_plans').upsert(defaultPlans);
+      } catch (err) {
+        console.warn('Supabase milestone_plans restore warning:', err);
+      }
+    }
+
+    // 4. Restore Mini Test Results (小テスト・単元確認テストの復元)
+    const defaultMiniTests = this.getMiniTestResults();
+    const currentMiniTests = this.getMockData<MiniTestResult>('mini_test_results', []);
+    for (const mt of defaultMiniTests) {
+      const idx = currentMiniTests.findIndex(m => m.id === mt.id);
+      if (idx >= 0) currentMiniTests[idx] = mt;
+      else currentMiniTests.push(mt);
+    }
+    this.saveMockData('mini_test_results', currentMiniTests);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('mini_test_results').upsert(defaultMiniTests);
+      } catch (err) {
+        console.warn('Supabase mini_test_results restore warning:', err);
+      }
+    }
+
+    // 5. Restore Homework Results (宿題提出状況の復元)
+    const defaultHomework = this.getHomeworkResults();
+    const currentHomework = this.getMockData<HomeworkResult>('homework_results', []);
+    for (const hw of defaultHomework) {
+      const idx = currentHomework.findIndex(h => h.id === hw.id);
+      if (idx >= 0) currentHomework[idx] = hw;
+      else currentHomework.push(hw);
+    }
+    this.saveMockData('homework_results', currentHomework);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('homework_results').upsert(defaultHomework);
+      } catch (err) {
+        console.warn('Supabase homework_results restore warning:', err);
+      }
+    }
+
+    // 6. Restore Test Records (定期テスト・模試実績の復元)
+    const defaultTestRecords = this.getTestRecords();
+    const currentTestRecords = this.getMockData<TestRecord>('test_records', []);
+    for (const tr of defaultTestRecords) {
+      const idx = currentTestRecords.findIndex(t => t.id === tr.id);
+      if (idx >= 0) currentTestRecords[idx] = tr;
+      else currentTestRecords.push(tr);
+    }
+    this.saveMockData('test_records', currentTestRecords);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('test_records').upsert(defaultTestRecords);
+      } catch (err) {
+        console.warn('Supabase test_records restore warning:', err);
+      }
+    }
+
+    // 7. Restore Student Interactions (面談・指導記録の復元)
+    const defaultInteractions = this.getStudentInteractions();
+    const currentInteractions = this.getMockData<StudentInteraction>('student_interactions', []);
+    for (const inter of defaultInteractions) {
+      const idx = currentInteractions.findIndex(i => i.id === inter.id);
+      if (idx >= 0) currentInteractions[idx] = inter;
+      else currentInteractions.push(inter);
+    }
+    this.saveMockData('student_interactions', currentInteractions);
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('student_interactions').upsert(defaultInteractions);
+      } catch (err) {
+        console.warn('Supabase student_interactions restore warning:', err);
+      }
+    }
+
+    // 8. Restore Student Schedule Configs (通塾設定の復元)
+    for (const seed of defaultSeeds) {
+      const cfg = this.getStudentScheduleConfig(seed.id);
+      await this.saveStudentScheduleConfig(cfg);
+    }
+
+    log += `[生徒5名・年間計画・学習計画・小テスト・宿題・定期テスト・面談記録の全復元完了]`;
     this.lastSyncLog = `DB復元結果: ${log}`;
-    return { success: successCount > 0, count: successCount, log: this.lastSyncLog };
+    return { success: true, count: defaultSeeds.length, log: this.lastSyncLog };
+  }
+
+  public async seedDefaultStudentsToSupabase(): Promise<{ success: boolean; count: number; log: string }> {
+    return this.restoreAllDefaultData();
   }
 
   public async fetchStudents(): Promise<Student[]> {
@@ -2320,7 +2519,22 @@ function isValidUUID(str?: string | null): boolean {
 
   // 12. MiniTestResults CRUD
   public getMiniTestResults(): MiniTestResult[] {
-    return this.getMockData('mini_test_results', []);
+    const seed: MiniTestResult[] = [
+      // 佐藤拓海
+      { id: 'mt-1-1', student_id: 'std-1', date: '2026-06-15', subject: '数学', test_content: '正負の数 単元確認テスト', score: 95, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-15T18:00:00Z' },
+      { id: 'mt-1-2', student_id: 'std-1', date: '2026-06-18', subject: '数学', test_content: '文字式 単元確認テスト', score: 85, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-18T18:00:00Z' },
+      { id: 'mt-1-3', student_id: 'std-1', date: '2026-06-18', subject: '英語', test_content: 'be動詞・一般動詞 単元確認テスト', score: 90, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-18T19:00:00Z' },
+      // 鈴木結衣
+      { id: 'mt-2-1', student_id: 'std-2', date: '2026-06-15', subject: '算数', test_content: '分数のかけ算 単元確認テスト', score: 88, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-15T17:00:00Z' },
+      // 中尾謙信
+      { id: 'mt-3-1', student_id: 'std-3', date: '2026-06-16', subject: '算数', test_content: '小数のかけ算 単元確認テスト', score: 90, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-16T17:00:00Z' },
+      { id: 'mt-3-2', student_id: 'std-3', date: '2026-06-16', subject: '算数', test_content: '小数のわり算 単元確認テスト', score: 85, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-16T18:00:00Z' },
+      { id: 'mt-3-3', student_id: 'std-3', date: '2026-06-16', subject: '英語', test_content: 'アルファベット・身の回りの単語', score: 100, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-16T18:30:00Z' },
+      { id: 'mt-3-4', student_id: 'std-3', date: '2026-06-16', subject: '国語', test_content: '5年漢字・語句 単元確認テスト', score: 95, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-16T19:00:00Z' },
+      // 田中颯太
+      { id: 'mt-4-1', student_id: 'std-4', date: '2026-06-17', subject: '数学', test_content: '式の計算 単元確認テスト', score: 92, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-17T18:00:00Z' }
+    ];
+    return this.getMockData('mini_test_results', seed);
   }
 
   public async fetchMiniTestResults(studentId?: string, date?: string): Promise<MiniTestResult[]> {
@@ -2406,7 +2620,16 @@ function isValidUUID(str?: string | null): boolean {
 
   // 13. HomeworkResults CRUD
   public getHomeworkResults(): HomeworkResult[] {
-    return this.getMockData('homework_results', []);
+    const seed: HomeworkResult[] = [
+      // 佐藤拓海
+      { id: 'hw-1-1', student_id: 'std-1', date: '2026-06-18', subject: '数学', homework_content: 'ワーク p.22-25 (文字式の応用)', homework_deadline: '2026-06-25', status: 'completed', evaluation: 'A', memo: '途中式も綺麗に書けている', target_scope: 'individual', created_at: '2026-06-18T18:00:00Z' },
+      { id: 'hw-1-2', student_id: 'std-1', date: '2026-06-18', subject: '英語', homework_content: '単語プリント No.3', homework_deadline: '2026-06-25', status: 'completed', evaluation: 'A', memo: '', target_scope: 'individual', created_at: '2026-06-18T19:00:00Z' },
+      // 中尾謙信
+      { id: 'hw-3-1', student_id: 'std-3', date: '2026-06-16', subject: '算数', homework_content: '計算ドリル p.12-15 (小数のかけ算)', homework_deadline: '2026-06-23', status: 'completed', evaluation: 'A', memo: '全問正解！素晴らしい集中力', target_scope: 'individual', created_at: '2026-06-16T17:00:00Z' },
+      { id: 'hw-3-2', student_id: 'std-3', date: '2026-06-16', subject: '国語', homework_content: '漢字スキル p.8-10', homework_deadline: '2026-06-23', status: 'completed', evaluation: 'A', memo: 'とめ・はね・はらいが丁寧', target_scope: 'individual', created_at: '2026-06-16T18:00:00Z' },
+      { id: 'hw-3-3', student_id: 'std-3', date: '2026-06-16', subject: '英語', homework_content: '単語練習プリント No.1', homework_deadline: '2026-06-23', status: 'completed', evaluation: 'A', memo: '', target_scope: 'individual', created_at: '2026-06-16T18:30:00Z' }
+    ];
+    return this.getMockData('homework_results', seed);
   }
 
   public async fetchHomeworkResults(studentId?: string, date?: string): Promise<HomeworkResult[]> {
@@ -2758,6 +2981,73 @@ function isValidUUID(str?: string | null): boolean {
       seed.push({
         id: `mp-m1math-levelC-${p.month}-${p.week_number}`,
         grade: '中1',
+        subject: '数学',
+        course: 'standard',
+        ...p
+      });
+    });
+
+    // 小5 算数・国語・英語 (中尾謙信など小学生向け)
+    const elem5MathPlans: Omit<MilestonePlan, 'id' | 'grade' | 'subject' | 'course'>[] = [
+      { month: 4, week_number: 1, unit_name: '整数と小数', target_sequence_order: 1, is_holiday: false, level: 'A', chapter: '第1章', target_theme_name: '整数と小数のしくみ' },
+      { month: 4, week_number: 2, unit_name: '直方体と立方体の体積', target_sequence_order: 2, is_holiday: false, level: 'A', chapter: '第2章', target_theme_name: '体積の求め方' },
+      { month: 4, week_number: 3, unit_name: '比例', target_sequence_order: 3, is_holiday: false, level: 'A', chapter: '第3章', target_theme_name: '比例の関係' },
+      { month: 4, week_number: 4, unit_name: '小数のかけ算', target_sequence_order: 4, is_holiday: false, level: 'A', chapter: '第4章', target_theme_name: '小数の計算' },
+      { month: 5, week_number: 1, unit_name: 'GW休み', target_sequence_order: 4, is_holiday: true, holiday_name: 'GW休み', level: 'A', chapter: '休み' },
+      { month: 5, week_number: 2, unit_name: '小数のわり算', target_sequence_order: 5, is_holiday: false, level: 'A', chapter: '第5章', target_theme_name: '小数でわる計算' },
+      { month: 5, week_number: 3, unit_name: '合同な図形', target_sequence_order: 6, is_holiday: false, level: 'A', chapter: '第6章', target_theme_name: '図形の合同' },
+      { month: 5, week_number: 4, unit_name: '図形の角', target_sequence_order: 7, is_holiday: false, level: 'A', chapter: '第7章', target_theme_name: '三角形と四角形の角' },
+      { month: 6, week_number: 1, unit_name: '倍数と約数', target_sequence_order: 8, is_holiday: false, level: 'A', chapter: '第8章', target_theme_name: '公倍数と公約数' },
+      { month: 6, week_number: 2, unit_name: '分数のたし算とひき算', target_sequence_order: 9, is_holiday: false, level: 'A', chapter: '第9章', target_theme_name: '通分と約分' },
+      { month: 6, week_number: 3, unit_name: 'まとめテスト対策', target_sequence_order: 9, is_holiday: true, holiday_name: 'まとめテスト対策期間', level: 'A', chapter: 'テスト対策' },
+      { month: 6, week_number: 4, unit_name: 'まとめテスト対策', target_sequence_order: 9, is_holiday: true, holiday_name: 'まとめテスト対策期間', level: 'A', chapter: 'テスト対策' },
+      { month: 7, week_number: 1, unit_name: '1学期復習', target_sequence_order: 9, is_holiday: false, level: 'A', chapter: '復習' },
+      { month: 7, week_number: 2, unit_name: '1学期復習', target_sequence_order: 9, is_holiday: false, level: 'A', chapter: '復習' },
+      { month: 7, week_number: 3, unit_name: '面積の求め方', target_sequence_order: 10, is_holiday: false, level: 'A', chapter: '第10章', target_theme_name: '平行四辺形と三角形の面積' },
+      { month: 7, week_number: 4, unit_name: '平均', target_sequence_order: 11, is_holiday: false, level: 'A', chapter: '第11章', target_theme_name: '平均とその利用' },
+      { month: 8, week_number: 1, unit_name: '夏期講習・総合復習', target_sequence_order: 11, is_holiday: false, level: 'A', chapter: '夏期講習' },
+      { month: 8, week_number: 2, unit_name: 'お盆休み', target_sequence_order: 11, is_holiday: true, holiday_name: 'お盆休み', level: 'A', chapter: 'お盆休み' },
+      { month: 8, week_number: 3, unit_name: '夏期講習・応用演習', target_sequence_order: 11, is_holiday: false, level: 'A', chapter: '夏期講習' },
+      { month: 8, week_number: 4, unit_name: '単位量あたりの大きさ', target_sequence_order: 12, is_holiday: false, level: 'A', chapter: '第12章', target_theme_name: '速さ・人口密度' },
+      { month: 9, week_number: 1, unit_name: '割合とグラフ', target_sequence_order: 13, is_holiday: false, level: 'A', chapter: '第13章', target_theme_name: '百分率と歩合' },
+      { month: 9, week_number: 2, unit_name: '円と正多角形', target_sequence_order: 14, is_holiday: false, level: 'A', chapter: '第14章', target_theme_name: '円周率' }
+    ];
+
+    elem5MathPlans.forEach(p => {
+      seed.push({
+        id: `mp-elem5math-levelA-${p.month}-${p.week_number}`,
+        grade: '小5',
+        subject: '算数',
+        course: 'standard',
+        ...p
+      });
+      seed.push({
+        id: `mp-elem6math-levelA-${p.month}-${p.week_number}`,
+        grade: '小6',
+        subject: '算数',
+        course: 'standard',
+        ...p
+      });
+      seed.push({
+        id: `mp-elem5eng-levelA-${p.month}-${p.week_number}`,
+        grade: '小5',
+        subject: '英語',
+        course: 'standard',
+        ...p,
+        unit_name: (p.unit_name || '').replace('算数', '英語')
+      });
+      seed.push({
+        id: `mp-elem5jp-levelA-${p.month}-${p.week_number}`,
+        grade: '小5',
+        subject: '国語',
+        course: 'standard',
+        ...p,
+        unit_name: (p.unit_name || '').replace('算数', '国語')
+      });
+      // 中2 数学
+      seed.push({
+        id: `mp-m2math-levelA-${p.month}-${p.week_number}`,
+        grade: '中2',
         subject: '数学',
         course: 'standard',
         ...p
@@ -3132,7 +3422,7 @@ function isValidUUID(str?: string | null): boolean {
         category: '勉強相談',
         memo: '理科は前回より手応えあり。英語が下がったかも、と言っている。\n今日の自習の様子はいつもより暗い顔。',
         date: '2026-06-18',
-        staff_name: '福田',
+        staff_name: '福田 尚弘',
         created_at: '2026-06-18T18:00:00Z'
       },
       {
@@ -3141,8 +3431,26 @@ function isValidUUID(str?: string | null): boolean {
         category: '保護者対応',
         memo: '私立併願を迷っている。今度、駒場学園見に行く。',
         date: '2026-06-20',
-        staff_name: '福田',
+        staff_name: '福田 尚弘',
         created_at: '2026-06-20T19:00:00Z'
+      },
+      {
+        id: 'si-3-1',
+        student_id: 'std-3',
+        category: '勉強相談',
+        memo: '算数の図形問題に強い興味を示しており、応用問題も積極的に解いています。集中力が非常に高く、次回テストに向けて順調に進んでいます。',
+        date: '2026-06-15',
+        staff_name: '福田 尚弘',
+        created_at: '2026-06-15T17:30:00Z'
+      },
+      {
+        id: 'si-3-2',
+        student_id: 'std-3',
+        category: '保護者対応',
+        memo: '保護者（勇気様）同席で面談実施。中学受験に向けて基礎学力の定着と苦手分野の早期克服を目指す方針で合意。家庭学習の習慣も良好。',
+        date: '2026-05-10',
+        staff_name: '福田 尚弘',
+        created_at: '2026-05-10T18:00:00Z'
       }
     ];
     const list = this.getMockData<StudentInteraction>('student_interactions', seed);

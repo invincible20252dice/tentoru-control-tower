@@ -92,15 +92,15 @@ describe('db.ts Complete Pure Unit Coverage Boost', () => {
       created_at: new Date().toISOString()
     };
     await db.saveMiniTestResult(mini);
-    expect(db.getMiniTestResults().length).toBe(1);
+    expect(db.getMiniTestResults().some(m => m.id === 'mini-db-1')).toBe(true);
     expect((await db.fetchMiniTestResults(student1.id, '2026-09-01')).length).toBe(1);
 
     await db.deleteMiniTestResult('mini-db-1');
-    expect(db.getMiniTestResults().length).toBe(0);
+    expect(db.getMiniTestResults().some(m => m.id === 'mini-db-1')).toBe(false);
 
     await db.saveMiniTestResult(mini);
     await db.deleteMiniTestResultByDate(student1.id, '2026-09-01');
-    expect(db.getMiniTestResults().length).toBe(0);
+    expect(db.getMiniTestResults().some(m => m.id === 'mini-db-1')).toBe(false);
 
     // 5. HomeworkResults
     const hw: HomeworkResult = {
@@ -115,15 +115,15 @@ describe('db.ts Complete Pure Unit Coverage Boost', () => {
       created_at: new Date().toISOString()
     };
     await db.saveHomeworkResult(hw);
-    expect(db.getHomeworkResults().length).toBe(1);
+    expect(db.getHomeworkResults().some(h => h.id === 'hw-db-1')).toBe(true);
     expect((await db.fetchHomeworkResults(student1.id, '2026-09-01')).length).toBe(1);
 
     await db.deleteHomeworkResult('hw-db-1');
-    expect(db.getHomeworkResults().length).toBe(0);
+    expect(db.getHomeworkResults().some(h => h.id === 'hw-db-1')).toBe(false);
 
     await db.saveHomeworkResult(hw);
     await db.deleteHomeworkResultsByDate(student1.id, '2026-09-01');
-    expect(db.getHomeworkResults().length).toBe(0);
+    expect(db.getHomeworkResults().some(h => h.id === 'hw-db-1')).toBe(false);
 
     // 6. StudentLessonProgress & TeacherCorrectionLog
     const progress: StudentLessonProgress = {

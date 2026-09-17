@@ -197,10 +197,20 @@ export default function TeacherDashboard({
   const handleForceSyncStudents = async () => {
     setIsSyncingStudents(true);
     try {
-      const seedRes = await db.seedDefaultStudentsToSupabase();
+      const seedRes = await db.restoreAllDefaultData();
       const fetchedSt = await db.fetchStudents();
       if (fetchedSt && fetchedSt.length > 0) {
         setStudents(fetchedSt);
+        if (selectedStudent) {
+          const updated = fetchedSt.find(s => s.id === selectedStudent.id || s.student_id === selectedStudent.student_id);
+          if (updated) setSelectedStudent(updated);
+        }
+      }
+      const fetchedMps = db.getMilestonePlans();
+      setMilestonePlans(fetchedMps);
+      if (selectedStudent) {
+        const fetchedInteractions = await db.fetchStudentInteractions(selectedStudent.id);
+        setInteractions(fetchedInteractions);
       }
       setSupabaseDebugInfo({
         error: null,
@@ -209,7 +219,7 @@ export default function TeacherDashboard({
           ? fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', ')
           : '0件（データなし）',
         lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
-        syncLog: seedRes.log || db.lastSyncLog || '同期完了'
+        syncLog: seedRes.log || db.lastSyncLog || '全過去データ（生徒・年間計画・学習計画・テスト・宿題・面談記録）の完全復元完了'
       });
     } catch (err: any) {
       console.warn('handleForceSyncStudents error:', err);
@@ -889,7 +899,7 @@ export default function TeacherDashboard({
     setHomeworkResultsList(allHwResults);
     const hwStatusMap: Record<string, 'incomplete' | 'completed' | 'skipped'> = {};
     allHwResults.forEach(r => {
-      hwStatusMap[r.id] = r.status;
+      hwStatusMap[r.id] = r.status || 'incomplete';
     });
     setTempHomeworkStatuses(hwStatusMap);
     setGeminiApiKey(getGeminiApiKey());
