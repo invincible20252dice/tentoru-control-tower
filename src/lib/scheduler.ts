@@ -229,14 +229,14 @@ export function findNextUncompletedLessonForSubject(params: {
 
   const filteredMasters = curriculumMasters.filter(m => {
     if (isElem) {
-      const isMasterElem = (m.grade || '').startsWith('小') || m.grade === '園児';
+      const isMasterElem = (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
       if (!isMasterElem) return false;
       if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
         return m.subject === '算数' || m.subject === '数学';
       }
       return m.subject === subject;
     } else if (isJunior) {
-      const isMasterJunior = (m.grade || '').startsWith('中');
+      const isMasterJunior = (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
       if (!isMasterJunior) return false;
       if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
         return m.subject === '数学' || m.subject === '算数';
@@ -1052,7 +1052,12 @@ export function applyStartPositionsToTasks(
       return task;
     }
 
-    const startUnit = studentSchoolUnits.find(u => u.id === startUnitId || String(u.sequence_order) === String(startUnitId));
+    const startUnit = studentSchoolUnits.find(u => 
+      u.id === startUnitId || 
+      String(u.sequence_order) === String(startUnitId) ||
+      u.name === startUnitId ||
+      (u.name && startUnitId && (u.name.includes(startUnitId) || startUnitId.includes(u.name)))
+    );
     if (!startUnit) return task;
 
     if (unit.sequence_order < startUnit.sequence_order) {

@@ -543,9 +543,13 @@ export default function TeacherDashboard({
     setMilestoneTemplates(listTemplates);
     setCustomClassesList(listCc);
     setBranches(listBranches);
-    setCurriculumMastersList(listMasters);
+    // 非同期で Supabase のクラウドDBから生徒・学校・カリキュラムマスターデータを取得して同期
+    db.fetchCurriculumMasters().then(fetchedMasters => {
+      if (fetchedMasters && fetchedMasters.length > 0) {
+        setCurriculumMastersList(fetchedMasters);
+      }
+    }).catch(err => console.warn('fetchCurriculumMasters in loadData error:', err));
 
-    // 非同期で Supabase のクラウドDBから生徒・学校データを取得して同期
     db.fetchStudents().then(fetchedSt => {
       if (fetchedSt && fetchedSt.length > 0) {
         setStudents(fetchedSt);
@@ -6477,25 +6481,25 @@ export default function TeacherDashboard({
 
                   // 小学生向け進行状況と完了予測計算（部門ごとに正確なカリキュラムマスターを抽出）
                   const targetSubject = (isElementary && selectedSubject === '数学') ? '算数' : selectedSubject;
-                  const rawMasters = db.getCurriculumMasters();
+                  const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
                   const masterUnits = rawMasters
                     .filter(m => {
                       if (isElementary) {
-                        const isElemGrade = (m.grade || '').startsWith('小') || m.grade === '園児';
+                        const isElemGrade = isElementaryStudent(m.grade) || (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
                         if (!isElemGrade) return false;
                         if (targetSubject === '算数' || targetSubject === '数学') {
                           return m.subject === '算数' || m.subject === '数学';
                         }
                         return m.subject === targetSubject;
                       } else if (isJuniorHigh) {
-                        const isJuniorGrade = (m.grade || '').startsWith('中');
+                        const isJuniorGrade = isJuniorHighStudent(m.grade) || (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
                         if (!isJuniorGrade) return false;
                         if (targetSubject === '算数' || targetSubject === '数学') {
                           return m.subject === '数学' || m.subject === '算数';
                         }
                         return m.subject === targetSubject;
                       } else if (isHighSchool) {
-                        const isHighGrade = (m.grade || '').startsWith('高') || m.grade === '既卒';
+                        const isHighGrade = isHighSchoolStudent(m.grade) || (m.grade || '').startsWith('高') || m.grade === '既卒';
                         if (!isHighGrade) return false;
                         return m.subject === targetSubject;
                       }
@@ -6572,7 +6576,17 @@ export default function TeacherDashboard({
                   let startSeq = 0;
                   const subjectStartUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
                   if (selectedStudent && subjectStartUnitId) {
-                    const su = timelineUnits.find(u => String(u.id) === String(subjectStartUnitId));
+                    const su = timelineUnits.find(u => {
+                      const au = u as any;
+                      return (
+                        String(au.id) === String(subjectStartUnitId) || 
+                        String(au.sort_order) === String(subjectStartUnitId) ||
+                        au.unit_name === subjectStartUnitId ||
+                        au.lesson_name === subjectStartUnitId ||
+                        au.name === subjectStartUnitId ||
+                        (au.name && subjectStartUnitId && (au.name.includes(subjectStartUnitId) || subjectStartUnitId.includes(au.unit_name || '___')))
+                      );
+                    });
                     if (su) startSeq = su.sequence_order - 1;
                   }
 
@@ -7139,7 +7153,15 @@ export default function TeacherDashboard({
                                       )}
                                       {(() => {
                                         const sUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
-                                        if (sUnitId === unit.id) {
+                                        const uAny = unit as any;
+                                        const isStart = sUnitId && (
+                                          sUnitId === unit.id ||
+                                          (uAny.sort_order !== undefined && String(sUnitId) === String(uAny.sort_order)) ||
+                                          (uAny.unit_name && sUnitId === uAny.unit_name) ||
+                                          (uAny.lesson_name && sUnitId === uAny.lesson_name) ||
+                                          (unit.name && (unit.name === sUnitId || unit.name.includes(sUnitId) || (uAny.unit_name && sUnitId.includes(uAny.unit_name))))
+                                        );
+                                        if (isStart) {
                                           return (
                                             <span 
                                               data-testid="timeline-start-line-badge"
@@ -8302,7 +8324,8 @@ export default function TeacherDashboard({
                               const isSelected = curSubjs.includes(item.subject) || (item.subject === '数学' && curSubjs.includes('算数')) || (item.subject === '算数' && curSubjs.includes('数学'));
 
                               // Filter curriculum masters for this subject
-                              const mastersForSubject = curriculumMastersList.filter(m => 
+                              const allMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+                              const mastersForSubject = allMasters.filter(m => 
                                 m.subject === item.subject ||
                                 (item.subject === '数学' && m.subject === '算数') ||
                                 (item.subject === '算数' && m.subject === '数学')
@@ -8335,7 +8358,7 @@ export default function TeacherDashboard({
                               // Current selected grade in state, or infer from existing val
                               let curGrade = selectedStartGrades[item.key] || '';
                               if (!curGrade && val) {
-                                const foundMaster = mastersForSubject.find(m => m.id === val || String(m.sort_order) === String(val));
+                                const foundMaster = mastersForSubject.find(m => m.id === val || String(m.sort_order) === String(val) || m.unit_name === val || m.lesson_name === val);
                                 if (foundMaster) {
                                   curGrade = normalizeGrade(foundMaster.grade_level || foundMaster.grade);
                                 }
@@ -8345,7 +8368,9 @@ export default function TeacherDashboard({
                               const filteredMasters = curGrade 
                                 ? mastersForSubject.filter(m => {
                                     const g = m.grade_level || m.grade || '';
-                                    return g === curGrade || normalizeGrade(g) === normalizeGrade(curGrade);
+                                    return g === curGrade || 
+                                           normalizeGrade(g) === normalizeGrade(curGrade) || 
+                                           normalizeStandardGrade(g) === normalizeStandardGrade(curGrade);
                                   }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
                                 : [];
 
@@ -8397,7 +8422,12 @@ export default function TeacherDashboard({
                               // Determine currently selected unit value in dropdown
                               let currentDropdownValue = '';
                               if (val) {
-                                const matchedUnit = uniqueUnitOptions.find(u => u.id === val || u.lessonIds.includes(val));
+                                const matchedUnit = uniqueUnitOptions.find(u => 
+                                  u.id === val || 
+                                  u.lessonIds.includes(val) || 
+                                  u.name === val || 
+                                  String(u.sort_order) === String(val)
+                                );
                                 if (matchedUnit) {
                                   currentDropdownValue = matchedUnit.id;
                                 } else {

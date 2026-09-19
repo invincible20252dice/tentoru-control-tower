@@ -231,8 +231,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     // 学年での絞り込み（該当するものがあれば優先）
     const gradeExactMasters = candidateMasters.filter(m => m.grade === student.grade);
     const gradeCategoryMasters = candidateMasters.filter(m => {
-      if (isElem && m.grade) return m.grade.startsWith('小') || m.grade === '園児';
-      if (isJhs && m.grade) return m.grade.startsWith('中');
+      if (isElem && m.grade) return m.grade.startsWith('小') || /^[1-6]年生?$/.test(m.grade) || m.grade === '園児';
+      if (isJhs && m.grade) return m.grade.startsWith('中') || /^[7-9]年生?$/.test(m.grade);
       if (isHs && m.grade) return m.grade.startsWith('高') || m.grade === '既卒';
       return true;
     });
@@ -665,7 +665,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     if (isUnitTestTask) {
       const nextAttendanceDate = getNextAttendanceDate(currentDateStr, updatedStudent);
       const completedSet = new Set((updatedStudent.completed_lesson_ids || []).map(String));
-      const isElem = updatedStudent.grade.startsWith('小') || updatedStudent.grade === '園児';
+      const isElem = updatedStudent.grade.startsWith('小') || /^[1-6]年生?$/.test(updatedStudent.grade) || updatedStudent.grade === '園児';
       const activeSubj = task.subject || (isElem ? '算数' : '数学');
       
       const candidateMasters = curriculumMasters
