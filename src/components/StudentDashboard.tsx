@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
 import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
+import { ensureMathEnglishUnitTests, normalizeGrade } from '../lib/scheduler';
 import SugorokuMap from './SugorokuMap';
 import { TestScoreRadarChart } from './TestScoreRadarChart';
 import { WeeklyScheduleViewer } from './WeeklyScheduleViewer';
@@ -228,8 +229,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return false;
     });
 
+    const targetGradeNorm = normalizeGrade(student.grade);
     // 学年での絞り込み（該当するものがあれば優先）
-    const gradeExactMasters = candidateMasters.filter(m => m.grade === student.grade);
+    const gradeExactMasters = candidateMasters.filter(m => normalizeGrade(m.grade) === targetGradeNorm);
     const gradeCategoryMasters = candidateMasters.filter(m => {
       if (isElem && m.grade) return m.grade.startsWith('小') || /^[1-6]年生?$/.test(m.grade) || m.grade === '園児';
       if (isJhs && m.grade) return m.grade.startsWith('中') || /^[7-9]年生?$/.test(m.grade);
@@ -239,9 +241,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     // 検索対象のリスト候補（該当教科内でのみ段階的にフォールバック）
     const listsToTry = [
-      gradeExactMasters.length > 0 ? gradeExactMasters : null,
-      gradeCategoryMasters.length > 0 ? gradeCategoryMasters : null,
-      candidateMasters.length > 0 ? candidateMasters : null
+      gradeExactMasters.length > 0 ? ensureMathEnglishUnitTests(gradeExactMasters) : null,
+      gradeCategoryMasters.length > 0 ? ensureMathEnglishUnitTests(gradeCategoryMasters) : null,
+      candidateMasters.length > 0 ? ensureMathEnglishUnitTests(candidateMasters) : null
     ].filter(Boolean) as typeof curriculumMasters[];
 
     const findIndexInList = (
@@ -262,17 +264,29 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         const norm = cleanStr(raw);
         if (!norm) return -1;
 
-        // 1. 完全一致
+        // 1. 完全一致 (fullTitle または name)
         const exact = list.findIndex(m => m.name === raw || m.fullTitle === raw);
         if (exact >= 0) return exact;
 
-        // 2. 正規化完全一致
-        const normMatch = list.findIndex(m => {
-          const mNorm = cleanStr(m.name);
+        // 2. 正規化完全一致 (fullTitle または name)
+        const normExact = list.findIndex(m => cleanStr(m.fullTitle) === norm || cleanStr(m.name) === norm);
+        if (normExact >= 0) return normExact;
+
+        // 3. fullTitle での部分一致（汎用名だけの誤マッチを防ぐため fullTitle 優先）
+        const fullTitleMatch = list.findIndex(m => {
           const fNorm = cleanStr(m.fullTitle);
-          return mNorm === norm || fNorm === norm;
+          return fNorm.includes(norm) || norm.includes(fNorm);
         });
-        if (normMatch >= 0) return normMatch;
+        if (fullTitleMatch >= 0) return fullTitleMatch;
+
+        // 4. name での部分一致（"テスト" や "単元確認テスト" などの汎用名を除外）
+        const genericNames = ['テスト', '単元確認テスト', '単元テスト', '確認テスト'];
+        const nameMatch = list.findIndex(m => {
+          const mNorm = cleanStr(m.name);
+          if (genericNames.includes(mNorm)) return false;
+          return mNorm.length >= 3 && (mNorm.includes(norm) || norm.includes(mNorm));
+        });
+        if (nameMatch >= 0) return nameMatch;
       }
       return -1;
     };
@@ -281,12 +295,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       const masterLessons = rawList
         .slice()
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(m => ({
-          id: m.id,
-          sort_order: m.sort_order,
-          name: m.lesson_name || m.unit_name || '',
-          fullTitle: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : (m.lesson_name || '')
-        }));
+        .map(m => {
+          const isUnitTest = m.item_type === 'unit_test' || m.lesson_name.includes('テスト');
+          const cleanLessonName = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+          const displayLessonName = isUnitTest 
+            ? (cleanLessonName.includes('単元確認テスト') || cleanLessonName.includes('テスト') ? cleanLessonName : `${cleanLessonName} (単元テスト)`)
+            : cleanLessonName;
+          return {
+            id: m.id,
+            sort_order: m.sort_order,
+            name: displayLessonName || m.unit_name || '',
+            fullTitle: m.unit_name ? `${m.unit_name} - ${displayLessonName}` : (displayLessonName || ''),
+            unit_name: m.unit_name
+          };
+        });
 
       if (masterLessons.length > 0) {
         let startIdx = findIndexInList(masterLessons, task.start_lesson_id, task.start_lesson_name);
@@ -301,6 +323,28 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             if (startIdx < 0 && fromStr) startIdx = findIndexInList(masterLessons, undefined, fromStr);
             if (endIdx < 0 && toStr) endIdx = findIndexInList(masterLessons, undefined, toStr);
           }
+        }
+
+        // startIdx と endIdx の両方が特定できた場合
+        if (startIdx >= 0 && endIdx >= 0) {
+          const startItem = masterLessons[startIdx];
+          const endItem = masterLessons[endIdx];
+
+          // 同一単元内の場合は、その単元のみに絞り込んでからスライス（他単元の重複sort_order混入を完全遮断）
+          if (startItem.unit_name && endItem.unit_name && startItem.unit_name === endItem.unit_name) {
+            const sameUnitLessons = masterLessons.filter(m => m.unit_name === startItem.unit_name);
+            const sIdx = sameUnitLessons.findIndex(m => m.id === startItem.id || m.name === startItem.name);
+            const eIdx = sameUnitLessons.findIndex(m => m.id === endItem.id || m.name === endItem.name);
+            if (sIdx >= 0 && eIdx >= 0) {
+              const minI = Math.min(sIdx, eIdx);
+              const maxI = Math.max(sIdx, eIdx);
+              return sameUnitLessons.slice(minI, maxI + 1);
+            }
+          }
+
+          const minI = Math.min(startIdx, endIdx);
+          const maxI = Math.max(startIdx, endIdx);
+          return masterLessons.slice(minI, maxI + 1);
         }
 
         // sort_order 基準での範囲特定 (From〜To)

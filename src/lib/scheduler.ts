@@ -253,15 +253,18 @@ export function findNextUncompletedLessonForSubject(params: {
     return m.subject === subject;
   });
 
-  let masterLessons: Array<{ id: string; name: string; sort_order: number }> = [];
+  let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
 
-  if (filteredMasters.length > 0) {
-    masterLessons = filteredMasters
+  const ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
+  if (ensuredMasters.length > 0) {
+    masterLessons = ensuredMasters
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map(m => ({
         id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-        sort_order: m.sort_order ?? 0
+        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+        sort_order: m.sort_order ?? 0,
+        unit_name: m.unit_name,
+        item_type: m.item_type
       }));
   } else {
     const matchingSchoolUnits = curriculumUnits.filter(u => 
@@ -580,15 +583,18 @@ export function calculateLessonRangeForSlot(params: {
     return m.subject === subject;
   });
 
-  let masterLessons: Array<{ id: string; name: string; sort_order: number }> = [];
+  let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
 
-  if (isElem && filteredMasters.length > 0) {
-    masterLessons = filteredMasters
+  const ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
+  if (isElem && ensuredMasters.length > 0) {
+    masterLessons = ensuredMasters
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map(m => ({
         id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-        sort_order: m.sort_order ?? 0
+        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+        sort_order: m.sort_order ?? 0,
+        unit_name: m.unit_name,
+        item_type: m.item_type
       }));
   } else {
     const matchingSchoolUnits = curriculumUnits.filter(u => 
@@ -604,13 +610,15 @@ export function calculateLessonRangeForSlot(params: {
           name: u.name,
           sort_order: u.sequence_order ?? 0
         }));
-    } else if (filteredMasters.length > 0) {
-      masterLessons = filteredMasters
+    } else if (ensuredMasters.length > 0) {
+      masterLessons = ensuredMasters
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
         .map(m => ({
           id: m.id,
-          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
-          sort_order: m.sort_order ?? 0
+          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+          sort_order: m.sort_order ?? 0,
+          unit_name: m.unit_name,
+          item_type: m.item_type
         }));
     } else {
       const fallbackUnits = curriculumUnits
@@ -692,7 +700,22 @@ export function calculateLessonRangeForSlot(params: {
     paceReason = inference.reason;
   }
 
-  const endIdx = Math.min(startIdx + Math.max(1, effectivePace) - 1, masterLessons.length - 1);
+  // 単元テストの境界制御:
+  // startIdx から順番に進める際、途中で「単元確認テスト」に到達した場合は、その単元テストまででストップ（新単元の授業にまたがない）
+  let endIdx = startIdx;
+  const maxStep = Math.max(1, effectivePace || 1);
+  for (let step = 0; step < maxStep && (startIdx + step) < masterLessons.length; step++) {
+    const currentItem = masterLessons[startIdx + step];
+    endIdx = startIdx + step;
+    const isUnitTest = currentItem.item_type === 'unit_test' || 
+                       currentItem.name.includes('単元確認テスト') || 
+                       currentItem.name.includes('テスト');
+    // 単元テストに到達したら、その単元テストでストップ
+    if (isUnitTest) {
+      break;
+    }
+  }
+
   const startItem = masterLessons[startIdx];
   const endItem = masterLessons[endIdx];
 

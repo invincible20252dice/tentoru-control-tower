@@ -34,7 +34,7 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     db.saveCurriculumMasters(mockCurriculumMasters);
   });
 
-  test('生徒画面で From(sort_order: 11) 〜 To(sort_order: 12) の算数2授業分が 0/2 完了として全ステップ展開される', async () => {
+  test('生徒画面で From(sort_order: 11) 〜 To(sort_order: 12) の算数2授業分（＋単元テスト）が 0/3 完了として全ステップ展開される', async () => {
     const taskMath: LearningTask = {
       id: 'task-math-range',
       student_id: mockStudent.id,
@@ -65,14 +65,15 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
       />
     );
 
-    // 0 / 2 完了と表示されること (単一0/1完了フォールバックではないこと)
+    // 0 / 3 完了と表示されること (単元テストが挿入されるため3ステップ)
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 2 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 3 完了');
     });
 
-    // STEP 1 と STEP 2 の両方が描画されること
+    // STEP 1, STEP 2, STEP 3 が描画されること
     expect(screen.getByTestId('step-card-1-0')).toBeInTheDocument();
     expect(screen.getByTestId('step-card-1-1')).toBeInTheDocument();
+    expect(screen.getByTestId('step-card-1-2')).toBeInTheDocument();
   });
 
   test('すごろくマップで From 〜 To 範囲の全マスが 🟠 オレンジ(stepToday)としてハイライトされる', async () => {
@@ -144,13 +145,14 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-2')).toHaveTextContent('0 / 2 完了');
+      expect(screen.getByTestId('step-progress-count-2')).toHaveTextContent('0 / 3 完了');
     });
 
     // 英語のコマ枠内(period-row-2)に英語のステップのみが表示され、算数の単元(「ひきざん」など)は一切表示されないこと
     const period2Row = screen.getByTestId('period-row-2');
     expect(within(period2Row).getByTestId('step-card-2-0')).toBeInTheDocument();
     expect(within(period2Row).getByTestId('step-card-2-1')).toBeInTheDocument();
+    expect(within(period2Row).getByTestId('step-card-2-2')).toBeInTheDocument();
     expect(within(period2Row).getAllByText(/A〜Gの発音/)[0]).toBeInTheDocument();
     expect(within(period2Row).getAllByText(/身の回りのもの/)[0]).toBeInTheDocument();
     expect(within(period2Row).queryByText(/ひきざん/)).not.toBeInTheDocument();
@@ -304,7 +306,7 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     expect(isFriAttendance).toBe(true);
   });
 
-  test('「遅れチェック & 自動リスケ」実行時に次回通塾日(8/21)のコマ割りが選択教科・直後授業(From)・AI予測目標(To)で自動生成されること', () => {
+  test('「遅れチェック & 自動リスケ」実行時に次回通塾日(8/21)のコマ割りが選択教科・直後授業(From:単元テスト含む)・AI予測目標(To)で自動生成されること', () => {
     const studentForReschedule: Student = {
       id: 'std-reschedule-auto',
       name: 'リスケ自動生成生徒',
@@ -339,11 +341,11 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     expect(slots[1].subject).toBe('国語');
     expect(slots[1].startLessonName).toContain('あいうえお');
 
-    // 算数は cm-p1-m1 が完了しているため、直後の未完了授業 cm-p1-m2 (のこりはいくつ) からスタートすること
+    // 算数は cm-p1-m1 が完了しているが、単元末尾の単元確認テストが未完了のため「たしざん(1) - 単元確認テスト」からスタートすること
     expect(slots[2].subject).toBe('算数');
-    expect(slots[2].startLessonName).toContain('のこりはいくつ');
+    expect(slots[2].startLessonName).toContain('単元確認テスト');
 
-    // 英語は cm-p1-e1 が完了しているため、直後の未完了授業 cm-p1-e2 (H〜N) からスタートすること
+    // 英語は cm-p1-e1 が完了しているため、同一単元内の次授業 cm-p1-e2 (H〜N) からスタートすること
     expect(slots[3].subject).toBe('英語');
     expect(slots[3].startLessonName).toContain('H〜N');
   });
