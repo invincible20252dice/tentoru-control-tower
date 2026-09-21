@@ -4818,7 +4818,7 @@ export default function TeacherDashboard({
                             {todayTests.map((test) => {
                               const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
                               const unitTestMasters = curriculumMastersList.filter(m => 
-                                (m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認')) &&
+                                (m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('テスト')) || Boolean(m.lesson_name?.includes('確認'))) &&
                                 (m.subject === testSub || (testSub === '算数' && m.subject === '数学') || (testSub === '数学' && m.subject === '算数'))
                               );
 
@@ -6521,12 +6521,13 @@ export default function TeacherDashboard({
                   // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
                   const rawTimelineUnits = ensuredMasters.length > 0
                     ? ensuredMasters.map((m, idx) => {
-                        const isUnitTest = m.item_type === 'unit_test' || m.lesson_name.includes('テスト');
-                        let formattedName = m.lesson_name;
+                        const lessonName = m.lesson_name || '';
+                        const isUnitTest = m.item_type === 'unit_test' || lessonName.includes('テスト');
+                        let formattedName = lessonName;
                         if (isUnitTest) {
-                          formattedName = m.lesson_name.includes(' - ') ? m.lesson_name : `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}`;
+                          formattedName = lessonName.includes(' - ') ? lessonName : `${m.unit_name} - ${lessonName.replace(/^[^-]+-\s*/, '')}`;
                         } else {
-                          formattedName = `${m.unit_name} - ${m.lesson_name}`;
+                          formattedName = `${m.unit_name} - ${lessonName}`;
                         }
                         return {
                           id: m.id,

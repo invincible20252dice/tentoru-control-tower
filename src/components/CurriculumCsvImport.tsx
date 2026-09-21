@@ -406,7 +406,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     return true;
   });
 
-  const unitTestMasters = masters.filter(m => m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'));
+  const unitTestMasters = masters.filter(m => m.item_type === 'unit_test' || (m.lesson_name && (m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'))));
 
   const uniqueGrades = Array.from(new Set(masters.map(m => m.grade))).filter(Boolean);
   const uniqueSubjects = Array.from(new Set(masters.map(m => m.subject))).filter(Boolean);

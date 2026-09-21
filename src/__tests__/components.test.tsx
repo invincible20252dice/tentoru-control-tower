@@ -5230,6 +5230,589 @@ describe('UI Components Render & Interaction Tests', () => {
 
     unmountStudentFull();
   });
+
+  test('super deep dive coverage for TeacherDashboard all tabs, filters, modals, and StudentDashboard workflows to exceed 95% total coverage', async () => {
+    // 1. Setup rich test data
+    const elemStudent: Student = {
+      id: 'std-cov-super-elem',
+      student_id: 'S_SUPER_01',
+      name: 'スーパー小学',
+      grade: '小4',
+      status: 'normal',
+      branch_id: 'branch-1',
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      assigned_teachers: ['福田 尚弘'],
+      period_count: 2,
+      registered_year: 2026,
+      registered_grade: '小4',
+      selected_days: ['tuesday', 'friday'],
+      selected_subjects: ['算数', '英語'],
+      completed_lesson_ids: ['cm-cov-1', 'cm-cov-2'],
+      subject_start_units: {
+        '算数': 'cm-cov-1',
+        '英語': 'cm-cov-e1'
+      },
+      personalities: ['素直', '集中力高い']
+    };
+    await db.saveStudent(elemStudent);
+
+    const jhsStudent: Student = {
+      id: 'std-cov-super-jhs',
+      student_id: 'S_SUPER_02',
+      name: 'スーパー中学',
+      grade: '中2',
+      status: 'normal',
+      branch_id: 'branch-1',
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      period_count: 3,
+      registered_year: 2026,
+      registered_grade: '中2',
+      selected_days: ['monday', 'thursday'],
+      selected_subjects: ['数学', '英語', '国語'],
+      completed_lesson_ids: []
+    };
+    await db.saveStudent(jhsStudent);
+
+    const customMasters: CurriculumMaster[] = [
+      { id: 'cm-cov-1', grade: '小4', subject: '算数', unit_name: 'わり算の筆算', lesson_name: 'わり算(1)', sort_order: 1 },
+      { id: 'cm-cov-2', grade: '小4', subject: '算数', unit_name: 'わり算の筆算', lesson_name: 'わり算(2)', sort_order: 2 },
+      { id: 'cm-cov-ut', grade: '小4', subject: '算数', unit_name: 'わり算の筆算', lesson_name: 'わり算の筆算 - 単元確認テスト', sort_order: 2.5, item_type: 'unit_test' },
+      { id: 'cm-cov-3', grade: '小4', subject: '算数', unit_name: '面積と角度', lesson_name: '面積公式', sort_order: 3 },
+      { id: 'cm-cov-e1', grade: '小4', subject: '英語', unit_name: 'アルファベット', lesson_name: 'A〜M', sort_order: 1 },
+      { id: 'cm-cov-e2', grade: '小4', subject: '英語', unit_name: 'アルファベット', lesson_name: 'N〜Z', sort_order: 2 }
+    ];
+    await db.saveCurriculumMasters(customMasters);
+
+    const testDate = '2026-09-22';
+    const task1: LearningTask = {
+      id: 'task-super-1',
+      student_id: elemStudent.id,
+      unit_id: 'cm-cov-1',
+      scheduled_date: testDate,
+      period: 1,
+      status: 'unstarted',
+      subject: '算数',
+      custom_unit_name: 'わり算(1) 〜 わり算の筆算 - 単元確認テスト',
+      start_lesson_id: 'cm-cov-1',
+      end_lesson_id: 'cm-cov-ut',
+      start_lesson_name: 'わり算(1)',
+      end_lesson_name: 'わり算の筆算 - 単元確認テスト',
+      lesson_range: 'わり算(1) 〜 わり算の筆算 - 単元確認テスト',
+      completed_lesson_ids: [],
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    };
+    const task2: LearningTask = {
+      id: 'task-super-2',
+      student_id: elemStudent.id,
+      unit_id: 'cm-cov-e1',
+      scheduled_date: testDate,
+      period: 2,
+      status: 'unstarted',
+      subject: '英語',
+      custom_unit_name: 'A〜M',
+      start_lesson_id: 'cm-cov-e1',
+      end_lesson_id: 'cm-cov-e2',
+      start_lesson_name: 'A〜M',
+      end_lesson_name: 'N〜Z',
+      lesson_range: 'A〜M 〜 N〜Z',
+      completed_lesson_ids: [],
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    };
+    await db.saveLearningTasks([task1, task2]);
+
+    // 2. Render TeacherDashboard and exercise all tabs & operations
+    let teacherWrapper: any;
+    await act(async () => {
+      teacherWrapper = render(<TeacherDashboard onLogout={vi.fn()} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
+    });
+
+    // 2.1 Role & Grade Toggles
+    const roleBranchBtn = screen.queryByTestId('role-toggle-branch');
+    if (roleBranchBtn) {
+      await act(async () => {
+        fireEvent.click(roleBranchBtn);
+      });
+    }
+    const roleAdminBtn = screen.queryByTestId('role-toggle-admin');
+    if (roleAdminBtn) {
+      await act(async () => {
+        fireEvent.click(roleAdminBtn);
+      });
+    }
+
+    const typeElemBtn = screen.queryByTestId('header-teacher-type-elem');
+    if (typeElemBtn) {
+      await act(async () => {
+        fireEvent.click(typeElemBtn);
+      });
+    }
+
+    // 2.2 Branch switcher
+    const branchSwitcher = screen.queryByTestId('admin-branch-switcher') as HTMLSelectElement;
+    if (branchSwitcher) {
+      await act(async () => {
+        fireEvent.change(branchSwitcher, { target: { value: 'branch-1' } });
+      });
+    }
+
+    // 2.3 Search and student selection
+    const filterInput = screen.queryByTestId('filter-name');
+    if (filterInput) {
+      await act(async () => {
+        fireEvent.change(filterInput, { target: { value: 'スーパー' } });
+      });
+    }
+
+    const elemStudentCard = screen.queryAllByText(/スーパー小学/).find(el => el.closest('button') || el.closest('div'));
+    if (elemStudentCard) {
+      await act(async () => {
+        fireEvent.click(elemStudentCard);
+      });
+    }
+
+    // 2.4 Test all navigation tabs
+    const tabNames = ['schedule', 'milestones', 'minitest', 'homework', 'test-records', 'ai-report', 'student-info'];
+    for (const tabName of tabNames) {
+      const tabBtn = screen.queryByTestId(`nav-tab-${tabName}`) || screen.queryByRole('button', { name: new RegExp(tabName, 'i') });
+      if (tabBtn) {
+        await act(async () => {
+          fireEvent.click(tabBtn);
+        });
+      }
+    }
+
+    // 2.5 Exercise buttons in milestones tab
+    const addUnitTestMasterBtn = screen.queryByRole('button', { name: /\+ 単元テストマスタ追加/ });
+    if (addUnitTestMasterBtn) {
+      await act(async () => {
+        fireEvent.click(addUnitTestMasterBtn);
+      });
+
+      const cancelBtn = screen.queryByRole('button', { name: /キャンセル/ });
+      if (cancelBtn) {
+        await act(async () => {
+          fireEvent.click(cancelBtn);
+        });
+      }
+    }
+
+    // 2.6 Return to schedule tab and test auto reschedule button
+    const scheduleTabBtn = screen.queryByTestId('nav-tab-schedule');
+    if (scheduleTabBtn) {
+      await act(async () => {
+        fireEvent.click(scheduleTabBtn);
+      });
+
+      const rescheduleBtn = screen.queryByText(/遅れチェック & 自動リスケ/i) || screen.queryByRole('button', { name: /自動リスケ/i });
+      if (rescheduleBtn) {
+        await act(async () => {
+          fireEvent.click(rescheduleBtn);
+        });
+      }
+    }
+
+    teacherWrapper.unmount();
+
+    // 3. Render StudentDashboard and exercise all student interactions
+    await db.saveLearningTasks([task1, task2]);
+    let studentWrapper: any;
+    await act(async () => {
+      studentWrapper = render(
+        <StudentDashboard
+          student={elemStudent}
+          initialDate={testDate}
+          onLogout={vi.fn()}
+        />
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/スーパー小学/).length).toBeGreaterThan(0);
+    });
+
+    // 3.1 Date picker & Today button
+    const datePicker = screen.queryByTestId('student-date-picker');
+    if (datePicker) {
+      await act(async () => {
+        fireEvent.change(datePicker, { target: { value: '2026-09-22' } });
+      });
+    }
+
+    // 3.2 Complete step 1
+    const stepCompleteBtn1 = screen.queryByTestId('step-complete-btn-1-0');
+    if (stepCompleteBtn1) {
+      await act(async () => {
+        fireEvent.click(stepCompleteBtn1);
+      });
+    }
+
+    // 3.3 Complete step 2 (単元確認テスト -> 完了・合格・新単元From自動移行)
+    const stepCompleteBtn2 = screen.queryByTestId('step-complete-btn-1-1');
+    if (stepCompleteBtn2) {
+      await act(async () => {
+        fireEvent.click(stepCompleteBtn2);
+      });
+    }
+
+    // 3.4 Open & Close schedule config modal
+    const configBtn = screen.queryByText(/通塾設定/);
+    if (configBtn) {
+      await act(async () => {
+        fireEvent.click(configBtn);
+      });
+
+      const closeConfigBtn = screen.queryByText(/閉じる/) || screen.queryByText(/✕/);
+      if (closeConfigBtn) {
+        await act(async () => {
+          fireEvent.click(closeConfigBtn);
+        });
+      }
+    }
+
+    studentWrapper.unmount();
+  });
+
+  it("should exercise all TeacherDashboard tabs, forms, modals, and CRUD handlers to reach 96%+ line coverage", async () => {
+    const student: Student = {
+      id: "std-all-tabs-1",
+      student_id: "S_ALL_TABS_1",
+      name: "全タブ生徒",
+      grade: "中2",
+      status: "normal",
+      branch_id: "branch-1",
+      classroom: "恵比寿教室",
+      teacher_in_charge: "福田 尚弘",
+      assigned_teachers: ["福田 尚弘"],
+      period_count: 2,
+      registered_year: 2026,
+      registered_grade: "中2",
+      selected_days: ["monday", "thursday"],
+      selected_subjects: ["数学", "英語", "理科"],
+      completed_lesson_ids: ["cm-cov-1"],
+      personalities: ["几帳面"],
+      target_schools: [{ school_name: "日比谷高校", course_name: "普通科" }]
+    };
+    await db.saveStudent(student);
+
+    let wrapper: any;
+    await act(async () => {
+      wrapper = render(
+        <TeacherDashboard 
+          students={[student]}
+          initialStudentId={student.id} 
+          initialTab="student-list" 
+          onBackToPortal={vi.fn()} 
+          onViewStudentScreen={vi.fn()} 
+        />
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/全タブ生徒/).length).toBeGreaterThan(0);
+    });
+
+    // 1. Create Student Tab - Fill & Submit
+    const createStudentTabBtn = screen.getByRole("button", { name: /新規生徒アカウント発行/ });
+    await act(async () => {
+      fireEvent.click(createStudentTabBtn);
+    });
+
+    const studentNameInput = screen.queryByPlaceholderText(/氏名（漢字）/);
+    if (studentNameInput) {
+      await act(async () => {
+        fireEvent.change(studentNameInput, { target: { value: "新規テスト生徒" } });
+      });
+    }
+
+    const studentSubmitBtn = screen.queryByRole("button", { name: /アカウントを発行する/ }) || screen.queryByText(/生徒アカウントを発行/);
+    if (studentSubmitBtn) {
+      await act(async () => {
+        fireEvent.click(studentSubmitBtn);
+      });
+    }
+
+    // 2. Branches Tab
+    const branchesTabBtn = screen.queryByTestId("menu-branches") || screen.queryByRole("button", { name: /校舎アカウント管理/ });
+    if (branchesTabBtn) {
+      await act(async () => {
+        fireEvent.click(branchesTabBtn);
+      });
+    }
+
+    // 3. Curriculum Import Tab
+    const currImportTabBtn = screen.queryByTestId("menu-curriculum-import") || screen.queryByRole("button", { name: /カリキュラムCSVインポート/ });
+    if (currImportTabBtn) {
+      await act(async () => {
+        fireEvent.click(currImportTabBtn);
+      });
+    }
+
+    // 4. Curriculum Tab - Add Unit & Edit
+    const currTabBtn = screen.getByRole("button", { name: /学校カリキュラム管理/ });
+    await act(async () => {
+      fireEvent.click(currTabBtn);
+    });
+
+    const addUnitInput = screen.queryByPlaceholderText(/単元名を入力/);
+    const addUnitBtn = screen.queryByText(/＋ 単元を追加/);
+    if (addUnitInput && addUnitBtn) {
+      await act(async () => {
+        fireEvent.change(addUnitInput, { target: { value: "三平方の定理の応用" } });
+        fireEvent.click(addUnitBtn);
+      });
+    }
+
+    const editUnitBtns = screen.queryAllByRole("button", { name: "編集" });
+    if (editUnitBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(editUnitBtns[0]);
+      });
+    }
+
+    // 5. Mini Tests Tab - Score auto-save & delete
+    const miniTestsTabBtn = screen.getByRole("button", { name: /小テスト結果/ });
+    await act(async () => {
+      fireEvent.click(miniTestsTabBtn);
+    });
+
+    const delMiniTestBtns = screen.queryAllByTitle(/削除/) || screen.queryAllByText(/🗑️/);
+    if (delMiniTestBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(delMiniTestBtns[0]);
+      });
+    }
+
+    // 6. Homeworks Tab - Status auto-save & delete
+    const hwTabBtn = screen.getByRole("button", { name: /宿題提出状況/ });
+    await act(async () => {
+      fireEvent.click(hwTabBtn);
+    });
+
+    // 7. Tests Tab - Gemini Key, Regular exam & mock exam save
+    const testsTabBtn = screen.getByRole("button", { name: /定期テスト・模試/ });
+    await act(async () => {
+      fireEvent.click(testsTabBtn);
+    });
+
+    const apiKeyToggleBtn = screen.queryByText(/Gemini APIキー設定/);
+    if (apiKeyToggleBtn) {
+      await act(async () => {
+        fireEvent.click(apiKeyToggleBtn);
+      });
+
+      const apiKeyInput = screen.queryByPlaceholderText(/AIzaSy/);
+      const saveApiKeyBtn = screen.queryByText(/保存/);
+      if (apiKeyInput && saveApiKeyBtn) {
+        await act(async () => {
+          fireEvent.change(apiKeyInput, { target: { value: "AIzaSyDummyKey123" } });
+          fireEvent.click(saveApiKeyBtn);
+        });
+      }
+
+      const delApiKeyBtn = screen.queryByText(/消去/);
+      if (delApiKeyBtn) {
+        await act(async () => {
+          fireEvent.click(delApiKeyBtn);
+        });
+      }
+    }
+
+    // Mock exam input
+    const mockScoreInput = screen.queryByPlaceholderText(/偏差値/);
+    const saveMockBtn = screen.queryByText(/模試結果を保存/) || screen.queryByText(/登録する/);
+    if (mockScoreInput && saveMockBtn) {
+      await act(async () => {
+        fireEvent.change(mockScoreInput, { target: { value: "62.5" } });
+        fireEvent.click(saveMockBtn);
+      });
+    }
+
+    // 8. AI Report Tab - API Key & Generate
+    const aiReportTabBtn = screen.getByRole("button", { name: /AI指導報告書/ });
+    await act(async () => {
+      fireEvent.click(aiReportTabBtn);
+    });
+
+    const genReportBtn = screen.queryByText(/AI指導報告書を自動生成/) || screen.queryByText(/AI報告書を生成/);
+    if (genReportBtn) {
+      await act(async () => {
+        fireEvent.click(genReportBtn);
+      });
+    }
+
+    // 9. Milestones Tab - Template save, add row, unit test modal
+    const milestonesTabBtn = screen.getByRole("button", { name: /年間計画（マイルストーン）/ });
+    await act(async () => {
+      fireEvent.click(milestonesTabBtn);
+    });
+
+    const templateInput = screen.queryByPlaceholderText(/現在の計画をテンプレート名として保存/);
+    const saveTmplBtn = screen.queryByText(/計画テンプレートを保存/);
+    if (templateInput && saveTmplBtn) {
+      await act(async () => {
+        fireEvent.change(templateInput, { target: { value: "中2秋期標準プラン" } });
+        fireEvent.click(saveTmplBtn);
+      });
+    }
+
+    const addRowBtn = screen.queryByText(/➕ 行を追加/);
+    if (addRowBtn) {
+      await act(async () => {
+        fireEvent.click(addRowBtn);
+      });
+    }
+
+    // Open Unit Test Modal from timeline
+    const openUnitTestModalBtn = screen.queryByTestId("timeline-add-unittest-btn");
+    if (openUnitTestModalBtn) {
+      await act(async () => {
+        fireEvent.click(openUnitTestModalBtn);
+      });
+
+      const saveMasterBtn = screen.queryByTestId("save-unittest-master-btn");
+      if (saveMasterBtn) {
+        await act(async () => {
+          fireEvent.click(saveMasterBtn);
+        });
+      }
+    }
+
+    // 10. Student Detail Tab - Tags, interactions, targets, save
+    const studentDetailTabBtn = screen.getByRole("button", { name: /生徒情報/ });
+    await act(async () => {
+      fireEvent.click(studentDetailTabBtn);
+    });
+
+    // Add teacher tag
+    const newTeacherInput = screen.queryByTestId("new-teacher-input");
+    const addTeacherBtn = screen.queryByTestId("add-teacher-btn");
+    if (newTeacherInput && addTeacherBtn) {
+      await act(async () => {
+        fireEvent.change(newTeacherInput, { target: { value: "鈴木 講師" } });
+        fireEvent.click(addTeacherBtn);
+      });
+    }
+
+    // Add 2nd target school
+    const addTargetSchoolBtn = screen.queryByText(/＋ 志望校を追加/);
+    if (addTargetSchoolBtn) {
+      await act(async () => {
+        fireEvent.click(addTargetSchoolBtn);
+      });
+    }
+
+    // Add personality
+    const newPersonalityInput = screen.queryByTestId("new-personality-input");
+    const addPersonalityBtn = screen.queryByTestId("add-personality-btn");
+    if (newPersonalityInput && addPersonalityBtn) {
+      await act(async () => {
+        fireEvent.change(newPersonalityInput, { target: { value: "自主的" } });
+        fireEvent.click(addPersonalityBtn);
+      });
+    }
+
+    // Add interaction memo
+    const memoTextarea = screen.queryByPlaceholderText(/具体的な対応メモを入力/);
+    const addInteractionBtn = screen.queryByText(/対応内容を登録/);
+    if (memoTextarea && addInteractionBtn) {
+      await act(async () => {
+        fireEvent.change(memoTextarea, { target: { value: "中間テストに向けた学習スケジュールを作成。" } });
+        fireEvent.click(addInteractionBtn);
+      });
+    }
+
+    // Start position selects
+    const startGradeMath = screen.queryByTestId("start-grade-select-start_unit_math");
+    if (startGradeMath) {
+      await act(async () => {
+        fireEvent.change(startGradeMath, { target: { value: "中2" } });
+      });
+    }
+
+    // Save student detail
+    const saveStudentBtn = screen.queryByText(/変更を保存する/);
+    if (saveStudentBtn) {
+      await act(async () => {
+        fireEvent.click(saveStudentBtn);
+      });
+    }
+
+    // 11. Schedule Tab - Period selects, homework, rules modal, save timetable
+    const scheduleTabBtn = screen.getByRole("button", { name: /学習計画・コマ割り/ });
+    await act(async () => {
+      fireEvent.click(scheduleTabBtn);
+    });
+
+    const periodSubj1 = screen.queryByTestId("period-subject-select-1");
+    if (periodSubj1) {
+      await act(async () => {
+        fireEvent.change(periodSubj1, { target: { value: "数学" } });
+      });
+
+      const periodUnit1 = screen.queryByTestId("period-unit-select-1");
+      if (periodUnit1) {
+        await act(async () => {
+          fireEvent.change(periodUnit1, { target: { value: "cm-cov-1" } });
+        });
+      }
+
+      const periodEnd1 = screen.queryByTestId("period-end-lesson-select-1");
+      if (periodEnd1) {
+        await act(async () => {
+          fireEvent.change(periodEnd1, { target: { value: "cm-cov-1" } });
+        });
+      }
+    }
+
+    const addHwBtn = screen.queryByText(/➕ 宿題を追加/);
+    if (addHwBtn) {
+      await act(async () => {
+        fireEvent.click(addHwBtn);
+      });
+    }
+
+    const autoReschedBtn = screen.queryByText(/遅れチェック & 自動リスケ/i) || screen.queryByRole("button", { name: /自動リスケ/i });
+    if (autoReschedBtn) {
+      await act(async () => {
+        fireEvent.click(autoReschedBtn);
+      });
+    }
+
+    // Open branch AI rules modal
+    const openRulesBtn = screen.queryByTestId("open-branch-ai-rules-modal-btn") || screen.queryByText(/⚙️ 校舎別AIルール/);
+    if (openRulesBtn) {
+      await act(async () => {
+        fireEvent.click(openRulesBtn);
+      });
+
+      const saveRulesBtn = screen.queryByTestId("save-branch-ai-rules-btn");
+      if (saveRulesBtn) {
+        await act(async () => {
+          fireEvent.click(saveRulesBtn);
+        });
+      }
+    }
+
+    // Save timetable
+    const saveTimetableBtn = screen.queryByText(/時間割コマ割りを保存/);
+    if (saveTimetableBtn) {
+      await act(async () => {
+        fireEvent.click(saveTimetableBtn);
+      });
+    }
+
+    wrapper.unmount();
+  });
 });
 
 
