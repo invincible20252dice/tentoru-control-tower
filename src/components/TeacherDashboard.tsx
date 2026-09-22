@@ -2231,7 +2231,7 @@ export default function TeacherDashboard({
 
   // 開始授業選択時
   const handleStartLessonChange = (p: number, startId: string) => {
-    const currentConfig = periodSelections[p];
+    const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
     let updatedPeriods = { ...periodSelections };
     if (!startId) {
       updatedPeriods[p] = {
@@ -2315,7 +2315,7 @@ export default function TeacherDashboard({
 
   // 終了目標授業選択時
   const handleEndLessonChange = (p: number, endId: string) => {
-    const currentConfig = periodSelections[p];
+    const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
     if (!endId) return;
 
     const endLesson = findLessonById(endId, currentConfig.subject);
@@ -2370,7 +2370,7 @@ export default function TeacherDashboard({
 
   // コマごとのテーマ変更時（双方向テスト連動を含む）
   const handleThemeChange = (p: number, val: string) => {
-    const currentConfig = periodSelections[p];
+    const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
     setPeriodSelections({
       ...periodSelections,
       [p]: { ...currentConfig, customTheme: val }
@@ -4596,7 +4596,7 @@ export default function TeacherDashboard({
 
                       <div className={styles.timetableSetup}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
-                          const currentConfig = periodSelections[p];
+                          const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
                           const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児';
 
                           return (
@@ -4605,7 +4605,7 @@ export default function TeacherDashboard({
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
                                 <select
                                   data-testid={`period-subject-select-${p}`}
-                                  value={currentConfig.subject}
+                                  value={currentConfig.subject || ''}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
                                 >

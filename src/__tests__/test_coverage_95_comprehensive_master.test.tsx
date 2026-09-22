@@ -473,7 +473,7 @@ describe('Comprehensive 95%+ Code Coverage Perfection Master Suite', () => {
     });
 
     // Change Apply Scope to grade
-    const scopeSelect = screen.queryByLabelText(/適用範囲/i) || screen.queryByDisplayValue(/この生徒のみ/i);
+    const scopeSelect = screen.queryByTestId('apply-scope-select') || screen.queryByLabelText(/適用範囲/i) || screen.queryAllByDisplayValue(/この生徒のみ/i)[0];
     if (scopeSelect) {
       await act(async () => {
         fireEvent.change(scopeSelect, { target: { value: 'grade' } });
