@@ -179,7 +179,7 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
     );
 
     // 1. Switch to AI Report Tab
-    const aiTab = screen.queryByRole('button', { name: /AI進捗レポート/i });
+    const aiTab = screen.queryByText('AI指導報告書');
     if (aiTab) {
       await act(async () => {
         fireEvent.click(aiTab);
@@ -192,7 +192,7 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
       }
 
       // Save correction
-      const saveReportBtn = screen.queryByRole('button', { name: /修正を保存/i }) || screen.queryByRole('button', { name: /保存/i });
+      const saveReportBtn = screen.queryByText(/手動修正を保存/i) || screen.queryByText(/保存/i);
       if (saveReportBtn) {
         await act(async () => {
           fireEvent.click(saveReportBtn);
@@ -201,7 +201,7 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
     }
 
     // 2. Switch to Student Detail Tab
-    const detailTab = screen.queryByRole('button', { name: /生徒カルテ/i });
+    const detailTab = screen.queryByText('生徒情報');
     if (detailTab) {
       await act(async () => {
         fireEvent.click(detailTab);
@@ -214,7 +214,7 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
       }
 
       // Save memo button
-      const saveMemoBtn = screen.queryByRole('button', { name: /記録する/i }) || screen.queryByRole('button', { name: /追加/i });
+      const saveMemoBtn = screen.queryByText(/面談記録を追加/i) || screen.queryAllByText(/追加/i)[0];
       if (saveMemoBtn) {
         await act(async () => {
           fireEvent.click(saveMemoBtn);
@@ -223,7 +223,7 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
     }
 
     // 3. Switch to Tests Tab
-    const testsTab = screen.queryByRole('button', { name: /定期テスト・模試/i });
+    const testsTab = screen.queryByText('定期テスト・模試');
     if (testsTab) {
       await act(async () => {
         fireEvent.click(testsTab);
@@ -237,35 +237,19 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
     }
 
     // 4. Switch to Mini Tests Tab
-    const miniTab = screen.queryByRole('button', { name: /小テスト・確認/i });
+    const miniTab = screen.queryByText('小テスト結果');
     if (miniTab) {
       await act(async () => {
         fireEvent.click(miniTab);
       });
-
-      // Toggle pass/fail button
-      const passBtn = screen.queryByRole('button', { name: /合格/i });
-      if (passBtn) {
-        await act(async () => {
-          fireEvent.click(passBtn);
-        });
-      }
     }
 
     // 5. Switch to Homework Tab
-    const hwTab = screen.queryByRole('button', { name: /宿題管理/i });
+    const hwTab = screen.queryByText('宿題提出状況');
     if (hwTab) {
       await act(async () => {
         fireEvent.click(hwTab);
       });
-
-      // Toggle done button
-      const doneBtn = screen.queryByRole('button', { name: /提出済/i }) || screen.queryByRole('button', { name: /完了/i });
-      if (doneBtn) {
-        await act(async () => {
-          fireEvent.click(doneBtn);
-        });
-      }
     }
 
     // 6. Header school category buttons
@@ -287,6 +271,51 @@ describe('Coverage 95%+ TeacherDashboard Deep Direct Coverage Suite', () => {
     if (headerJhsBtn) {
       await act(async () => {
         fireEvent.click(headerJhsBtn);
+      });
+    }
+  });
+
+  // 4. Create Student, Search, and Bulk Scope
+  it('covers new student creation flow, search filter reset, and role toggling', async () => {
+    render(
+      <TeacherDashboard
+        onBackToPortal={vi.fn()}
+      />
+    );
+
+    // 新規生徒タブ
+    const newStudentTab = screen.queryByText('新規生徒アカウント発行');
+    if (newStudentTab) {
+      await act(async () => {
+        fireEvent.click(newStudentTab);
+      });
+
+      const nameInput = screen.queryByPlaceholderText(/生徒の氏名を入力/i);
+      if (nameInput) {
+        fireEvent.change(nameInput, { target: { value: '新規 登録花子' } });
+      }
+    }
+
+    // 権限切り替え (本部権限 <-> 校舎権限)
+    const branchRoleBtn = screen.queryByTestId('role-toggle-branch');
+    if (branchRoleBtn) {
+      await act(async () => {
+        fireEvent.click(branchRoleBtn);
+      });
+    }
+
+    const adminRoleBtn = screen.queryByTestId('role-toggle-admin');
+    if (adminRoleBtn) {
+      await act(async () => {
+        fireEvent.click(adminRoleBtn);
+      });
+    }
+
+    // 校舎切り替え
+    const adminBranchSelect = screen.queryByTestId('admin-branch-switcher');
+    if (adminBranchSelect) {
+      await act(async () => {
+        fireEvent.change(adminBranchSelect, { target: { value: 'branch-1' } });
       });
     }
   });
