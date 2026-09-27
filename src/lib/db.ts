@@ -4356,7 +4356,7 @@ function isValidUUID(str?: string | null): boolean {
           const userMeta = data.user.user_metadata || {};
           const role: UserRole = userMeta.role === 'branch' ? 'branch' : 'admin';
           const branches = this.getBranches();
-          const matchedBranch = branches.find(b => b.email.toLowerCase() === trimmedEmail.toLowerCase());
+          const matchedBranch = branches.find(b => b.email && b.email.toLowerCase() === trimmedEmail.toLowerCase());
           
           const session: UserSession = {
             user: {
@@ -4383,7 +4383,7 @@ function isValidUUID(str?: string | null): boolean {
     // Local / Mock / Demo fallback authentication
     const lowerEmail = trimmedEmail.toLowerCase();
     const branches = this.getBranches();
-    const matchedBranch = branches.find(b => b.email.toLowerCase() === lowerEmail);
+    const matchedBranch = branches.find(b => b.email && b.email.toLowerCase() === lowerEmail);
 
     // Check for password mismatch in mock/demo mode
     if (password === 'wrongpass' || (!matchedBranch && !lowerEmail.includes('admin') && !lowerEmail.includes('tentoru'))) {
