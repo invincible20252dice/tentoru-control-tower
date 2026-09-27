@@ -6649,7 +6649,7 @@ export default function TeacherDashboard({
                       sequence_order: idx + 1
                     }));
                   
-                  const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
+                    const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
                   
                   const studentCompletedIds = new Set(
                     (selectedStudent.completed_lesson_ids || []).map(id => String(id).trim())
@@ -6658,7 +6658,7 @@ export default function TeacherDashboard({
                     db.getStudentLessonProgressList(selectedStudent.id).map(p => [String(p.lesson_id), p.status])
                   );
 
-                  // 完了済みタスク（task.status === 'completed'）から完了したレッスンIDを収集（ステップID単位の完全一致のみ）
+                  // 完了済みタスク（task.status === 'completed' または task.test_passed）から完了したレッスンIDのみを収集
                   const completedTaskLessonIds = new Set<string>();
                   studentTasks.filter(t => t.status === 'completed' || t.test_passed).forEach(t => {
                     if (t.unit_id) completedTaskLessonIds.add(String(t.unit_id));
@@ -6666,6 +6666,29 @@ export default function TeacherDashboard({
                     if (t.end_lesson_id) completedTaskLessonIds.add(String(t.end_lesson_id));
                     if (Array.isArray(t.completed_lesson_ids)) {
                       t.completed_lesson_ids.forEach(cid => completedTaskLessonIds.add(String(cid)));
+                    }
+                  });
+
+                  // 「学習計画・コマ割り」に現在割り当てられている（未完了の）レッスン範囲を収集
+                  const currentActiveLessonIds = new Set<string>();
+                  const uncompletedTasks = studentTasks.filter(t => {
+                    const isTargetSub = t.subject === targetSubject || (targetSubject === '算数' && t.subject === '数学') || (targetSubject === '数学' && t.subject === '算数');
+                    return isTargetSub && t.status !== 'completed' && !t.test_passed;
+                  });
+
+                  uncompletedTasks.forEach(t => {
+                    if (t.unit_id) currentActiveLessonIds.add(String(t.unit_id));
+                    if (t.start_lesson_id) currentActiveLessonIds.add(String(t.start_lesson_id));
+                    if (t.end_lesson_id) currentActiveLessonIds.add(String(t.end_lesson_id));
+                  });
+
+                  // 当日編集中の periodSelections に入っているレッスンも現在地として扱う
+                  Object.values(periodSelections).forEach(p => {
+                    const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
+                    if (isTargetSub) {
+                      if (p.unitId) currentActiveLessonIds.add(String(p.unitId));
+                      if (p.startLessonId) currentActiveLessonIds.add(String(p.startLessonId));
+                      if (p.endLessonId) currentActiveLessonIds.add(String(p.endLessonId));
                     }
                   });
 
@@ -6692,7 +6715,8 @@ export default function TeacherDashboard({
                     miniTestResults: miniTestResultsList
                   });
 
-                  const isUnitDone = (u: any, idx: number) => {
+                  // 各単元が実際に完了しているかどうかの判定
+                  const isUnitCompleted = (u: any, idx: number) => {
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
 
@@ -6705,24 +6729,42 @@ export default function TeacherDashboard({
                       }
                     }
 
+                    // 現在コマ割りで取り組み中のレッスンは完了としない
+                    if (currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                      return false;
+                    }
+
+                    // 生徒が実際に完了したか
                     if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort))) return true;
                     if (lessonProgressMap.get(uid) === 'completed') return true;
                     if (completedTaskLessonIds.has(uid)) return true;
+                    
+                    // スタートライン以前のレッスン（ただし現在アクティブでないもの）
                     if (startSeq > 0 && (idx + 1) <= startSeq) return true;
+
                     return false;
                   };
 
-                  let maxCompletedIdx = -1;
-                  timelineUnits.forEach((u, idx) => {
-                    if (isUnitDone(u, idx)) {
-                      if (idx > maxCompletedIdx) {
-                        maxCompletedIdx = idx;
-                      }
+                  // 現在地（取り組み中）ステップの判定
+                  const currentStepIndices = new Set<number>();
+                  timelineUnits.forEach((u: any, idx) => {
+                    const uid = String(u.id);
+                    const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+                    if (currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                      currentStepIndices.add(idx);
                     }
                   });
 
-                  const currentIdx = maxCompletedIdx + 1;
-                  const completedCount = Math.max(0, maxCompletedIdx + 1);
+                  // コマ割りに現在地タスクがない場合は、最初の未完了ステップを現在地とする
+                  if (currentStepIndices.size === 0) {
+                    const firstIncompleteIdx = timelineUnits.findIndex((u: any, idx) => !isUnitCompleted(u, idx));
+                    if (firstIncompleteIdx >= 0) {
+                      currentStepIndices.add(firstIncompleteIdx);
+                    }
+                  }
+
+                  const completedUnitsList = timelineUnits.filter((u, idx) => !currentStepIndices.has(idx) && isUnitCompleted(u, idx));
+                  const completedCount = completedUnitsList.length;
                   const progressPercent = Math.min(100, Math.round((completedCount / totalCount) * 100));
                   
                   const studentDays = (selectedStudent.selected_days?.length || 2);
@@ -7189,8 +7231,8 @@ export default function TeacherDashboard({
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {timelineUnits.map((unit, idx) => {
                                 const stepNum = idx + 1;
-                                const isCompleted = idx <= maxCompletedIdx || isUnitDone(unit, idx);
-                                const isCurrent = idx === currentIdx && currentIdx < timelineUnits.length;
+                                const isCurrent = currentStepIndices.has(idx);
+                                const isCompleted = !isCurrent && isUnitCompleted(unit, idx);
 
                                 return (
                                   <div
