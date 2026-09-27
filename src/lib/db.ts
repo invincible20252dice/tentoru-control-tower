@@ -2350,20 +2350,54 @@ function isValidUUID(str?: string | null): boolean {
   }
 
   // 3. Curriculum CRUD
+  public async fetchCurriculumUnits(schoolId?: string, subject?: string): Promise<CurriculumUnit[]> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        let query = this.supabase
+          .from('curriculum_units')
+          .select('*')
+          .order('sequence_order', { ascending: true });
+        if (schoolId) query = query.eq('school_id', schoolId);
+        if (subject) query = query.eq('subject', subject);
+        const { data, error } = await query;
+        if (error) throw error;
+        if (data && data.length > 0) {
+          const list = this.getCurriculumUnits();
+          (data as CurriculumUnit[]).forEach(u => {
+            const idx = list.findIndex(item => item.id === u.id);
+            if (idx >= 0) list[idx] = u;
+            else list.push(u);
+          });
+          list.sort((a, b) => a.sequence_order - b.sequence_order);
+          this.saveMockData('curriculum_units', list);
+          return data as CurriculumUnit[];
+        }
+      } catch (err) {
+        console.warn('fetchCurriculumUnits error:', err);
+      }
+    }
+    const list = this.getCurriculumUnits();
+    let filtered = list;
+    if (schoolId) filtered = filtered.filter(u => u.school_id === schoolId);
+    if (subject) filtered = filtered.filter(u => u.subject === subject);
+    return filtered.sort((a, b) => a.sequence_order - b.sequence_order);
+  }
+
   public async saveCurriculumUnits(units: CurriculumUnit[]): Promise<CurriculumUnit[]> {
+    const list = this.getCurriculumUnits();
+    units.forEach(u => {
+      const idx = list.findIndex(item => item.id === u.id);
+      if (idx >= 0) list[idx] = u;
+      else list.push(u);
+    });
+    list.sort((a, b) => a.sequence_order - b.sequence_order);
+    this.saveMockData('curriculum_units', list);
+
     if (!this.isMockMode && this.supabase) {
       const { data, error } = await this.supabase.from('curriculum_units').upsert(units).select();
       if (error) throw error;
-      return data;
+      return data || units;
     } else {
-      const list = this.getCurriculumUnits();
-      units.forEach(u => {
-        const idx = list.findIndex(item => item.id === u.id);
-        if (idx >= 0) list[idx] = u;
-        else list.push(u);
-      });
-      // Ensure ordering constraints if any
-      this.saveMockData('curriculum_units', list);
       return units;
     }
   }

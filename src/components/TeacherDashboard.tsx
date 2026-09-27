@@ -368,13 +368,31 @@ export default function TeacherDashboard({
   const [newCustomClassName, setNewCustomClassName] = useState('');
 
   // Curriculum State
-  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [selectedSchoolId, setSelectedSchoolId] = useState(() => {
+    const allSt = propStudents || db.getStudents();
+    const allSch = db.getSchools();
+    const targetSt = initialStudentId ? allSt.find(s => s.id === initialStudentId) : allSt[0];
+    if (targetSt) {
+      const matched = allSch.find(s => (targetSt.school_id && s.id === targetSt.school_id) || (targetSt.school_name && s.name === targetSt.school_name));
+      if (matched) return matched.id;
+      if (targetSt.grade?.startsWith('小') || targetSt.grade === '園児') {
+        const elem = allSch.find(s => s.type === 'elementary');
+        if (elem) return elem.id;
+      }
+    }
+    return allSch.length > 0 ? allSch[0].id : '';
+  });
   const [selectedSubject, setSelectedSubject] = useState(() => {
-    if (initialStudentId) {
-      const all = propStudents || db.getStudents();
-      const found = all.find(s => s.id === initialStudentId);
-      if (found && (found.grade.startsWith('小') || found.grade === '園児')) {
-        return (found.selected_subjects && found.selected_subjects[0]) || '算数';
+    const allSt = propStudents || db.getStudents();
+    const targetSt = initialStudentId ? allSt.find(s => s.id === initialStudentId) : allSt[0];
+    if (targetSt) {
+      const isElem = targetSt.grade?.startsWith('小') || targetSt.grade === '園児';
+      if (isElem) {
+        const pref = targetSt.selected_subjects?.find(sub => ['算数', '国語', '英語', '理科', '社会'].includes(sub));
+        return pref || '算数';
+      } else {
+        const pref = targetSt.selected_subjects?.find(sub => ['数学', '英語', '理科', '歴史', '地理', '国語', '社会'].includes(sub));
+        return pref || '数学';
       }
     }
     return (currentTeacherType === 'elementary' ? '算数' : '数学');
@@ -566,14 +584,34 @@ export default function TeacherDashboard({
     db.fetchSchools().then(fetchedSch => {
       if (fetchedSch && fetchedSch.length > 0) {
         setSchools(fetchedSch);
+        if (targetStudent) {
+          const matched = fetchedSch.find(s => (targetStudent.school_id && s.id === targetStudent.school_id) || (targetStudent.school_name && s.name === targetStudent.school_name));
+          if (matched) setSelectedSchoolId(matched.id);
+        }
       }
     }).catch(err => console.warn('fetchSchools in loadData error:', err));
+
+    db.fetchCurriculumUnits().then(fetchedUnits => {
+      if (fetchedUnits && fetchedUnits.length > 0) {
+        const targetId = selectedSchoolId || (listSch.length > 0 ? listSch[0].id : '');
+        const filtered = fetchedUnits
+          .filter(u => u.school_id === targetId && u.subject === selectedSubject)
+          .sort((a, b) => a.sequence_order - b.sequence_order);
+        setSchoolUnits(filtered);
+      }
+    }).catch(err => console.warn('fetchCurriculumUnits in loadData error:', err));
 
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
     }
     if (listSch.length > 0 && !selectedSchoolId) {
-      setSelectedSchoolId(listSch[0].id);
+      if (targetStudent) {
+        const matched = listSch.find(s => (targetStudent.school_id && s.id === targetStudent.school_id) || (targetStudent.school_name && s.name === targetStudent.school_name));
+        if (matched) setSelectedSchoolId(matched.id);
+        else setSelectedSchoolId(listSch[0].id);
+      } else {
+        setSelectedSchoolId(listSch[0].id);
+      }
     }
 
     const stToProcess = targetStudent !== undefined ? targetStudent : selectedStudent;
@@ -915,16 +953,51 @@ export default function TeacherDashboard({
 
   useEffect(() => {
     if (selectedStudent) {
-      const isJuniorHigh = selectedStudent.grade.startsWith('中');
+      // 生徒の所属学校と連動
+      const currentSchools = schools.length > 0 ? schools : db.getSchools();
+      const matchedSchool = currentSchools.find(s => 
+        (selectedStudent.school_id && s.id === selectedStudent.school_id) ||
+        (selectedStudent.school_name && s.name === selectedStudent.school_name)
+      );
+      if (matchedSchool) {
+        setSelectedSchoolId(matchedSchool.id);
+      } else if (selectedStudent.grade?.startsWith('小') || selectedStudent.grade === '園児') {
+        const elemSch = currentSchools.find(s => s.type === 'elementary');
+        if (elemSch) setSelectedSchoolId(elemSch.id);
+      } else if (selectedStudent.grade?.startsWith('中')) {
+        const jhsSch = currentSchools.find(s => s.type === 'junior_high');
+        if (jhsSch) setSelectedSchoolId(jhsSch.id);
+      } else if (selectedStudent.grade?.startsWith('高')) {
+        const hsSch = currentSchools.find(s => s.type === 'high_school');
+        if (hsSch) setSelectedSchoolId(hsSch.id);
+      }
+
+      // 生徒の学年・校種・受講教科と連動
+      const isJuniorHigh = selectedStudent.grade?.startsWith('中');
+      const isElementary = selectedStudent.grade?.startsWith('小') || selectedStudent.grade === '園児';
       if (isJuniorHigh) {
-        const juniorSubjects = ['数学', '英語', '理科', '歴史', '地理', '国語'];
-        if (!juniorSubjects.includes(selectedSubject)) {
+        const juniorSubjects = ['数学', '英語', '理科', '歴史', '地理', '国語', '社会'];
+        const pref = selectedStudent.selected_subjects?.find(sub => juniorSubjects.includes(sub));
+        if (pref && (!selectedSubject || !juniorSubjects.includes(selectedSubject))) {
+          setSelectedSubject(pref);
+        } else if (!juniorSubjects.includes(selectedSubject)) {
           setSelectedSubject('数学');
         }
-      } else {
+      } else if (isElementary) {
         const elemSubjects = ['算数', '国語', '英語', '理科', '社会'];
-        if (!elemSubjects.includes(selectedSubject)) {
+        const pref = selectedStudent.selected_subjects?.find(sub => elemSubjects.includes(sub));
+        if (pref && (!selectedSubject || !elemSubjects.includes(selectedSubject))) {
+          setSelectedSubject(pref);
+        } else if (!elemSubjects.includes(selectedSubject)) {
           setSelectedSubject('算数');
+        }
+      } else {
+        const highSubjects = ['数学', '英語', '国語', '理科', '社会'];
+        const pref = selectedStudent.selected_subjects?.find(sub => highSubjects.includes(sub));
+        if (pref && (!selectedSubject || !highSubjects.includes(selectedSubject))) {
+          setSelectedSubject(pref);
+        } else if (!highSubjects.includes(selectedSubject)) {
+          setSelectedSubject('数学');
         }
       }
     }
@@ -1465,6 +1538,9 @@ export default function TeacherDashboard({
       ...unit,
       sequence_order: idx + 1
     }));
+
+    // 即座にステート更新
+    setSchoolUnits(updatedUnits);
 
     // 保存
     await db.saveCurriculumUnits(updatedUnits);
@@ -5272,7 +5348,16 @@ export default function TeacherDashboard({
                       <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象学校</label>
                       <select 
                         value={selectedSchoolId}
-                        onChange={e => setSelectedSchoolId(e.target.value)}
+                        onChange={e => {
+                          const newSchoolId = e.target.value;
+                          setSelectedSchoolId(newSchoolId);
+                          const sch = schools.find(s => s.id === newSchoolId);
+                          if (sch?.type === 'elementary' && selectedSubject === '数学') {
+                            setSelectedSubject('算数');
+                          } else if (sch?.type !== 'elementary' && selectedSubject === '算数') {
+                            setSelectedSubject('数学');
+                          }
+                        }}
                         className={styles.select}
                       >
                         {schools.map(s => (
@@ -5289,8 +5374,19 @@ export default function TeacherDashboard({
                       >
                         {(() => {
                           const targetSchool = schools.find(s => s.id === selectedSchoolId);
-                          const isJuniorHigh = targetSchool ? targetSchool.type === 'junior_high' : true;
-                          return isJuniorHigh ? (
+                          const isElem = targetSchool ? targetSchool.type === 'elementary' : (selectedStudent?.grade?.startsWith('小') || selectedStudent?.grade === '園児');
+                          if (isElem) {
+                            return (
+                              <>
+                                <option value="算数">算数</option>
+                                <option value="国語">国語</option>
+                                <option value="英語">英語</option>
+                                <option value="理科">理科</option>
+                                <option value="社会">社会</option>
+                              </>
+                            );
+                          }
+                          return (
                             <>
                               <option value="数学">数学</option>
                               <option value="英語">英語</option>
@@ -5298,9 +5394,8 @@ export default function TeacherDashboard({
                               <option value="歴史">歴史</option>
                               <option value="地理">地理</option>
                               <option value="国語">国語</option>
+                              <option value="社会">社会</option>
                             </>
-                          ) : (
-                            <option value="算数">算数</option>
                           );
                         })()}
                       </select>
