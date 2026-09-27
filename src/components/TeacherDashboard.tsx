@@ -308,7 +308,7 @@ export default function TeacherDashboard({
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
-  const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>([]);
+  const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>(() => (typeof window !== 'undefined' ? db.getCurriculumMasters() : []));
   const [selectedStartGrades, setSelectedStartGrades] = useState<Record<string, string>>({});
 
   // レベル別・テンプレート機能用 State
@@ -561,6 +561,7 @@ export default function TeacherDashboard({
     setMilestoneTemplates(listTemplates);
     setCustomClassesList(listCc);
     setBranches(listBranches);
+    setCurriculumMastersList(listMasters);
     // 非同期で Supabase のクラウドDBから生徒・学校・カリキュラムマスターデータを取得して同期
     db.fetchCurriculumMasters().then(fetchedMasters => {
       if (fetchedMasters && fetchedMasters.length > 0) {
@@ -2163,7 +2164,9 @@ export default function TeacherDashboard({
       matchSubject(u.subject)
     );
 
-    let masters = curriculumMastersList.filter(m => matchSubject(m.subject));
+    const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+    let masters = rawMasters.filter(m => matchSubject(m.subject));
+    const ensuredMasters = ensureMathEnglishUnitTests(masters);
 
     const schoolUnits = matchingSchoolUnits.map(u => ({
       id: u.id,
@@ -2172,9 +2175,9 @@ export default function TeacherDashboard({
       isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
     }));
 
-    const masterUnits = masters.map(m => ({
+    const masterUnits = ensuredMasters.map(m => ({
       id: m.id,
-      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
       sort_order: m.sort_order ?? 0,
       isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj))
     }));
@@ -2199,16 +2202,42 @@ export default function TeacherDashboard({
       }
     });
 
+    // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完
+    if (periodSelections) {
+      Object.values(periodSelections).forEach(sel => {
+        if (sel && sel.subject && matchSubject(sel.subject)) {
+          if (sel.startLessonId && !combinedMap.has(sel.startLessonId)) {
+            combinedMap.set(sel.startLessonId, {
+              id: sel.startLessonId,
+              name: sel.startLessonName || sel.lessonRange || '単元確認テスト',
+              sort_order: 999,
+              isStartUnit: false
+            });
+          }
+          if (sel.endLessonId && !combinedMap.has(sel.endLessonId)) {
+            combinedMap.set(sel.endLessonId, {
+              id: sel.endLessonId,
+              name: sel.endLessonName || sel.startLessonName || '単元確認テスト',
+              sort_order: 999,
+              isStartUnit: false
+            });
+          }
+        }
+      });
+    }
+
     return Array.from(combinedMap.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   };
 
   const findLessonById = (id: string, subject?: string) => {
     if (!id) return null;
-    const m = curriculumMastersList.find(item => item.id === id || String(item.sort_order) === String(id));
+    const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+    const allEnsuredMasters = ensureMathEnglishUnitTests(rawMasters);
+    const m = allEnsuredMasters.find(item => item.id === id || String(item.sort_order) === String(id));
     if (m) {
       return {
         id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name,
+        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
         sort_order: m.sort_order ?? 0,
         subject: m.subject
       };
@@ -2731,16 +2760,18 @@ export default function TeacherDashboard({
 
     // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
     const loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || periodCount || 3;
+    const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
     const optimizedPeriods = generateSlotsForSelectedSubjects({
       student: freshSt,
       periodCount: loadedPeriodCount,
       selectedSubjects: freshSt.selected_subjects,
       tasks: freshTasks,
       branchRules,
-      curriculumMasters: curriculumMastersList,
+      curriculumMasters: rawMasters,
       curriculumUnits: allCurriculumUnits,
       schoolId: freshSt.school_id,
-      lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+      lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
+      miniTestResults: db.getMiniTestResults(freshSt.id)
     });
 
     // 各コマの単元テスト To 固定チェック & 範囲補正
@@ -2759,6 +2790,7 @@ export default function TeacherDashboard({
 
     // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出 (State完全リセット＆完了済みテスト除外)
     const extractedTodayTests: typeof todayTests = [];
+    const allMasters = ensureMathEnglishUnitTests(rawMasters);
     Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
       if (!sel || !sel.subject || !sel.startLessonName) return;
       const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト');
@@ -2770,13 +2802,24 @@ export default function TeacherDashboard({
         if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
           const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
           if (!exists) {
+            let unitName = sel.startLessonName ? (sel.startLessonName.includes(' - ') ? sel.startLessonName.split(' - ')[0].trim() : sel.startLessonName.split(' ')[0]) : '単元テスト';
+            const matchedMaster = allMasters.find(m =>
+              m.id === sel.startLessonId ||
+              m.id === sel.unitId ||
+              m.lesson_name === cleanContent ||
+              m.lesson_name === testContent ||
+              `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent ||
+              ((m.item_type === 'unit_test' || m.lesson_name.includes('テスト')) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
+            );
+            const passingLine = matchedMaster?.passing_line || '80%以上';
+
             extractedTodayTests.push({
               id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
               subject: sel.subject,
               testType: 'unit_test',
-              unitName: sel.startLessonName.split(' ')[0] || sel.startLessonName,
+              unitName: unitName,
               content: testContent,
-              passingLine: '80%以上',
+              passingLine: passingLine,
               targetScope: 'individual'
             });
           }
@@ -4893,7 +4936,8 @@ export default function TeacherDashboard({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '8px' }}>
                             {todayTests.map((test) => {
                               const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
-                              const unitTestMasters = curriculumMastersList.filter(m => 
+                              const allMasters = ensureMathEnglishUnitTests(curriculumMastersList);
+                              const unitTestMasters = allMasters.filter(m => 
                                 (m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('テスト')) || Boolean(m.lesson_name?.includes('確認'))) &&
                                 (m.subject === testSub || (testSub === '算数' && m.subject === '数学') || (testSub === '数学' && m.subject === '算数'))
                               );
@@ -4929,15 +4973,23 @@ export default function TeacherDashboard({
                                     </select>
 
                                     {/* 内容入力 / ドロップダウン */}
-                                    {test.testType === 'unit_test' && unitTestMasters.length > 0 ? (
+                                    {test.testType === 'unit_test' && (unitTestMasters.length > 0 || test.content) ? (
                                       <select
                                         value={test.content}
                                         onChange={e => {
                                           const selectedContent = e.target.value;
-                                          const matchedMaster = unitTestMasters.find(m => m.lesson_name === selectedContent || `${m.unit_name} ${m.lesson_name}` === selectedContent);
+                                          const matchedMaster = unitTestMasters.find(m => 
+                                            m.lesson_name === selectedContent || 
+                                            `${m.unit_name} ${m.lesson_name}` === selectedContent ||
+                                            `${m.unit_name} - ${m.lesson_name}` === selectedContent ||
+                                            `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === selectedContent
+                                          );
                                           handleUpdateTest(test.id, 'content', selectedContent);
                                           if (matchedMaster?.unit_name) {
                                             handleUpdateTest(test.id, 'unitName', matchedMaster.unit_name);
+                                          }
+                                          if (matchedMaster?.passing_line) {
+                                            handleUpdateTest(test.id, 'passingLine', matchedMaster.passing_line);
                                           }
                                         }}
                                         className={styles.select}
@@ -4945,9 +4997,15 @@ export default function TeacherDashboard({
                                       >
                                         <option value="">-- 単元テストマスタから選択 --</option>
                                         {unitTestMasters.map(m => {
-                                          const label = m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name;
+                                          const label = m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name;
                                           return <option key={m.id} value={label}>{label}</option>;
                                         })}
+                                        {test.content && !unitTestMasters.some(m => {
+                                          const label = m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name;
+                                          return label === test.content || m.lesson_name === test.content;
+                                        }) && (
+                                          <option value={test.content}>{test.content}</option>
+                                        )}
                                       </select>
                                     ) : (
                                       <input

@@ -139,10 +139,12 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
     const unitTests: CurriculumMaster[] = [];
 
     group.forEach(m => {
+      const lessonName = m.lesson_name || '';
+      const unitName = m.unit_name || '';
       const isTest = m.item_type === 'unit_test' || 
-                     m.lesson_name.includes('単元確認テスト') || 
-                     m.lesson_name.includes('テスト') || 
-                     (m.unit_name && m.unit_name.includes('テスト'));
+                     lessonName.includes('単元確認テスト') || 
+                     lessonName.includes('テスト') || 
+                     unitName.includes('テスト');
       if (isTest) {
         unitTests.push(m);
       } else {
@@ -156,10 +158,11 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
     if (unitTests.length > 0) {
       // 既にテストアイテムがある場合は最初の1件のみ採用（二重三重の重複を完全デデュプリケーション）
       const primaryTest = unitTests[0];
-      const cleanName = primaryTest.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+      const rawLessonName = primaryTest.lesson_name || '単元確認テスト';
+      const cleanName = rawLessonName.replace(/^[^-]+-\s*/, '').trim();
       const formattedLessonName = primaryTest.unit_name 
         ? `${primaryTest.unit_name} - ${cleanName.includes('単元確認テスト') || cleanName.includes('テスト') ? '単元確認テスト' : cleanName}`
-        : primaryTest.lesson_name;
+        : rawLessonName;
 
       result.push({
         ...primaryTest,
@@ -383,10 +386,29 @@ export function findNextUncompletedLessonForSubject(params: {
     miniTestResults
   });
 
+  // 合格済みの単元テストを completedIds に追加（合格時の次単元解禁）
+  if (unitTestStatus.completedUnitTestKeys) {
+    unitTestStatus.completedUnitTestKeys.forEach(k => {
+      completedIds.add(k);
+      completedIds.add(String(k));
+      masterLessons.forEach(m => {
+        const mName = m.name || '';
+        if (mName === k || m.unit_name === k || mName.includes(k) || (m.unit_name && k.includes(m.unit_name))) {
+          completedIds.add(m.id);
+          completedIds.add(String(m.id));
+          completedIds.add(mName);
+        }
+      });
+    });
+  }
+
   if (unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest) {
     const failedTest = unitTestStatus.failedUnitTest;
-    const testKey = failedTest.unit_name || failedTest.test_content;
-    const failedIdx = masterLessons.findIndex(m => m.name.includes(testKey) || (failedTest.unit_name && m.name.includes(failedTest.unit_name)));
+    const testKey = failedTest.unit_name || failedTest.test_content || '';
+    const failedIdx = masterLessons.findIndex(m => {
+      const mName = m.name || '';
+      return (testKey && mName.includes(testKey)) || (failedTest.unit_name && mName.includes(failedTest.unit_name));
+    });
     if (failedIdx >= 0) {
       return {
         lessonId: masterLessons[failedIdx].id,
@@ -708,8 +730,8 @@ export function calculateLessonRangeForSlot(params: {
     const currentItem = masterLessons[startIdx + step];
     endIdx = startIdx + step;
     const isUnitTest = currentItem.item_type === 'unit_test' || 
-                       currentItem.name.includes('単元確認テスト') || 
-                       currentItem.name.includes('テスト');
+                       (currentItem.name || '').includes('単元確認テスト') || 
+                       (currentItem.name || '').includes('テスト');
     // 単元テストに到達したら、その単元テストでストップ
     if (isUnitTest) {
       break;
@@ -1806,6 +1828,7 @@ export function generateSlotsForSelectedSubjects(params: {
   curriculumUnits?: CurriculumUnit[];
   schoolId?: string;
   lessonProgressList?: StudentLessonProgress[];
+  miniTestResults?: MiniTestResult[];
 }): Record<number, {
   subject: string;
   unitId: string;
@@ -1825,7 +1848,8 @@ export function generateSlotsForSelectedSubjects(params: {
     curriculumMasters = [],
     curriculumUnits = [],
     schoolId = student.school_id,
-    lessonProgressList = []
+    lessonProgressList = [],
+    miniTestResults = []
   } = params;
 
   const sortedSubjs = getSortedSubjectsByProgressRate({
@@ -1864,7 +1888,8 @@ export function generateSlotsForSelectedSubjects(params: {
       curriculumMasters,
       curriculumUnits,
       schoolId,
-      lessonProgressList
+      lessonProgressList,
+      miniTestResults: miniTestResults.length > 0 ? miniTestResults : db.getMiniTestResults(student.id)
     });
 
     const isUnitTest = range.start_lesson_name?.includes('単元確認テスト') || range.start_lesson_name?.includes('単元テスト');

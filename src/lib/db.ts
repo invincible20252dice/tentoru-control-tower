@@ -605,6 +605,8 @@ export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<st
   const passing_line = test.passing_line ? String(test.passing_line).trim() : null;
   const target_scope = test.target_scope ? String(test.target_scope).trim() : 'individual';
   const subject = test.subject ? String(test.subject).trim() : undefined;
+  const test_type = test.test_type ? test.test_type : undefined;
+  const unit_name = test.unit_name ? String(test.unit_name).trim() : undefined;
   const created_at = test.created_at ? String(test.created_at) : new Date().toISOString();
 
   return {
@@ -617,6 +619,8 @@ export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<st
     passing_line,
     target_scope,
     ...(subject ? { subject } : {}),
+    ...(test_type ? { test_type } : {}),
+    ...(unit_name ? { unit_name } : {}),
     created_at
   };
 }
@@ -2690,7 +2694,7 @@ function isValidUUID(str?: string | null): boolean {
   }
 
   // 12. MiniTestResults CRUD
-  public getMiniTestResults(): MiniTestResult[] {
+  public getMiniTestResults(studentId?: string): MiniTestResult[] {
     const seed: MiniTestResult[] = [
       // 佐藤拓海
       { id: 'mt-1-1', student_id: 'std-1', date: '2026-06-15', subject: '数学', test_content: '正負の数 単元確認テスト', score: 95, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-15T18:00:00Z' },
@@ -2706,7 +2710,11 @@ function isValidUUID(str?: string | null): boolean {
       // 田中颯太
       { id: 'mt-4-1', student_id: 'std-4', date: '2026-06-17', subject: '数学', test_content: '式の計算 単元確認テスト', score: 92, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-17T18:00:00Z' }
     ];
-    return this.getMockData('mini_test_results', seed);
+    const list = this.getMockData('mini_test_results', seed);
+    if (studentId) {
+      return list.filter(t => t.student_id === studentId);
+    }
+    return list;
   }
 
   public async fetchMiniTestResults(studentId?: string, date?: string): Promise<MiniTestResult[]> {
