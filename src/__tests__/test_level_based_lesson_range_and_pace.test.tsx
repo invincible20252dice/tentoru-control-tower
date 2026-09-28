@@ -146,7 +146,7 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
     expect(range.end_lesson_name).not.toContain('小数のわり算');
   });
 
-  it('renders elementary milestone timeline with level-based pace calculation in TeacherDashboard', async () => {
+  it('renders elementary milestone timeline with level-based pace calculation in TeacherDashboard and hides level toggle buttons', async () => {
     await act(async () => {
       render(
         <TeacherDashboard
@@ -161,5 +161,57 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
 
     expect(screen.getByText(/消化ペース: 週約/)).toBeInTheDocument();
     expect(screen.getByText(/全単元完了の推定予定日/)).toBeInTheDocument();
+
+    // 小学生タイムラインでは手動レベル選択トグルボタンが存在しないこと
+    expect(screen.queryByRole('button', { name: 'レベルA (発展)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'レベルB (標準)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'レベルC (基礎)' })).not.toBeInTheDocument();
+  });
+
+  it('displays grade and learning level badges in top student banner header for different levels', async () => {
+    // レベルAの生徒
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[studentLevelA]}
+        curriculumMasters={sampleMasters}
+        tasks={[]}
+        initialStudentId={studentLevelA.id}
+        initialTab="schedule"
+      />
+    );
+
+    const gradeBadgeA = screen.getByTestId('student-header-grade-badge');
+    const levelBadgeA = screen.getByTestId('student-header-level-badge');
+    expect(gradeBadgeA).toHaveTextContent('［小5］');
+    expect(levelBadgeA).toHaveTextContent('［レベルA（発展）］');
+    unmount();
+
+    // レベルBの生徒
+    const { unmount: unmountB } = render(
+      <TeacherDashboard
+        students={[studentLevelB]}
+        curriculumMasters={sampleMasters}
+        tasks={[]}
+        initialStudentId={studentLevelB.id}
+        initialTab="schedule"
+      />
+    );
+    const levelBadgeB = screen.getByTestId('student-header-level-badge');
+    expect(levelBadgeB).toHaveTextContent('［レベルB（標準）］');
+    unmountB();
+
+    // レベルCの生徒
+    const { unmount: unmountC } = render(
+      <TeacherDashboard
+        students={[studentLevelC]}
+        curriculumMasters={sampleMasters}
+        tasks={[]}
+        initialStudentId={studentLevelC.id}
+        initialTab="schedule"
+      />
+    );
+    const levelBadgeC = screen.getByTestId('student-header-level-badge');
+    expect(levelBadgeC).toHaveTextContent('［レベルC（基礎）］');
+    unmountC();
   });
 });

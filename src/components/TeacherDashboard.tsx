@@ -4594,7 +4594,47 @@ export default function TeacherDashboard({
                   <div className={styles.card} style={{ borderLeft: '6px solid #4f46e5' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <h2 style={{ margin: '0 0 6px 0', fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                          <h2 style={{ margin: 0, fontSize: '1.3rem' }}>{selectedStudent.name} (ID: {selectedStudent.student_id})</h2>
+                          {selectedStudent.grade && (
+                            <span 
+                              data-testid="student-header-grade-badge"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: 700,
+                                backgroundColor: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe'
+                              }}
+                            >
+                              ［{selectedStudent.grade}］
+                            </span>
+                          )}
+                          <span 
+                            data-testid="student-header-level-badge"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              backgroundColor: '#f5f3ff',
+                              color: '#6d28d9',
+                              border: '1px solid #ddd6fe'
+                            }}
+                          >
+                            ［{
+                              (selectedStudent.level === 'A' || (selectedStudent as any).learning_level === 'A') ? 'レベルA（発展）' :
+                              (selectedStudent.level === 'C' || (selectedStudent as any).learning_level === 'C') ? 'レベルC（基礎）' :
+                              'レベルB（標準）'
+                            }］
+                          </span>
+                        </div>
                         <span style={{ fontSize: '0.8rem', color: '#64748b' }}>所属学校: {schools.find(s => s.id === selectedStudent.school_id)?.name}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -6934,33 +6974,35 @@ export default function TeacherDashboard({
                             );
                           })()}
 
-                          {/* Level Toggle switch */}
-                          <div>
-                            <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>学習レベル:</label>
-                            <div className={styles.segmentControl} style={{ display: 'inline-flex' }}>
-                              <button
-                                type="button"
-                                className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
-                                onClick={() => setSelectedLevel('A')}
-                              >
-                                レベルA (発展)
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
-                                onClick={() => setSelectedLevel('B')}
-                              >
-                                レベルB (標準)
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.segmentBtn} ${selectedLevel === 'C' ? styles.segmentBtnActive : ''}`}
-                                onClick={() => setSelectedLevel('C')}
-                              >
-                                レベルC (基礎)
-                              </button>
+                          {/* Level Toggle switch (Only for Junior High / High School) */}
+                          {!isElementary && (
+                            <div>
+                              <label style={{ marginRight: '8px', fontSize: '0.85rem', fontWeight: 600 }}>学習レベル:</label>
+                              <div className={styles.segmentControl} style={{ display: 'inline-flex' }}>
+                                <button
+                                  type="button"
+                                  className={`${styles.segmentBtn} ${selectedLevel === 'A' ? styles.segmentBtnActive : ''}`}
+                                  onClick={() => setSelectedLevel('A')}
+                                >
+                                  レベルA (発展)
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`${styles.segmentBtn} ${selectedLevel === 'B' ? styles.segmentBtnActive : ''}`}
+                                  onClick={() => setSelectedLevel('B')}
+                                >
+                                  レベルB (標準)
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`${styles.segmentBtn} ${selectedLevel === 'C' ? styles.segmentBtnActive : ''}`}
+                                  onClick={() => setSelectedLevel('C')}
+                                >
+                                  レベルC (基礎)
+                                </button>
+                              </div>
                             </div>
-                          </div>
+                          )}
 
                           {/* Month filter toggle (Only for Junior High / High School) */}
                           {!isElementary && (
