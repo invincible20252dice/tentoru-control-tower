@@ -227,4 +227,116 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
     expect(savedMiniTests[0].test_content).toContain('かずと すうじ - 単元確認テスト');
     expect(savedMiniTests[0].passing_line).toBe('90点以上');
   });
+
+  it('5. 中学生: 単元テスト到達時のFrom/To適正表示、合否ゲート制御、自動リスケ本日のテスト自動連携', async () => {
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    const jhsMasters: CurriculumMaster[] = [
+      {
+        id: 'cm-jhs-eq-1',
+        grade: '中2',
+        grade_level: '中2',
+        subject: '数学',
+        unit_name: '連立方程式',
+        lesson_name: '第1講 連立方程式の解き方',
+        sort_order: 1
+      },
+      {
+        id: 'cm-jhs-eq-test',
+        grade: '中2',
+        grade_level: '中2',
+        subject: '数学',
+        unit_name: '連立方程式',
+        lesson_name: '連立方程式 - 単元確認テスト',
+        item_type: 'unit_test',
+        sort_order: 2,
+        passing_line: '85点以上'
+      },
+      {
+        id: 'cm-jhs-fn-1',
+        grade: '中2',
+        grade_level: '中2',
+        subject: '数学',
+        unit_name: '一次関数',
+        lesson_name: '第1講 一次関数のグラフ',
+        sort_order: 3
+      }
+    ];
+
+    const jhsStudent: Student = {
+      id: 'st-jhs-gate-1',
+      student_id: 'S_JHS_GATE_1',
+      name: '中学生 単元ゲートテスト生徒',
+      grade: '中2',
+      status: 'normal',
+      branch_id: 'branch-1',
+      classroom: '恵比寿教室',
+      teacher_in_charge: '福田 尚弘',
+      registered_year: 2026,
+      registered_grade: '中2',
+      selected_days: ['monday', 'thursday'],
+      selected_subjects: ['数学'],
+      start_unit_math: 'cm-jhs-eq-1',
+      completed_lesson_ids: ['cm-jhs-eq-1'],
+      period_count: 2
+    };
+
+    localStorage.setItem('tentoru_curriculum_masters', JSON.stringify(jhsMasters));
+    await db.saveStudent(jhsStudent);
+
+    // 5.1 スケジューラでのスロット生成: 1コマ目が単元確認テスト、2コマ目も同日に新単元を先入れしない
+    const slots = generateSlotsForSelectedSubjects({
+      student: jhsStudent,
+      periodCount: 2,
+      selectedSubjects: ['数学'],
+      curriculumMasters: jhsMasters
+    });
+
+    expect(slots[1].startLessonName).toContain('連立方程式');
+    expect(slots[1].startLessonName).toContain('単元確認テスト');
+    expect(slots[1].startLessonId).toBe('cm-jhs-eq-test');
+    expect(slots[1].endLessonId).toBe('cm-jhs-eq-test');
+
+    // 2コマ目は一次関数へ先入れされないこと（当日の学習ストッパー）
+    expect(slots[2].startLessonName).not.toContain('一次関数のグラフ');
+
+    // 5.2 TeacherDashboard 上での遅れチェック＆自動リスケ
+    let container: HTMLElement;
+    await act(async () => {
+      const renderRes = render(
+        <TeacherDashboard 
+          initialStudentId={jhsStudent.id} 
+          teacherType="junior_high" 
+          initialTab="schedule" 
+        />
+      );
+      container = renderRes.container;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /遅れチェック ＆ 自動リスケ/i })).toBeDefined();
+    });
+
+    const autoReschedBtn = screen.getByRole('button', { name: /遅れチェック ＆ 自動リスケ/i });
+    await act(async () => {
+      fireEvent.click(autoReschedBtn);
+    });
+
+    // ドロップダウンのFrom / To が空欄でないこと
+    const fromSelect = container!.querySelector('select[data-testid="period-unit-select-1"]') as HTMLSelectElement;
+    expect(fromSelect).toBeDefined();
+    expect(fromSelect.value).toBe('cm-jhs-eq-test');
+
+    const toSelect = container!.querySelector('select[data-testid="period-end-lesson-select-1"]') as HTMLSelectElement;
+    expect(toSelect).toBeDefined();
+    expect(toSelect.value).toBe('cm-jhs-eq-test');
+
+    // 本日のテストに自動投入されていること
+    const savedMiniTests = db.getMiniTestResults().filter(t => t.student_id === jhsStudent.id);
+    expect(savedMiniTests.length).toBeGreaterThan(0);
+    expect(savedMiniTests[0].subject).toBe('数学');
+    expect(savedMiniTests[0].test_type).toBe('unit_test');
+    expect(savedMiniTests[0].test_content).toContain('連立方程式 - 単元確認テスト');
+    expect(savedMiniTests[0].passing_line).toBe('85点以上');
+  });
 });

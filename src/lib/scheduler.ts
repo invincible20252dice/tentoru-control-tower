@@ -1870,6 +1870,7 @@ export function generateSlotsForSelectedSubjects(params: {
   const userSubjs = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : (student.selected_subjects && student.selected_subjects.length > 0 ? student.selected_subjects : defaultSubjs);
 
   const slots: Record<number, any> = {};
+  const subjectReachedUnitTest = new Set<string>();
 
   for (let p = 1; p <= periodCount; p++) {
     let sub = '';
@@ -1878,6 +1879,9 @@ export function generateSlotsForSelectedSubjects(params: {
     } else {
       sub = sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0] || '算数';
     }
+
+    // 当日の学習ストッパー: すでに当日単元テストに到達している教科は、同日に次単元を先入れせずテスト・復習位置を維持
+    const alreadyTestedToday = subjectReachedUnitTest.has(sub);
 
     const range = calculateLessonRangeForSlot({
       subject: sub,
@@ -1892,11 +1896,19 @@ export function generateSlotsForSelectedSubjects(params: {
       miniTestResults: miniTestResults.length > 0 ? miniTestResults : db.getMiniTestResults(student.id)
     });
 
-    const isUnitTest = range.start_lesson_name?.includes('単元確認テスト') || range.start_lesson_name?.includes('単元テスト');
+    const isUnitTest = range.start_lesson_name?.includes('単元確認テスト') || 
+                       range.start_lesson_name?.includes('単元テスト') || 
+                       range.end_lesson_name?.includes('単元確認テスト') ||
+                       range.end_lesson_name?.includes('単元テスト');
+
+    if (isUnitTest || alreadyTestedToday) {
+      subjectReachedUnitTest.add(sub);
+    }
+
     const startId = range.start_lesson_id || '';
     const startName = range.start_lesson_name || '';
     const endId = isUnitTest ? startId : (range.end_lesson_id || startId);
-    const endName = isUnitTest ? startName : (range.end_lesson_name || startName);
+    const endName = range.end_lesson_name || startName;
     const rangeText = isUnitTest ? startName : (range.lesson_range || startName);
 
     slots[p] = {

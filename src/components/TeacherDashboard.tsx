@@ -2233,7 +2233,13 @@ export default function TeacherDashboard({
     if (!id) return null;
     const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
     const allEnsuredMasters = ensureMathEnglishUnitTests(rawMasters);
-    const m = allEnsuredMasters.find(item => item.id === id || String(item.sort_order) === String(id));
+    const m = allEnsuredMasters.find(item => 
+      item.id === id || 
+      String(item.sort_order) === String(id) || 
+      item.lesson_name === id || 
+      `${item.unit_name} - ${item.lesson_name}` === id ||
+      `${item.unit_name} - ${item.lesson_name.replace(/^[^-]+-\s*/, '')}` === id
+    );
     if (m) {
       return {
         id: m.id,
@@ -2242,7 +2248,7 @@ export default function TeacherDashboard({
         subject: m.subject
       };
     }
-    const u = allCurriculumUnits.find(item => item.id === id);
+    const u = allCurriculumUnits.find(item => item.id === id || item.name === id);
     if (u) {
       return {
         id: u.id,
