@@ -465,9 +465,34 @@ export function findNextUncompletedLessonForSubject(params: {
   };
 }
 
+// 学習レベル（A・B・C）に応じた1コマ進度幅（From〜Toレッスン数）の定義
+export const LEVEL_PACE_CONFIG = {
+  A: {
+    min: 3,
+    max: 5,
+    defaultPace: 4,
+    multiplier: 4.0,
+    label: 'レベルA（発展: 3〜5授業/コマ）'
+  },
+  B: {
+    min: 1,
+    max: 3,
+    defaultPace: 2,
+    multiplier: 2.0,
+    label: 'レベルB（標準: 1〜3授業/コマ）'
+  },
+  C: {
+    min: 1,
+    max: 1,
+    defaultPace: 1,
+    multiplier: 0.8,
+    label: 'レベルC（基礎: 1授業/コマ）'
+  }
+} as const;
+
 /**
- * 生徒のこれまでの消化ペース（1コマあたりの授業数）と校舎ルールを参照し、
- * 次回授業の適切な目標授業（To）をAI/ロジックが自動推論する
+ * 生徒の学習レベル（A: 4, B: 2, C: 1）およびこれまでの消化ペースと校舎ルールを参照し、
+ * 次回授業の適切な目標授業（To）を自動決定・推論する
  */
 export function inferStudentSubjectPace(params: {
   student?: Student | null;
@@ -480,10 +505,14 @@ export function inferStudentSubjectPace(params: {
   reason: string;
 } {
   const { student, subject, tasks = [], branchRules, lessonProgressList = [] } = params;
-  const basePace = branchRules?.lessons_per_slot || 2;
+  const rawLevel = (student?.level || (student as any)?.learning_level || 'B').toUpperCase();
+  const studentLevel = (rawLevel === 'A' || rawLevel === 'B' || rawLevel === 'C') ? rawLevel : 'B';
+
+  const config = LEVEL_PACE_CONFIG[studentLevel as keyof typeof LEVEL_PACE_CONFIG];
+  const basePace = config.defaultPace;
 
   if (!student) {
-    return { estimatedLessonsPerSlot: basePace, reason: `校舎標準ペース (${basePace}授業/コマ)` };
+    return { estimatedLessonsPerSlot: basePace, reason: `標準ペース (${basePace}授業/コマ)` };
   }
 
   // 1. 直近の完了タスクから消化スピードを算出
@@ -509,34 +538,27 @@ export function inferStudentSubjectPace(params: {
     }
   });
 
-  // もし過去の実績がある場合、その平均値
+  // もし過去の実績がある場合、その平均値（なければレベル基準値）
   let dynamicPace = countOfSessions > 0 ? (totalLessonsCompleted / countOfSessions) : basePace;
 
   // 2. 生徒のステータスによる補正
   let reason = '';
   if (student.status === 'fast') {
-    dynamicPace = Math.max(dynamicPace, basePace + 1);
-    reason = `🚀 爆速進行モード: 直近実績 (${dynamicPace.toFixed(1)}授業) に基づき先取り目標を設定`;
+    dynamicPace = Math.min(config.max, dynamicPace + 1);
+    reason = `🚀 爆速進行モード (レベル${studentLevel}): 先取り目標を設定 (${Math.round(dynamicPace)}授業/コマ)`;
   } else if (student.status === 'warning') {
-    dynamicPace = Math.min(dynamicPace, Math.max(1, basePace - 1));
-    reason = `⚠️ 計画パンク防止: 確実な定着のためペースを調整 (${Math.round(dynamicPace)}授業/コマ)`;
+    dynamicPace = Math.max(config.min, dynamicPace - 1);
+    reason = `⚠️ 計画パンク防止 (レベル${studentLevel}): 確実な定着のためペースを調整 (${Math.round(dynamicPace)}授業/コマ)`;
   } else if (countOfSessions > 0) {
-    reason = `🤖 AI推論: 過去${countOfSessions}回の平均消化ペース (${dynamicPace.toFixed(1)}授業/コマ) を適用`;
+    reason = `🤖 AI推論: 過去${countOfSessions}回の平均消化実績とレベル${studentLevel}基準 (${dynamicPace.toFixed(1)}授業/コマ) を適用`;
   } else {
-    reason = `校舎設定ルール: 標準${basePace}授業/コマ`;
+    reason = `学習レベル基準 (${config.label}): 1コマ${basePace}授業幅`;
   }
 
-  // 3. レベル補正
-  if (student.level === 'A') {
-    dynamicPace = Math.max(dynamicPace, 2);
-  } else if (student.level === 'C') {
-    dynamicPace = Math.min(dynamicPace, 2);
-  }
-
-  const roundedPace = Math.max(1, Math.min(5, Math.round(dynamicPace)));
+  const boundedPace = Math.max(config.min, Math.min(config.max, Math.round(dynamicPace)));
 
   return {
-    estimatedLessonsPerSlot: roundedPace,
+    estimatedLessonsPerSlot: boundedPace,
     reason
   };
 }

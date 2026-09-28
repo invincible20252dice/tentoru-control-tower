@@ -6834,9 +6834,15 @@ export default function TeacherDashboard({
                   const studentDays = (selectedStudent.selected_days?.length || 2);
                   const studentSlots = (selectedStudent.default_slots || selectedStudent.period_count || 2);
                   const selectedSubjsCount = (selectedStudent.selected_subjects?.length || 3);
-                  const weeklyPace = Math.max(1, Math.round((studentDays * studentSlots) / selectedSubjsCount));
+
+                  // 学習レベル別消化スピード係数（レベルA: 4.0, レベルB: 2.0, レベルC: 0.8）
+                  const studentLvl = (selectedStudent.level || (selectedStudent as any).learning_level || 'B').toUpperCase();
+                  const levelMultiplier = studentLvl === 'A' ? 4.0 : (studentLvl === 'C' ? 0.8 : 2.0);
+                  const weeklySubjectSlots = (studentDays * studentSlots) / selectedSubjsCount;
+                  const weeklyPaceRaw = weeklySubjectSlots * levelMultiplier;
+                  const weeklyPace = Math.max(0.5, Math.round(weeklyPaceRaw * 10) / 10);
                   const remainingCount = Math.max(0, totalCount - completedCount);
-                  const estimatedWeeks = Math.ceil(remainingCount / weeklyPace);
+                  const estimatedWeeks = Math.max(1, Math.ceil(remainingCount / weeklyPace));
                   
                   const estDate = new Date(Date.now() + estimatedWeeks * 7 * 24 * 60 * 60 * 1000);
                   const formattedEstDate = `${estDate.getFullYear()}年${estDate.getMonth() + 1}月${estDate.getDate()}日`;
