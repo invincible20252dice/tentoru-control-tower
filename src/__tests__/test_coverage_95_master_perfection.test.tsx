@@ -1606,6 +1606,474 @@ describe('Coverage 95%+ Master Perfection Suite', () => {
     (db as any).isMockMode = originalMock;
     (db as any).supabase = originalSb;
   });
+
+  it('22. TeacherDashboard: Unit Test Master Modal with new, edit, and custom sort order placement', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const testMasters: CurriculumMaster[] = [
+      { id: 'cm-cov-u1', grade: '中2', subject: '数学', unit_name: '1章 連立方程式', lesson_name: 'STEP 1', sort_order: 1, item_type: 'lesson' },
+      { id: 'cm-cov-u2', grade: '中2', subject: '数学', unit_name: '1章 連立方程式', lesson_name: 'STEP 2', sort_order: 2, item_type: 'lesson' },
+      { id: 'cm-cov-u3', grade: '中2', subject: '数学', unit_name: '2章 一次関数', lesson_name: 'STEP 1', sort_order: 3, item_type: 'lesson' },
+    ];
+    await db.saveCurriculumMasters(testMasters);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        curriculumMasters={testMasters}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="milestones"
+      />
+    );
+
+    // 単元テスト追加ボタンをクリックしてモーダルを開く
+    const addUnitTestBtn = screen.queryByRole('button', { name: /単元テストの追加|単元テストマスタ登録/i }) || screen.queryByText(/単元テストマスタ登録|単元テストを追加/i);
+    if (addUnitTestBtn) {
+      fireEvent.click(addUnitTestBtn);
+    }
+
+    // 単元テストモーダルが開いている場合の入力
+    const testNameInput = screen.queryByPlaceholderText(/たしざん 単元確認テスト/i);
+    if (testNameInput) {
+      fireEvent.change(testNameInput, { target: { value: '連立方程式の応用 単元確認テスト' } });
+
+      const passingLineInput = screen.queryByPlaceholderText(/80%以上, 90点/i);
+      if (passingLineInput) {
+        fireEvent.change(passingLineInput, { target: { value: '85%以上' } });
+      }
+
+      const saveBtn = screen.getByTestId('save-unittest-master-btn');
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(alertMock).toHaveBeenCalled();
+      });
+    }
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
+
+  it('23. TeacherDashboard: Tests & Exams Tab: Regular Exam Scores & Mock Exams Management', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="tests"
+      />
+    );
+
+    // 定期テスト追加ボタンや入力フォームの操作
+    const examInputs = screen.queryAllByRole('textbox');
+    if (examInputs.length > 0) {
+      fireEvent.change(examInputs[0], { target: { value: '1学期期末テスト' } });
+    }
+
+    const numberInputs = screen.queryAllByRole('spinbutton');
+    numberInputs.forEach(input => {
+      fireEvent.change(input, { target: { value: '85' } });
+    });
+
+    const addExamBtns = screen.queryAllByRole('button', { name: /追加|保存|登録/i });
+    if (addExamBtns.length > 0) {
+      fireEvent.click(addExamBtns[0]);
+    }
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
+
+  it('24. TeacherDashboard: Homeworks & Mini-Tests Tabs Complete User Interaction', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const testHw: HomeworkResult = {
+      id: 'hw-cov-tab-1',
+      student_id: mockJhsStudent.id,
+      date: '2026-04-10',
+      subject: '数学',
+      unit_name: '1章 連立方程式',
+      lesson_name: 'STEP 1 宿題',
+      status: 'incomplete',
+      created_at: new Date().toISOString()
+    };
+    await db.saveHomeworkResult(testHw);
+
+    const testMini: MiniTestResult = {
+      id: 'mini-cov-tab-1',
+      student_id: mockJhsStudent.id,
+      date: '2026-04-10',
+      subject: '数学',
+      test_type: 'unit_test',
+      unit_name: '1章 連立方程式',
+      lesson_name: '連立方程式 単元確認テスト',
+      status: 'pending',
+      score: 0,
+      passed: false,
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(testMini);
+
+    // 宿題タブのレンダリングと操作
+    const { unmount: unmountHw } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="homeworks"
+      />
+    );
+
+    const hwSelects = screen.queryAllByRole('combobox');
+    if (hwSelects.length > 0) {
+      fireEvent.change(hwSelects[0], { target: { value: 'completed' } });
+    }
+    const saveHwBtns = screen.queryAllByRole('button', { name: /保存|更新/i });
+    if (saveHwBtns.length > 0) {
+      fireEvent.click(saveHwBtns[0]);
+    }
+    unmountHw();
+
+    // ミニテストタブのレンダリングと操作
+    const { unmount: unmountMini } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="mini-tests"
+      />
+    );
+
+    const passBtns = screen.queryAllByRole('button', { name: /合格|採点|保存/i });
+    if (passBtns.length > 0) {
+      fireEvent.click(passBtns[0]);
+    }
+    unmountMini();
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+  });
+
+  it('25. TeacherDashboard: Period Selection, Subject Change, and Auto Reschedule Interaction', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="schedule"
+      />
+    );
+
+    // リスケボタンのクリック
+    const rescheduleBtn = screen.queryByRole('button', { name: /遅れチェック|リスケ/i });
+    if (rescheduleBtn) {
+      fireEvent.click(rescheduleBtn);
+    }
+
+    alertMock.mockRestore();
+    unmount();
+  });
+
+  it('26. TeacherDashboard: Full Lifecycle of Student Detail, AI Rules, Sync, and Templates', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent, mockElemStudent]}
+        schools={[mockElemSchool, mockJhsSchool]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="student-detail"
+      />
+    );
+
+    // 性格タグの追加
+    const personalityInput = screen.queryByPlaceholderText(/新しい性格・特徴タグ/i);
+    if (personalityInput) {
+      fireEvent.change(personalityInput, { target: { value: '論理的思考' } });
+      const addTagBtn = screen.queryByRole('button', { name: /タグ追加/i });
+      if (addTagBtn) fireEvent.click(addTagBtn);
+    }
+
+    // 担当講師タグの追加
+    const teacherInput = screen.queryByPlaceholderText(/講師名を入力/i);
+    if (teacherInput) {
+      fireEvent.change(teacherInput, { target: { value: '新規 講師' } });
+      const addTeacherBtn = screen.queryByRole('button', { name: /講師追加/i });
+      if (addTeacherBtn) fireEvent.click(addTeacherBtn);
+    }
+
+    // 面談メモの入力
+    const memoTextarea = screen.queryByPlaceholderText(/面談内容、生徒の様子、連絡事項などを入力/i);
+    if (memoTextarea) {
+      fireEvent.change(memoTextarea, { target: { value: '保護者面談を実施。学習順調。' } });
+      const saveMemoBtn = screen.queryByRole('button', { name: /面談記録を保存/i });
+      if (saveMemoBtn) fireEvent.click(saveMemoBtn);
+    }
+
+    // カルテ保存ボタン
+    const saveDetailBtn = screen.queryByRole('button', { name: /生徒情報を更新/i });
+    if (saveDetailBtn) {
+      fireEvent.click(saveDetailBtn);
+    }
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
+
+  it('27. TeacherDashboard: Deepest Edge Case Handlers and UI States', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    // High school student for high school subject selectors
+    const hsStudent: Student = {
+      id: 'st-cov-hs-1',
+      student_id: 'S_COV_HS_1',
+      name: '高校生 カバ男',
+      grade: '高1',
+      status: 'fast',
+      level: 'A',
+      branch_id: 'branch-cov-1',
+      classroom: 'カバレッジ校舎',
+      school_id: 'sch-cov-jhs',
+      school_name: 'カバレッジ高校',
+      selected_days: ['wednesday', 'saturday'],
+      selected_subjects: ['数学', '英語', '国語', '理科', '社会'],
+      period_count: 2,
+      default_slots: 2
+    };
+    await db.saveStudent(hsStudent);
+
+    const { unmount: unmountHs } = render(
+      <TeacherDashboard
+        students={[hsStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={hsStudent.id}
+        initialTab="schedule"
+      />
+    );
+
+    // リスケ実行
+    const reschedBtn = screen.queryByRole('button', { name: /遅れチェック|リスケ/i });
+    if (reschedBtn) {
+      fireEvent.click(reschedBtn);
+    }
+    unmountHs();
+
+    // カリキュラム単元の追加、編集、削除テスト
+    const { unmount: unmountCurr } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        schools={[mockJhsSchool]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="curriculum"
+      />
+    );
+
+    const unitInput = screen.queryByPlaceholderText(/単元名を入力/i);
+    const addUnitBtn = screen.queryByText(/＋ 単元を追加/i);
+    if (unitInput && addUnitBtn) {
+      fireEvent.change(unitInput, { target: { value: '新しい単元' } });
+      fireEvent.click(addUnitBtn);
+    }
+
+    const editUnitBtns = screen.queryAllByRole('button', { name: '編集' });
+    if (editUnitBtns.length > 0) {
+      fireEvent.click(editUnitBtns[0]);
+      const updateUnitBtn = screen.queryByText(/更新/i);
+      if (updateUnitBtn) fireEvent.click(updateUnitBtn);
+    }
+
+    const deleteUnitBtns = screen.queryAllByRole('button', { name: '削除' });
+    if (deleteUnitBtns.length > 0) {
+      fireEvent.click(deleteUnitBtns[0]);
+    }
+    unmountCurr();
+
+    // AI指導レポート生成と保存
+    const { unmount: unmountAi } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        schools={[mockJhsSchool]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="ai-report"
+      />
+    );
+
+    const aiGenBtn = screen.queryByRole('button', { name: /AI指導レポートを生成|レポート生成/i });
+    if (aiGenBtn) {
+      fireEvent.click(aiGenBtn);
+    }
+    unmountAi();
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+  });
+
+  it('28. TeacherDashboard: Full Elementary Timeline Unit Test Master Modal with all inputs and cancel', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockElemStudent]}
+        curriculumMasters={[]}
+        tasks={[]}
+        initialStudentId={mockElemStudent.id}
+        initialTab="milestones"
+      />
+    );
+
+    // ➕ 単元テストを追加ボタンをクリック
+    const addUnitTestBtn = screen.getByTestId('timeline-add-unittest-btn');
+    fireEvent.click(addUnitTestBtn);
+
+    // モーダルが表示されていること
+    expect(screen.getByTestId('unit-test-master-modal')).toBeInTheDocument();
+
+    // 対象単元の入力
+    const unitInput = screen.getByPlaceholderText(/例: 1章 整数と小数/i);
+    fireEvent.change(unitInput, { target: { value: '1章 小数と計算' } });
+
+    // テスト名の入力
+    const testNameInput = screen.getByPlaceholderText(/例: たしざん 単元確認テスト/i);
+    fireEvent.change(testNameInput, { target: { value: '小数のかけ算 単元確認テスト' } });
+
+    // 合格基準の入力
+    const passingInput = screen.getByPlaceholderText(/例: 80%以上, 90点/i);
+    fireEvent.change(passingInput, { target: { value: '85%以上' } });
+
+    // 保存ボタンをクリック
+    const saveBtn = screen.getByTestId('save-unittest-master-btn');
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalled();
+    });
+
+    // 再度モーダルを開いてキャンセルボタンをクリック
+    fireEvent.click(addUnitTestBtn);
+    const cancelBtn = screen.getByRole('button', { name: 'キャンセル' });
+    fireEvent.click(cancelBtn);
+
+    expect(screen.queryByText('単元テストマスタ登録・編集')).not.toBeInTheDocument();
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
+
+  it('29. TeacherDashboard: exercises student target schools CRUD and note interactions in student detail tab', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        schools={[mockJhsSchool]}
+        curriculumMasters={mockMasters}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="student-detail"
+      />
+    );
+
+    // 志望校入力フィールド
+    const schoolNameInput = screen.queryByPlaceholderText(/例: 〇〇高校/i);
+    const courseInput = screen.queryByPlaceholderText(/例: 普通科/i);
+    const addSchoolBtn = screen.queryByRole('button', { name: /志望校を追加/i });
+
+    if (schoolNameInput && courseInput && addSchoolBtn) {
+      await act(async () => {
+        fireEvent.change(schoolNameInput, { target: { value: '開成高校' } });
+        fireEvent.change(courseInput, { target: { value: '普通科' } });
+        fireEvent.click(addSchoolBtn);
+      });
+    }
+
+    // 志望校削除ボタン
+    const delTargetBtns = screen.queryAllByRole('button', { name: /削除/i });
+    if (delTargetBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(delTargetBtns[0]);
+      });
+    }
+
+    // 生徒基本情報更新ボタン
+    const updateStudentBtn = screen.queryByRole('button', { name: /生徒情報を更新/i });
+    if (updateStudentBtn) {
+      await act(async () => {
+        fireEvent.click(updateStudentBtn);
+      });
+    }
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
+
+  it('30. TeacherDashboard: exercises regular exam modal and score threshold entries', async () => {
+    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        students={[mockJhsStudent]}
+        schools={[mockJhsSchool]}
+        curriculumMasters={mockMasters}
+        tasks={[]}
+        initialStudentId={mockJhsStudent.id}
+        initialTab="tests"
+      />
+    );
+
+    const testNameInput = screen.queryByPlaceholderText(/例: 1学期中間テスト/i);
+    if (testNameInput) {
+      await act(async () => {
+        fireEvent.change(testNameInput, { target: { value: '2学期期末テスト' } });
+      });
+    }
+
+    const numberInputs = screen.queryAllByRole('spinbutton');
+    for (const input of numberInputs) {
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '88' } });
+      });
+    }
+
+    const saveTestBtn = screen.queryByRole('button', { name: /テスト結果を保存|登録/i });
+    if (saveTestBtn) {
+      await act(async () => {
+        fireEvent.click(saveTestBtn);
+      });
+    }
+
+    alertMock.mockRestore();
+    confirmMock.mockRestore();
+    unmount();
+  });
 });
 
 

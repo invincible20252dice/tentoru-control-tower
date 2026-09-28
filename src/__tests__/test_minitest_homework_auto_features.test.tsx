@@ -132,10 +132,10 @@ describe('MiniTest and Homework Auto Features & Delete Unit Tests', () => {
     // 提出期限超過のアラート表示 (⚠️ 2026-08-25 (期限超過)) の存在検証
     expect(screen.getByText(/⚠️ 2026-08-25 \(期限超過\)/i)).toBeInTheDocument();
 
-    // 提出状況を「提出済み」に変更して自動保存
-    const statusSelect = screen.getByDisplayValue('未完') as HTMLSelectElement;
+    // 提出状況を「未提出」からクリックして「✓ 提出済」にトグル
+    const statusToggleBtn = screen.getByRole('button', { name: '未提出' });
     await act(async () => {
-      fireEvent.change(statusSelect, { target: { value: 'completed' } });
+      fireEvent.click(statusToggleBtn);
     });
 
     await waitFor(() => {

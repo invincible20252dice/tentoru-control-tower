@@ -1086,10 +1086,10 @@ describe('UI Components Render & Interaction Tests', () => {
     fireEvent.click(tabHomeworksBtn);
     expect(screen.getByText('数学ワークP45')).toBeInTheDocument();
 
-    // 宿題提出状況の自動保存テスト
+    // 宿題提出状況のトグル切り替え＆自動保存テスト
     const hwRow = screen.getByText('数学ワークP45').closest('tr')!;
-    const hwSelect = hwRow.querySelector('select')!;
-    fireEvent.change(hwSelect, { target: { value: 'completed' } });
+    const hwToggleBtn = hwRow.querySelector('button')!;
+    fireEvent.click(hwToggleBtn);
 
     await waitFor(() => {
       const finalHwResults = db.getHomeworkResults();
@@ -5627,6 +5627,26 @@ describe('UI Components Render & Interaction Tests', () => {
       }
     }
 
+    // Regular exam input
+    const examNameInput = screen.queryByPlaceholderText(/例: 1学期中間テスト/);
+    if (examNameInput) {
+      await act(async () => {
+        fireEvent.change(examNameInput, { target: { value: "中2 2学期期末テスト" } });
+      });
+    }
+    const examScoreInputs = screen.queryAllByRole("spinbutton");
+    for (const input of examScoreInputs) {
+      await act(async () => {
+        fireEvent.change(input, { target: { value: "88" } });
+      });
+    }
+    const saveExamBtn = screen.queryByRole("button", { name: /テスト結果を保存|登録/ });
+    if (saveExamBtn) {
+      await act(async () => {
+        fireEvent.click(saveExamBtn);
+      });
+    }
+
     // Mock exam input
     const mockScoreInput = screen.queryByPlaceholderText(/偏差値/);
     const saveMockBtn = screen.queryByText(/模試結果を保存/) || screen.queryByText(/登録する/);
@@ -5678,6 +5698,27 @@ describe('UI Components Render & Interaction Tests', () => {
       await act(async () => {
         fireEvent.click(openUnitTestModalBtn);
       });
+
+      const testNameInput = screen.queryByPlaceholderText(/例: たしざん 単元確認テスト/);
+      if (testNameInput) {
+        await act(async () => {
+          fireEvent.change(testNameInput, { target: { value: "1次関数の利用 単元確認テスト" } });
+        });
+      }
+
+      const unitNameInput = screen.queryByPlaceholderText(/例: 1章 整数と小数/);
+      if (unitNameInput) {
+        await act(async () => {
+          fireEvent.change(unitNameInput, { target: { value: "2章 1次関数" } });
+        });
+      }
+
+      const passingLineInput = screen.queryByPlaceholderText(/例: 80%以上, 90点/);
+      if (passingLineInput) {
+        await act(async () => {
+          fireEvent.change(passingLineInput, { target: { value: "80%以上" } });
+        });
+      }
 
       const saveMasterBtn = screen.queryByTestId("save-unittest-master-btn");
       if (saveMasterBtn) {

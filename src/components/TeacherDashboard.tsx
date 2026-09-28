@@ -2043,14 +2043,39 @@ export default function TeacherDashboard({
     setMiniTestResultsList(prev => prev.filter(r => r.id !== id));
   };
 
+  // 宿題提出状況のトグル切り替え（ワンクリック＆即時DB保存）
+  const handleToggleHomeworkStatus = async (result: HomeworkResult) => {
+    const currentStatus = tempHomeworkStatuses[result.id] || result.status || 'incomplete';
+    const isSubmitted = currentStatus === 'completed' || (currentStatus as string) === 'submitted';
+    const nextStatus = isSubmitted ? 'incomplete' : 'completed';
+
+    // 楽観的UI更新 (Optimistic UI)
+    setTempHomeworkStatuses(prev => ({
+      ...prev,
+      [result.id]: nextStatus
+    }));
+    const updated: HomeworkResult = {
+      ...result,
+      status: nextStatus
+    };
+    setHomeworkResultsList(prev => prev.map(h => h.id === result.id ? updated : h));
+
+    // 即時DB永続保存
+    await db.saveHomeworkResult(updated);
+  };
+
   // 宿題提出状況の自動保存
   const handleAutoSaveHomeworkStatus = async (result: HomeworkResult, newStatus: any) => {
     const updated: HomeworkResult = {
       ...result,
       status: newStatus
     };
-    await db.saveHomeworkResult(updated);
+    setTempHomeworkStatuses(prev => ({
+      ...prev,
+      [result.id]: newStatus
+    }));
     setHomeworkResultsList(prev => prev.map(h => h.id === result.id ? updated : h));
+    await db.saveHomeworkResult(updated);
   };
 
   // 宿題レコードの物理削除
@@ -6132,14 +6157,18 @@ export default function TeacherDashboard({
                               if (homeworkSortOrder === 'unsubmitted_first') {
                                 const statusA = tempHomeworkStatuses[a.id] || a.status;
                                 const statusB = tempHomeworkStatuses[b.id] || b.status;
-                                if (statusA === 'incomplete' && statusB !== 'incomplete') return -1;
-                                if (statusA !== 'incomplete' && statusB === 'incomplete') return 1;
+                                const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
+                                const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
+                                if (!isSubA && isSubB) return -1;
+                                if (isSubA && !isSubB) return 1;
                               }
                               if (homeworkSortOrder === 'completed_first') {
                                 const statusA = tempHomeworkStatuses[a.id] || a.status;
                                 const statusB = tempHomeworkStatuses[b.id] || b.status;
-                                if (statusA === 'completed' && statusB !== 'completed') return -1;
-                                if (statusA !== 'completed' && statusB === 'completed') return 1;
+                                const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
+                                const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
+                                if (isSubA && !isSubB) return -1;
+                                if (!isSubA && isSubB) return 1;
                               }
                               // デフォルト: 日付新しい順
                               return new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -6148,8 +6177,9 @@ export default function TeacherDashboard({
                               const student = students.find(s => s.id === r.student_id);
                               const todayStr = new Date().toISOString().split('T')[0];
                               const currentStatus = tempHomeworkStatuses[r.id] || r.status || 'incomplete';
+                              const isSubmitted = currentStatus === 'completed' || (currentStatus as string) === 'submitted';
                               const deadline = r.homework_deadline || r.date || '';
-                              const isOverdue = currentStatus === 'incomplete' && !!deadline && deadline < todayStr;
+                              const isOverdue = !isSubmitted && !!deadline && deadline < todayStr;
 
                               return (
                                 <tr
@@ -6173,23 +6203,30 @@ export default function TeacherDashboard({
                                     )}
                                   </td>
                                   <td style={{ padding: '10px' }}>
-                                    <select
-                                      value={currentStatus}
-                                      onChange={e => {
-                                        const newStatus = e.target.value as any;
-                                        setTempHomeworkStatuses(prev => ({
-                                          ...prev,
-                                          [r.id]: newStatus
-                                        }));
-                                        handleAutoSaveHomeworkStatus(r, newStatus);
+                                    <button
+                                      type="button"
+                                      data-testid={`toggle-homework-status-${r.id}`}
+                                      onClick={() => handleToggleHomeworkStatus(r)}
+                                      style={{
+                                        padding: '5px 12px',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 700,
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '4px',
+                                        border: isSubmitted ? '1px solid #15803d' : '1px solid #fca5a5',
+                                        backgroundColor: isSubmitted ? '#16a34a' : '#fef2f2',
+                                        color: isSubmitted ? '#ffffff' : '#dc2626',
+                                        boxShadow: isSubmitted ? '0 1px 2px rgba(22, 163, 74, 0.2)' : '0 1px 2px rgba(220, 38, 38, 0.05)'
                                       }}
-                                      className={styles.select}
-                                      style={{ padding: '4px 6px', fontSize: '0.8rem' }}
+                                      title={isSubmitted ? 'クリックして未提出に戻す' : 'クリックして提出済みにする'}
                                     >
-                                      <option value="incomplete">未完</option>
-                                      <option value="completed">提出済み</option>
-                                      <option value="skipped">スキップ</option>
-                                    </select>
+                                      {isSubmitted ? '✓ 提出済' : '未提出'}
+                                    </button>
                                   </td>
                                   <td style={{ padding: '10px' }}>
                                     <button
