@@ -182,7 +182,7 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     // 英語(cm-e1)と国語(cm-j1)を完了として保存
     studentWithSubjs.completed_lesson_ids = ['cm-e1', 'cm-j1'];
 
-    // 1. 進捗率昇順ソートの検証: 算数(0%) -> 国語(0%/元順) -> 英語(50%)
+    // 1. 進捗率昇順ソートの検証: 算数(1) -> 英語(2) -> 国語(3)
     const sortedSubjects = getSortedSubjectsByProgressRate({
       student: studentWithSubjs,
       selectedSubjects: ['英語', '国語', '算数'],
@@ -190,8 +190,8 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     });
 
     expect(sortedSubjects[0]).toBe('算数');
-    expect(sortedSubjects[1]).toBe('国語');
-    expect(sortedSubjects[2]).toBe('英語');
+    expect(sortedSubjects[1]).toBe('英語');
+    expect(sortedSubjects[2]).toBe('国語');
 
     // 2. コマ数 ＝ 選択教科数 (3コマ / 3教科): 各教科が1コマずつ配置
     const slots3 = generateSlotsForSelectedSubjects({
@@ -202,10 +202,10 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     });
 
     expect(slots3[1].subject).toBe('算数');
-    expect(slots3[2].subject).toBe('国語');
-    expect(slots3[3].subject).toBe('英語');
+    expect(slots3[2].subject).toBe('英語');
+    expect(slots3[3].subject).toBe('国語');
 
-    // 3. コマ数 ＜ 選択教科数 (2コマ / 3教科): 進捗が遅い上位2教科 (算数, 国語) を優先配置
+    // 3. コマ数 ＜ 選択教科数 (2コマ / 3教科): 最優先上位2教科 (算数, 英語) を優先配置
     const slots2 = generateSlotsForSelectedSubjects({
       student: studentWithSubjs,
       periodCount: 2,
@@ -214,10 +214,10 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     });
 
     expect(slots2[1].subject).toBe('算数');
-    expect(slots2[2].subject).toBe('国語');
+    expect(slots2[2].subject).toBe('英語');
     expect(slots2[3]).toBeUndefined();
 
-    // 4. コマ数 ＞ 選択教科数 (4コマ / 3教科): 最も進捗が遅い教科 (算数) が追加で配置されること
+    // 4. コマ数 ＞ 選択教科数 (4コマ / 3教科): 最優先教科 (算数) が追加で配置されること
     const slots4 = generateSlotsForSelectedSubjects({
       student: studentWithSubjs,
       periodCount: 4,
@@ -226,8 +226,8 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     });
 
     expect(slots4[1].subject).toBe('算数');
-    expect(slots4[2].subject).toBe('国語');
-    expect(slots4[3].subject).toBe('英語');
+    expect(slots4[2].subject).toBe('英語');
+    expect(slots4[3].subject).toBe('国語');
     expect(slots4[4].subject).toBe('算数');
   });
 
@@ -337,16 +337,16 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
       curriculumMasters: masters
     });
 
-    // 国語は完全未完了 (0%) なので 1コマ目に優先配置
-    expect(slots[1].subject).toBe('国語');
-    expect(slots[1].startLessonName).toContain('あいうえお');
+    // 算数は cm-p1-m1 が完了しているが、単元末尾の単元確認テストが未完了のため「たしざん(1) - 単元確認テスト」からスタートし、最優先教科として1コマ目に配置
+    expect(slots[1].subject).toBe('算数');
+    expect(slots[1].startLessonName).toContain('単元確認テスト');
 
-    // 算数は cm-p1-m1 が完了しているが、単元末尾の単元確認テストが未完了のため「たしざん(1) - 単元確認テスト」からスタートすること
-    expect(slots[2].subject).toBe('算数');
-    expect(slots[2].startLessonName).toContain('単元確認テスト');
+    // 英語は第2優先教科として2コマ目に配置
+    expect(slots[2].subject).toBe('英語');
+    expect(slots[2].startLessonName).toContain('H〜N');
 
-    // 英語は cm-p1-e1 が完了しているため、同一単元内の次授業 cm-p1-e2 (H〜N) からスタートすること
-    expect(slots[3].subject).toBe('英語');
-    expect(slots[3].startLessonName).toContain('H〜N');
+    // 国語は第3優先教科として3コマ目に配置
+    expect(slots[3].subject).toBe('国語');
+    expect(slots[3].startLessonName).toContain('あいうえお');
   });
 });

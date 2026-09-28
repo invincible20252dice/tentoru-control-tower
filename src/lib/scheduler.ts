@@ -1764,8 +1764,23 @@ export function calculateSubjectProgressRate(params: {
   return { progressRate, completedCount, totalCount };
 }
 
+// 教科の優先順位定義（数字が小さいほど最優先）
+export const SUBJECT_PRIORITY: Record<string, number> = {
+  math: 1,       // 算数・数学（最優先）
+  算数: 1,
+  数学: 1,
+  english: 2,    // 英語（第2優先）
+  英語: 2,
+  japanese: 3,   // 国語
+  国語: 3,
+  science: 4,    // 理科
+  理科: 4,
+  social: 5,     // 社会
+  社会: 5,
+};
+
 /**
- * 選択教科 (selected_subjects) を進捗率の昇順 (低い順 / 最も遅れている教科が先頭) にソートする
+ * 選択教科 (selected_subjects) を「算数/数学(1)・英語(2)」最優先 ＋ 進捗率順にソートする
  */
 export function getSortedSubjectsByProgressRate(params: {
   student: Student;
@@ -1789,7 +1804,7 @@ export function getSortedSubjectsByProgressRate(params: {
     (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
     student.grade === '園児'
   );
-  const defaultSubjs = isElem ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語'];
+  const defaultSubjs = isElem ? ['算数', '英語'] : ['数学', '英語'];
   const subjectsToUse = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : defaultSubjs;
 
   const subjectRates = subjectsToUse.map((sub, originalIdx) => {
@@ -1801,11 +1816,16 @@ export function getSortedSubjectsByProgressRate(params: {
       tasks,
       lessonProgressList
     });
-    return { subject: sub, rate: progressRate, originalIdx };
+    const priority = SUBJECT_PRIORITY[sub] ?? SUBJECT_PRIORITY[sub.toLowerCase()] ?? 99;
+    return { subject: sub, rate: progressRate, priority, originalIdx };
   });
 
-  // 進捗率の昇順（低率順）、同率なら元の配列順
+  // 1. 最優先: 教科の固定優先度 (算数・数学=1, 英語=2, 国語=3, 理科=4, 社会=5)
+  // 2. 同一優先度内: 進捗率の昇順（低率順）、同率なら元の配列順
   subjectRates.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority;
+    }
     if (a.rate !== b.rate) {
       return a.rate - b.rate;
     }

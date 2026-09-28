@@ -80,12 +80,12 @@ describe('Student Individual Start Position & Subject Strict Filter Test Suite',
     });
 
     expect(slots[1]).toBeDefined();
-    expect(slots[1].subject).toBe('英語');
-    expect(slots[1].startLessonName).toContain('I am ~');
+    expect(slots[1].subject).toBe('算数');
+    expect(slots[1].startLessonName).toContain('比とその利用');
 
     expect(slots[2]).toBeDefined();
-    expect(slots[2].subject).toBe('算数');
-    expect(slots[2].startLessonName).toContain('比とその利用');
+    expect(slots[2].subject).toBe('英語');
+    expect(slots[2].startLessonName).toContain('I am ~');
   });
 
   it('strictly filters English dropdown without Math lessons contamination for elementary student in TeacherDashboard', async () => {
@@ -105,10 +105,10 @@ describe('Student Individual Start Position & Subject Strict Filter Test Suite',
     });
 
     // バックエンド/ロジック層およびドロップダウン取得関数の直接フィルタリング検証
-    expect(slots[1].subject).toBe('英語');
-    expect(slots[1].startLessonName).toContain('I am ~');
-    expect(slots[2].subject).toBe('算数');
-    expect(slots[2].startLessonName).toContain('比とその利用');
+    expect(slots[1].subject).toBe('算数');
+    expect(slots[1].startLessonName).toContain('比とその利用');
+    expect(slots[2].subject).toBe('英語');
+    expect(slots[2].startLessonName).toContain('I am ~');
 
     // 英語と算数のレッスンが教科を跨いで混入しないことを検証
     const engLessons = masters.filter(m => m.subject === '英語');
