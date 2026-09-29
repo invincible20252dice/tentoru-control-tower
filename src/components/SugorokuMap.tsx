@@ -217,22 +217,33 @@ export default function SugorokuMap({
     playerSubStep = 'test';
   }
 
-  // 現在地（activeNode）への自動スクロール
+  // 現在地（activeNode）への自動スクロール（ファーストビューの中央付近に表示）
   useEffect(() => {
-    if (activeNodeElementRef.current && mapWrapperRef.current) {
-      try {
-        activeNodeElementRef.current.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center'
-        });
-      } catch {
-        // Fallback for jsdom / legacy environments
-        const top = activeNodeElementRef.current.offsetTop;
-        if (top > 100) {
-          mapWrapperRef.current.scrollTop = top - 150;
+    const scrollToActive = () => {
+      if (activeNodeElementRef.current && mapWrapperRef.current) {
+        try {
+          activeNodeElementRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+        } catch {
+          // Fallback for jsdom / legacy environments
+        }
+        const container = mapWrapperRef.current;
+        const el = activeNodeElementRef.current;
+        if (container && el && typeof el.offsetTop === 'number') {
+          const targetScrollTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+          if (typeof container.scrollTo === 'function') {
+            container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' });
+          } else {
+            container.scrollTop = Math.max(0, targetScrollTop);
+          }
         }
       }
-    }
+    };
+    scrollToActive();
+    const timer = setTimeout(scrollToActive, 100);
+    return () => clearTimeout(timer);
   }, [activeSubject, playerNodeId]);
 
   // S字ジグザグのオフセットクラスを決定（Duolingo風パス）

@@ -86,14 +86,17 @@
 }
 
 .gradeBadge {
-  background: #3b82f6;
-  color: #ffffff;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-weight: 800;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.25);
+  background: #334155;
+  color: #e2e8f0;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   white-space: nowrap;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
 }
 
 .streakBadge {
@@ -614,12 +617,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #ffffff;
   border: 1.5px solid #e2e8f0;
   transition: all 0.2s;
+  min-width: 0;
 }
 
 .darkTheme .stepCard {
@@ -643,9 +647,10 @@
   color: #1e293b;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   line-height: 1.4;
-  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .darkTheme .stepTitle {
@@ -656,15 +661,18 @@
   background: #10b981;
   color: #ffffff;
   border: none;
-  padding: 6px 14px;
-  border-radius: 10px;
-  font-size: 0.8rem;
+  padding: 10px 16px;
+  min-height: 44px;
+  min-width: max-content;
+  border-radius: 12px;
+  font-size: 0.85rem;
   font-weight: 800;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  box-shadow: 0 3px 0 #059669;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 4px 0 #059669;
   transition: all 0.1s ease;
   white-space: nowrap;
   flex-shrink: 0;
@@ -682,14 +690,17 @@
 .stepCompletedBadge {
   background: #dcfce7;
   color: #15803d;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 800;
-  padding: 5px 10px;
-  border-radius: 8px;
-  border: 1px solid #86efac;
+  padding: 10px 16px;
+  min-height: 44px;
+  min-width: max-content;
+  border-radius: 12px;
+  border: 1.5px solid #86efac;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -703,23 +714,28 @@
 /* 3D Action Buttons */
 .actions {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 12px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .btn {
-  padding: 8px 16px;
+  padding: 10px 16px;
+  min-height: 44px;
+  min-width: max-content;
   border-radius: 12px;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 800;
   cursor: pointer;
   border: none;
   transition: all 0.1s ease;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btnPrimary {

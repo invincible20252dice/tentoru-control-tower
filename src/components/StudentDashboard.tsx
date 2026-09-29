@@ -1019,21 +1019,19 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             🎓
           </div>
           <div className={styles.studentNameGroup}>
-            <h1>
-              {currentStudent.name} さんの学習画面
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h1 style={{ margin: 0 }}>
+                {currentStudent.name} さんの学習画面
+              </h1>
+              <span className={styles.gradeBadge}>学年: {currentStudent.grade}</span>
+            </div>
             <div className={styles.studentMeta}>
-              <span className={styles.gradeBadge}>{currentStudent.grade}</span>
               <span className={styles.streakBadge}>🔥 3日連続学習中！</span>
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                学年: <strong className={styles.badge}>{currentStudent.grade}</strong>
-              </span>
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                ログインID: <code>{currentStudent.student_id}</code>
-              </span>
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                アカウント状況: {getStatusBadge(currentStudent.status)}
-              </span>
+              {currentStudent.status !== 'normal' && (
+                <span>
+                  {getStatusBadge(currentStudent.status)}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1413,10 +1411,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                 data-testid={`step-card-${task.period}-${sIdx}`}
                               >
                                 <div className={styles.stepTitle}>
-                                  <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>STEP {sIdx + 1}:</span>
-                                  <span>{step.name || step.fullTitle}</span>
+                                  <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>STEP {sIdx + 1}:</span>
+                                  <span style={{ minWidth: 0, wordBreak: 'break-word', flex: '1 1 auto' }}>{step.name || step.fullTitle}</span>
                                 </div>
-                                <div>
+                                <div style={{ flexShrink: 0, minWidth: 'max-content' }}>
                                   {isStepDone ? (
                                     <span className={styles.stepCompletedBadge} data-testid={`step-done-badge-${task.period}-${sIdx}`}>
                                       ✅ 受講完了
