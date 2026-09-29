@@ -5566,6 +5566,25 @@ export default function TeacherDashboard({
                     </div>
                   </div>
 
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    <input 
+                      type="text"
+                      placeholder="例: 1章 正の数・負の数"
+                      value={newUnitName}
+                      onChange={e => setNewUnitName(e.target.value)}
+                      className={styles.input}
+                      style={{ maxWidth: '300px' }}
+                    />
+                    <button 
+                      type="button"
+                      onClick={handleCreateCurriculumUnit}
+                      className={styles.btn}
+                      style={{ width: 'auto' }}
+                    >
+                      授業（単元）を追加
+                    </button>
+                  </div>
+
                   <div className={styles.curriculumList}>
                     {schoolUnits.map((unit, index) => (
                       <div key={unit.id} className={styles.curriculumItem} style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
@@ -8896,6 +8915,16 @@ export default function TeacherDashboard({
                               );
                             });
                           })()}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                          <button
+                            type="button"
+                            onClick={handleSaveStartUnit}
+                            className={styles.btn}
+                            style={{ width: 'auto', background: '#3b82f6', color: '#ffffff', fontSize: '0.8rem', padding: '6px 14px' }}
+                          >
+                            📍 教科別スタート位置をTodoに反映
+                          </button>
                         </div>
                       </div>
 

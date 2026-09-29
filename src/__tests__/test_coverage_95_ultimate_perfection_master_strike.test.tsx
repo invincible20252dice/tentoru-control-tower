@@ -406,8 +406,8 @@ describe('Ultimate Perfection Master Strike for 95%+ Coverage Across All Files',
       await act(async () => {
         fireEvent.click(curTab);
       });
-      const newUnitInput = screen.queryByPlaceholderText(/単元名を入力/i);
-      const addUnitBtn = screen.queryByText(/単元を追加/i) || screen.queryByText(/追加/i);
+      const newUnitInput = screen.queryByPlaceholderText(/単元名を入力|例: 1章/i);
+      const addUnitBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('授業（単元）を追加') || b.textContent?.includes('追加'));
       if (newUnitInput && addUnitBtn) {
         await act(async () => {
           fireEvent.change(newUnitInput, { target: { value: '新しい算数単元' } });

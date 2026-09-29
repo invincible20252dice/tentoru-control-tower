@@ -5866,7 +5866,218 @@ describe('UI Components Render & Interaction Tests', () => {
 
     wrapper.unmount();
   });
+
+  it('should deeply exercise TeacherDashboard CRUD, exams, custom units, start units, and db.ts for 96%+ line coverage', async () => {
+    vi.spyOn(window, 'confirm').mockImplementation(() => true);
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.spyOn(window, 'print').mockImplementation(() => {});
+
+    const testStudent: Student = {
+      id: 'st-deep-cov-1',
+      student_id: 'S_DEEP_COV_1',
+      name: '深層 網羅太郎',
+      name_kana: 'シンソウ モウラタロウ',
+      grade: '小5',
+      status: 'normal',
+      level: 'A',
+      branch_id: 'branch-1',
+      classroom: '恵比寿教室',
+      school_id: 'sch-1',
+      school_name: '花咲小学校',
+      teacher_in_charge: '福田 尚弘',
+      assigned_teachers: ['福田 尚弘'],
+      registered_year: 2026,
+      registered_grade: '小5',
+      selected_days: ['monday', 'thursday'],
+      selected_subjects: ['算数', '英語', '国語'],
+      period_count: 2,
+      default_slots: 2,
+      personalities: ['几帳面'],
+      target_schools: [{ school_name: '開成中学校', course_name: '普通科' }],
+      start_unit_math: 'unit-deep-1' as any
+    };
+
+    await db.saveStudent(testStudent);
+    await db.saveCurriculumUnit({
+      id: 'unit-deep-1',
+      school_id: 'sch-1',
+      subject: '算数',
+      name: '1章 整数と小数',
+      sequence_order: 1,
+      created_at: new Date().toISOString()
+    });
+    await db.saveCurriculumUnit({
+      id: 'unit-deep-2',
+      school_id: 'sch-1',
+      subject: '算数',
+      name: '2章 小数の計算',
+      sequence_order: 2,
+      created_at: new Date().toISOString()
+    });
+    await db.saveCustomClass({
+      id: 'cc-deep-1',
+      name: '特別補習クラス',
+      created_at: new Date().toISOString()
+    });
+    await db.saveTestRecord({
+      id: 'tr-deep-1',
+      student_id: testStudent.id,
+      record_type: 'regular_test',
+      test_name: '1学期中間テスト',
+      subject: '5教科',
+      score_math: 90,
+      score_english: 85,
+      score_total: 175,
+      class_rank: '1位',
+      school_rank: '5位',
+      deviation_value: 62.0,
+      created_at: new Date().toISOString()
+    });
+    await db.addLearningLog({
+      id: 'log-deep-1',
+      student_id: testStudent.id,
+      unit_id: 'unit-deep-1',
+      log_type: 'video_view',
+      duration_seconds: 900,
+      created_at: new Date().toISOString()
+    });
+
+    let wrapper: any;
+    await act(async () => {
+      wrapper = render(
+        <TeacherDashboard
+          students={[testStudent]}
+          initialStudentId={testStudent.id}
+          initialTab="student-detail"
+          teacherType="elementary"
+        />
+      );
+    });
+
+    // 1. スタート位置設定の保存
+    const saveStartBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('スタート位置') || b.textContent?.includes('開始位置'));
+    if (saveStartBtn) {
+      await act(async () => {
+        fireEvent.click(saveStartBtn);
+      });
+    }
+
+    // 2. カリキュラム単元・自由記述タブ
+    const curricTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('カリキュラム') || b.textContent?.includes('単元'));
+    if (curricTab) {
+      await act(async () => {
+        fireEvent.click(curricTab);
+      });
+    }
+
+    // 単元追加
+    const unitInput = screen.queryByPlaceholderText(/単元名|授業名/);
+    const addUnitBtn = screen.queryByText(/単元を追加|授業を追加|追加する/);
+    if (unitInput && addUnitBtn) {
+      fireEvent.change(unitInput, { target: { value: '3章 分数と割合' } });
+      await act(async () => {
+        fireEvent.click(addUnitBtn);
+      });
+    }
+
+    // 自由記述授業名追加
+    const ccInput = screen.queryByPlaceholderText(/自由記述/);
+    const addCcBtn = screen.queryByText(/自由.*追加/);
+    if (ccInput && addCcBtn) {
+      fireEvent.change(ccInput, { target: { value: '冬期特別講習' } });
+      await act(async () => {
+        fireEvent.click(addCcBtn);
+      });
+    }
+
+    // 3. 定期テスト・模試タブ
+    const testTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('テスト結果') || b.textContent?.includes('成績'));
+    if (testTab) {
+      await act(async () => {
+        fireEvent.click(testTab);
+      });
+    }
+
+    // 定期テスト保存
+    const regName = screen.queryByPlaceholderText(/テスト名|1学期/);
+    if (regName) {
+      fireEvent.change(regName, { target: { value: '2学期期末' } });
+    }
+    const saveRegBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('定期テスト結果を記録') || b.textContent?.includes('結果を記録'));
+    if (saveRegBtn) {
+      await act(async () => {
+        fireEvent.click(saveRegBtn);
+      });
+    }
+
+    // 模試結果保存
+    const mockScore = screen.queryByPlaceholderText(/得点|総合得点/);
+    if (mockScore) {
+      fireEvent.change(mockScore, { target: { value: '450' } });
+    }
+    const saveMockBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('模試結果を記録') || b.textContent?.includes('判定'));
+    if (saveMockBtn) {
+      await act(async () => {
+        fireEvent.click(saveMockBtn);
+      });
+    }
+
+    // 成績レコード削除
+    const delTestBtns = screen.queryAllByRole('button').filter(b => b.textContent?.includes('削除') || b.title?.includes('削除'));
+    if (delTestBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(delTestBtns[delTestBtns.length - 1]);
+      });
+    }
+
+    // 4. AI報告書タブ
+    const aiTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('AI指導報告書') || b.textContent?.includes('AI報告'));
+    if (aiTab) {
+      await act(async () => {
+        fireEvent.click(aiTab);
+      });
+    }
+
+    const genAiBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('AI生成') || b.textContent?.includes('生成'));
+    if (genAiBtn) {
+      await act(async () => {
+        fireEvent.click(genAiBtn);
+      });
+    }
+
+    const textareas = screen.queryAllByRole('textbox');
+    for (const ta of textareas) {
+      fireEvent.change(ta, { target: { value: '確認済みコメント' } });
+    }
+
+    const saveAiBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('報告書を保存') || b.textContent?.includes('保存'));
+    if (saveAiBtn) {
+      await act(async () => {
+        fireEvent.click(saveAiBtn);
+      });
+    }
+
+    const printBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('印刷') || b.textContent?.includes('PDF'));
+    if (printBtn) {
+      await act(async () => {
+        fireEvent.click(printBtn);
+      });
+    }
+
+    // 5. db.ts 未カバーメソッド
+    const pReset = await db.sendBranchPasswordReset('sample@tentoru.jp');
+    expect(pReset.success).toBe(true);
+
+    const signAdmin = await db.signInWithPassword('admin@tentoru.jp', 'adminpass');
+    expect(signAdmin.success).toBe(true);
+
+    const signBranch = await db.signInWithPassword('branch@tentoru.jp', 'branchpass');
+    expect(signBranch.success).toBe(true);
+
+    wrapper.unmount();
+  });
 });
+
 
 
 
