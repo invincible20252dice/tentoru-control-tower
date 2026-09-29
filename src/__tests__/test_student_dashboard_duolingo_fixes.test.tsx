@@ -143,12 +143,18 @@ describe('Student Dashboard & Sugoroku Map UI Fixes Verification', () => {
     fireEvent.click(node1);
     expect(screen.getByText(/STEP 1/)).toBeInTheDocument();
 
-    // 5. Check RPG trail line connectors exist between nodes
+    // 5. Check RPG trail line connectors exist between nodes with pathRow wrapper
     const trailLines = container.querySelectorAll('[class*="trailLine"]');
     expect(trailLines.length).toBeGreaterThan(0);
+    const pathRows = container.querySelectorAll('[class*="pathRow"]');
+    expect(pathRows.length).toBeGreaterThan(0);
 
     // 6. Check RPG legend items
     expect(screen.getByText(/👑 クリア済み（メダル）/)).toBeInTheDocument();
     expect(screen.getByText(/🌟 現在地・挑戦中（スター）/)).toBeInTheDocument();
+
+    // 7. Check 3D stone node classes
+    const activeCircle = container.querySelector('[class*="circleActive"]');
+    expect(activeCircle).toBeInTheDocument();
   });
 });

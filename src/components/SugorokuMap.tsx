@@ -262,6 +262,27 @@ export default function SugorokuMap({
     }
   };
 
+  // 前のノードと現在のノードを繋ぐ「太い道（Path）」の配置と傾き（チルト）
+  const getPathOffsetAndTiltClass = (index: number) => {
+    const pattern = index % 8;
+    switch (pattern) {
+      case 1:
+      case 2:
+        return `${styles.offsetLeftHalf} ${styles.pathTiltLeft}`;
+      case 3:
+      case 4:
+        return `${styles.offsetLeftHalf} ${styles.pathTiltRight}`;
+      case 5:
+      case 6:
+        return `${styles.offsetRightHalf} ${styles.pathTiltRight}`;
+      case 7:
+      case 0:
+        return `${styles.offsetRightHalf} ${styles.pathTiltLeft}`;
+      default:
+        return styles.offsetCenter;
+    }
+  };
+
   const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
 
   return (
@@ -429,11 +450,12 @@ export default function SugorokuMap({
             }
 
             const offsetClass = getZigzagOffsetClass(index);
+            const pathOffsetClass = getPathOffsetAndTiltClass(index);
 
             return (
               <React.Fragment key={node.id}>
                 {index > 0 && (
-                  <div className={`${styles.pathRow} ${offsetClass}`} aria-hidden="true">
+                  <div className={`${styles.pathRow} ${pathOffsetClass}`} aria-hidden="true">
                     <div className={styles.trailLine} />
                   </div>
                 )}
