@@ -114,6 +114,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   });
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
+  const [activeMobileTab, setActiveMobileTab] = useState<'mission' | 'map'>('mission');
 
   const loadData = async () => {
     const latestStudent = getLatestStudent();
@@ -1011,27 +1012,35 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         </div>
       )}
 
+      {/* Duolingo Inspired Header */}
       <div className={styles.header}>
         <div className={styles.studentInfo}>
-          <h1>
-            {/* Student Icon */}
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-            {currentStudent.name} さんの学習画面
-          </h1>
-          <div className={styles.studentMeta}>
-            <span>学年: <strong className={styles.badge}>{currentStudent.grade}</strong></span>
-            <span>ログインID: <code>{currentStudent.student_id}</code></span>
-            <span>アカウント状況: {getStatusBadge(currentStudent.status)}</span>
+          <div className={styles.studentAvatar}>
+            🎓
+          </div>
+          <div className={styles.studentNameGroup}>
+            <h1>
+              {currentStudent.name} さんの学習画面
+            </h1>
+            <div className={styles.studentMeta}>
+              <span className={styles.gradeBadge}>{currentStudent.grade}</span>
+              <span className={styles.streakBadge}>🔥 3日連続学習中！</span>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                学年: <strong className={styles.badge}>{currentStudent.grade}</strong>
+              </span>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                ログインID: <code>{currentStudent.student_id}</code>
+              </span>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                アカウント状況: {getStatusBadge(currentStudent.status)}
+              </span>
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className={styles.headerActions}>
           <button 
             onClick={() => setShowScheduleConfig(!showScheduleConfig)} 
-            className={styles.backBtn}
-            style={{ background: '#4f46e5', color: '#fff' }}
+            className={styles.subtleBtn}
           >
             ⚙️ 通塾設定
           </button>
@@ -1043,13 +1052,95 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         </div>
       </div>
 
+      {/* Mobile Segment Control (iPad/スマホ対応) */}
+      <div className={styles.mobileSegmentControl}>
+        <button
+          type="button"
+          className={`${styles.mobileSegmentBtn} ${activeMobileTab === 'mission' ? styles.mobileSegmentBtnActive : ''}`}
+          onClick={() => setActiveMobileTab('mission')}
+        >
+          🎯 今日のミッション
+        </button>
+        <button
+          type="button"
+          className={`${styles.mobileSegmentBtn} ${activeMobileTab === 'map' ? styles.mobileSegmentBtnActive : ''}`}
+          onClick={() => setActiveMobileTab('map')}
+        >
+          🗺️ 冒険マップ
+        </button>
+      </div>
+
       <div className={styles.grid}>
-        {/* Left Side: Todays Timetable */}
-        <div className={styles.todoCard}>
+        {/* Left Side: Todays Timetable & Missions */}
+        <div 
+          className={styles.todoCard}
+          style={{ display: activeMobileTab === 'map' ? undefined : 'block' }}
+        >
+          {/* Duolingo-style Mission Progress Bar */}
+          {(() => {
+            // Calculate today's total missions and completed missions
+            let totalMissions = 0;
+            let completedMissions = 0;
+
+            // Mini Tests
+            miniTestResults.forEach(t => {
+              totalMissions += 1;
+              if (t.score !== null && t.score !== undefined) {
+                const passScore = (student.level === 'A' ? 90 : student.level === 'B' ? 80 : 70);
+                if (t.score >= passScore) completedMissions += 1;
+              }
+            });
+
+            // Timetable Step Lessons
+            todayTasks.forEach(task => {
+              const stepLessons = getTaskStepLessons(task);
+              const completedStepIds = new Set<string>();
+              (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+              (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+              if (task.status === 'completed' || task.test_passed) {
+                stepLessons.forEach(s => completedStepIds.add(String(s.id)));
+              }
+              stepLessons.forEach(s => {
+                totalMissions += 1;
+                if (completedStepIds.has(String(s.id))) completedMissions += 1;
+              });
+            });
+
+            // Homeworks
+            homeworkResults.forEach(hw => {
+              totalMissions += 1;
+              if (hw.status === 'completed') completedMissions += 1;
+            });
+
+            const remaining = Math.max(0, totalMissions - completedMissions);
+            const percent = totalMissions > 0 ? Math.round((completedMissions / totalMissions) * 100) : 100;
+
+            return (
+              <div className={styles.dailyProgressCard} data-testid="student-daily-progress-card">
+                <div className={styles.dailyProgressHeader}>
+                  <span>
+                    {remaining === 0 && totalMissions > 0 ? (
+                      '🎉 今日のミッション全達成！すばらしい！'
+                    ) : (
+                      `🎯 今日のミッション完了まで あと${remaining}つ！`
+                    )}
+                  </span>
+                  <span>{completedMissions} / {totalMissions} 完了 ({percent}%)</span>
+                </div>
+                <div className={styles.progressBarTrack}>
+                  <div 
+                    className={styles.progressBarFill} 
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
             <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
               {/* Clock Icon */}
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 16 14" />
               </svg>
@@ -1067,10 +1158,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   }
                 }}
                 style={{
-                  padding: '4px 8px',
-                  fontSize: '0.8rem',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
+                  padding: '6px 10px',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1',
                   backgroundColor: '#ffffff',
                   color: '#1e293b',
                   cursor: 'pointer'
@@ -1083,16 +1175,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     setCurrentDateStr(systemTodayStr);
                     setHasAutoSelectedDate(true);
                   }}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    borderRadius: '6px',
-                    border: '1px solid #cbd5e1',
-                    backgroundColor: '#f1f5f9',
-                    color: '#475569',
-                    cursor: 'pointer'
-                  }}
+                  className={styles.subtleBtn}
+                  style={{ padding: '6px 10px', fontSize: '0.78rem' }}
                 >
                   📅 今日に戻る
                 </button>
@@ -1102,8 +1186,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
           {/* 直近の通塾予定日を表示している場合の案内バナー */}
           {currentDateStr !== systemTodayStr && todayTasks.length > 0 && (
-            <div style={{ marginBottom: '12px', padding: '8px 12px', background: '#eff6ff', borderRadius: '6px', border: '1px solid #bfdbfe', fontSize: '0.8rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>💡</span>
+            <div style={{ marginBottom: '12px', padding: '10px 14px', background: '#eff6ff', borderRadius: '12px', border: '1.5px solid #bfdbfe', fontSize: '0.82rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+              <span style={{ fontSize: '1.1rem' }}>💡</span>
               <span>本日はコマ割りがありません。直近の通塾予定日（<strong>{currentDateStr}</strong>）の時間割・タスクを表示しています。</span>
             </div>
           )}
@@ -1120,33 +1204,34 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   margin: '12px 0', 
                   padding: '14px 16px', 
                   background: '#fffbeb', 
-                  borderRadius: '8px', 
-                  border: '1px solid #fef3c7', 
-                  borderLeft: '4px solid #f59e0b', 
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)' 
+                  borderRadius: '14px', 
+                  border: '1.5px solid #fde68a', 
+                  borderLeft: '5px solid #f59e0b', 
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.03)' 
                 }} 
                 data-testid="office-note-card"
               >
-                <h3 style={{ margin: '0 0 6px 0', fontSize: '0.9rem', color: '#92400e', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <h3 style={{ margin: '0 0 6px 0', fontSize: '0.9rem', color: '#92400e', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px' }}>
                   📢 講師からの業務連絡
                 </h3>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#78350f', whiteSpace: 'pre-wrap', fontWeight: 600 }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#78350f', whiteSpace: 'pre-wrap', fontWeight: 600, lineHeight: 1.5 }}>
                   {officeNote}
                 </p>
               </div>
             );
           })()}
 
-          {/* 🎯 本日のテストカード */}
+          {/* 🎯 本日のテスト（ボス戦 / チャレンジカード） */}
           {miniTestResults.length > 0 && (
             <div 
-              style={{ margin: '12px 0', padding: '16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fee2e2' }}
+              className={styles.bossTestCard}
               data-testid="today-test-card"
             >
-              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                🎯 本日のテスト
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className={styles.bossTestHeader}>
+                <span style={{ fontSize: '1.2rem' }}>⚔️</span>
+                <span>🎯 本日のテスト（ボス戦チャレンジ）</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {miniTestResults.map(test => {
                   const stLevel = student.level || 'A';
                   const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
@@ -1155,34 +1240,38 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   if (currentScore !== null && currentScore !== undefined) {
                     const isPassed = currentScore >= passScore;
                     statusBadge = isPassed ? (
-                      <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', marginLeft: '8px' }}>合格 ✨</span>
+                      <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '6px 12px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, border: '1.5px solid #86efac' }}>
+                        合格 ✨
+                      </span>
                     ) : (
-                      <span style={{ backgroundColor: '#fef2f2', color: '#991b1b', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', marginLeft: '8px' }}>不合格 (再挑戦) ⚠️</span>
+                      <span style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '6px 12px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, border: '1.5px solid #fca5a5' }}>
+                        不合格 (再挑戦) ⚠️
+                      </span>
                     );
                   }
                   const testSub = test.subject || (student.grade?.startsWith('中') ? '数学' : '算数');
                   const isUnitTest = test.test_type === 'unit_test' || test.test_content.includes('単元') || test.test_content.includes('確認');
 
                   return (
-                    <div key={test.id} style={{ borderBottom: '1px dashed #fee2e2', paddingBottom: '12px' }} data-testid={`test-item-${test.id}`}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#3730a3' }}>
+                    <div key={test.id} className={styles.bossTestItem} data-testid={`test-item-${test.id}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, padding: '3px 10px', borderRadius: '8px', backgroundColor: '#e0e7ff', color: '#3730a3' }}>
                           {testSub}
                         </span>
                         {isUnitTest && (
-                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 800, padding: '3px 10px', borderRadius: '8px', backgroundColor: '#f3e8ff', color: '#6b21a8', border: '1.5px solid #d8b4fe' }}>
                             📝 単元テスト
                           </span>
                         )}
-                        <span style={{ fontSize: '0.85rem', color: '#1f2937', fontWeight: 700 }}>
+                        <span style={{ fontSize: '0.92rem', color: '#0f172a', fontWeight: 800 }}>
                           {test.test_content}
                         </span>
-                        <span style={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 'normal' }}>
+                        <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 700 }}>
                           ({test.passing_line ? `目標: ${test.passing_line}` : `レベル${stLevel}目標: ${passScore}点`})
                         </span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151' }}>テスト結果点数: </label>
+                      <div className={styles.testScoreInputGroup}>
+                        <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>点数を入力: </label>
                         <input
                           type="number"
                           min="0"
@@ -1190,15 +1279,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                           value={studentScores[test.id]}
                           onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
                           placeholder="点数を入力"
-                          className={styles.input}
-                          style={{ width: '90px', padding: '4px 8px', fontSize: '0.8rem', display: 'inline-block' }}
+                          className={styles.scoreInput}
                           data-testid={`test-score-input-${test.id}`}
                         />
                         <button
                           type="button"
                           onClick={() => handleSaveStudentScore(test.id, studentScores[test.id])}
-                          className={styles.btn}
-                          style={{ width: 'auto', padding: '4px 12px', fontSize: '0.8rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                          className={styles.btn3dRed}
                           data-testid={`test-save-btn-${test.id}`}
                         >
                           結果を保存
@@ -1212,21 +1299,22 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             </div>
           )}
 
-          {/* 📝 宿題カード */}
+          {/* 📝 今日の宿題カード */}
           {homeworkResults.length > 0 && (
             <div 
-              style={{ margin: '12px 0', padding: '16px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #dcfce7' }}
+              className={styles.homeworkCard}
               data-testid="today-homework-card"
             >
-              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: '#166534', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                📝 今日の宿題
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className={styles.homeworkHeader}>
+                <span style={{ fontSize: '1.1rem' }}>📝</span>
+                <span>今日の宿題ミッション</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {homeworkResults.map(hw => (
-                  <div key={hw.id} style={{ borderBottom: '1px dashed #dcfce7', paddingBottom: '12px' }} data-testid={`homework-item-${hw.id}`}>
-                    <p style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#374151', whiteSpace: 'pre-wrap', fontWeight: 600, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  <div key={hw.id} className={styles.homeworkItem} data-testid={`homework-item-${hw.id}`}>
+                    <p style={{ margin: '0 0 6px 0', fontSize: '0.88rem', color: '#1e293b', whiteSpace: 'pre-wrap', fontWeight: 700, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                       {hw.subject && (
-                        <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#dcfce7', color: '#166534', fontWeight: 700 }}>
+                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', backgroundColor: '#dcfce7', color: '#166534', fontWeight: 800 }}>
                           {hw.subject}
                         </span>
                       )}
@@ -1234,7 +1322,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     </p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       {hw.homework_deadline && (
-                        <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
+                        <div style={{ fontSize: '0.78rem', color: '#15803d', fontWeight: 700 }}>
                           提出期限: {hw.homework_deadline}
                         </div>
                       )}
@@ -1287,12 +1375,21 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
                 const completedCount = stepLessons.filter(s => completedStepIds.has(String(s.id))).length;
 
+                // 教科バッジスタイル
+                let subjectBadgeClass = styles.subjectBadgeMath;
+                if (subjectName.includes('英語')) subjectBadgeClass = styles.subjectBadgeEnglish;
+                else if (subjectName.includes('国語')) subjectBadgeClass = styles.subjectBadgeJapanese;
+                else if (subjectName.includes('理科')) subjectBadgeClass = styles.subjectBadgeScience;
+                else if (subjectName.includes('社会')) subjectBadgeClass = styles.subjectBadgeSocial;
+
                 return (
                   <div key={task.id} className={styles.periodRow} data-testid={`period-row-${task.period}`}>
                     <div className={styles.periodNumber}>{task.period}</div>
                     <div className={styles.periodContent}>
                       <div className={styles.periodHeader}>
-                        <span className={styles.subjectName}>{subjectName}</span>
+                        <span className={styles.subjectName}>
+                          <span className={subjectBadgeClass}>{subjectName}</span>
+                        </span>
                         <div>
                           {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`} data-testid={`task-completed-badge-${task.period}`}>合格完了！</span>}
                           {task.status === 'failed' && <span className={`${styles.badge} ${styles.statusWarning}`}>不合格 (再挑戦)</span>}
@@ -1303,7 +1400,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                       {/* Step-by-Step Lesson Progress Cards */}
                       {stepLessons.length > 0 && (
                         <div className={styles.stepCardContainer}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span>進捗ステップ</span>
                             <span data-testid={`step-progress-count-${task.period}`}>{completedCount} / {stepLessons.length} 完了</span>
                           </div>
@@ -1316,7 +1413,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                 data-testid={`step-card-${task.period}-${sIdx}`}
                               >
                                 <div className={styles.stepTitle}>
-                                  <span style={{ color: '#4f46e5', fontWeight: 700 }}>STEP {sIdx + 1}:</span>
+                                  <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>STEP {sIdx + 1}:</span>
                                   <span>{step.name || step.fullTitle}</span>
                                 </div>
                                 <div>
@@ -1347,7 +1444,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
                       {/* Period-specific office note */}
                       {task.office_note && (
-                        <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                        <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', padding: '4px 10px', borderRadius: '6px', display: 'inline-block', fontWeight: 600 }}>
                           📝 連絡: {task.office_note}
                         </div>
                       )}
@@ -1428,18 +1525,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                 );
               })}
               {todayTasks.length > 0 && todayTasks.every(t => t.status === 'completed') && (
-                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #10b981', textAlign: 'center' }}>
-                  <h4 style={{ margin: '0 0 8px 0', color: '#065f46', fontSize: '1rem', fontWeight: 800 }}>
+                <div style={{ marginTop: '16px', padding: '18px', background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', borderRadius: '16px', border: '2px solid #34d399', textAlign: 'center' }}>
+                  <h4 style={{ margin: '0 0 8px 0', color: '#065f46', fontSize: '1.05rem', fontWeight: 800 }}>
                     🎉 本日の学習予定をすべて完了しました！お疲れ様でした！
                   </h4>
-                  <p style={{ margin: '0 0 12px 0', color: '#047857', fontSize: '0.8rem' }}>
+                  <p style={{ margin: '0 0 14px 0', color: '#047857', fontSize: '0.85rem', fontWeight: 600 }}>
                     時間に余力がある場合は、次の単元を先取りしてさらにステップアップしましょう！
                   </p>
                   <button
                     type="button"
                     onClick={handleStartAdvanceLearning}
-                    className={styles.btn}
-                    style={{ width: 'auto', padding: '8px 20px', background: '#10b981', color: '#fff', fontSize: '0.85rem', fontWeight: 700, borderRadius: '6px', border: 'none', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
+                    className={`${styles.btn} ${styles.btnSuccess}`}
+                    style={{ width: 'auto', padding: '10px 24px', fontSize: '0.9rem', margin: '0 auto' }}
                     data-testid="advance-learning-btn"
                   >
                     🚀 次の単元を先取り学習する（新単元 STEP 1〜）
@@ -1448,7 +1545,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
               )}
               {/* コマの最後に1つだけ今日の業務連絡を表示 */}
               {todayTasks.some(t => t.office_note) && (
-                <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '6px', borderLeft: '4px solid #d97706', fontSize: '0.85rem', color: '#78350f' }}>
+                <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '10px', borderLeft: '4px solid #d97706', fontSize: '0.85rem', color: '#78350f', fontWeight: 600 }}>
                   <strong>💡 今日の業務連絡:</strong> {todayTasks.find(t => t.office_note)?.office_note}
                 </div>
               )}
@@ -1457,7 +1554,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         </div>
 
         {/* Right Side: Sugoroku Maps */}
-        <div>
+        <div style={{ display: activeMobileTab === 'mission' ? undefined : 'block' }}>
           <SugorokuMap
             student={currentStudent}
             subjects={currentStudent.selected_subjects && currentStudent.selected_subjects.length > 0 

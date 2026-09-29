@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styles from './SugorokuMap.module.css';
 import { db, CurriculumUnit, LearningTask, CurriculumMaster, Student } from '../lib/db';
 
@@ -36,6 +36,10 @@ export default function SugorokuMap({
 
   const [activeSubject, setActiveSubject] = useState<string>(() => subject || availableSubjects[0] || '数学');
   const [mastersList, setMastersList] = useState<CurriculumMaster[]>(() => db.getCurriculumMasters(subject || availableSubjects[0]));
+  const [selectedNodeDetails, setSelectedNodeDetails] = useState<{ id: string; name: string; fullTitle: string; index: number } | null>(null);
+
+  const mapWrapperRef = useRef<HTMLDivElement>(null);
+  const activeNodeElementRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (subject && subject !== activeSubject) {
@@ -213,6 +217,40 @@ export default function SugorokuMap({
     playerSubStep = 'test';
   }
 
+  // 現在地（activeNode）への自動スクロール
+  useEffect(() => {
+    if (activeNodeElementRef.current && mapWrapperRef.current) {
+      try {
+        activeNodeElementRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      } catch {
+        // Fallback for jsdom / legacy environments
+        const top = activeNodeElementRef.current.offsetTop;
+        if (top > 100) {
+          mapWrapperRef.current.scrollTop = top - 150;
+        }
+      }
+    }
+  }, [activeSubject, playerNodeId]);
+
+  // S字ジグザグのオフセットクラスを決定（Duolingo風パス）
+  const getZigzagOffsetClass = (index: number) => {
+    const pattern = index % 8;
+    switch (pattern) {
+      case 0: return styles.offsetCenter;
+      case 1: return styles.offsetLeft;
+      case 2: return styles.offsetFarLeft;
+      case 3: return styles.offsetLeft;
+      case 4: return styles.offsetCenter;
+      case 5: return styles.offsetRight;
+      case 6: return styles.offsetFarRight;
+      case 7: return styles.offsetRight;
+      default: return styles.offsetCenter;
+    }
+  };
+
   const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
 
   return (
@@ -227,7 +265,7 @@ export default function SugorokuMap({
           </svg>
           {activeSubject}の学習マップ
         </h3>
-        <span className={styles.badge}>すごろく進捗</span>
+        <span className={styles.badge}>冒険マップ</span>
       </div>
 
       {/* Subject Tabs */}
@@ -242,6 +280,7 @@ export default function SugorokuMap({
                 className={`${styles.subjectTab} ${isActive ? styles.subjectTabActive : ''}`}
                 onClick={() => {
                   setActiveSubject(sub);
+                  setSelectedNodeDetails(null);
                   if (onSelectSubject) onSelectSubject(sub);
                 }}
               >
@@ -258,16 +297,52 @@ export default function SugorokuMap({
         </div>
       )}
 
-      <div className={styles.mapWrapper}>
-        {/* SVG track path background (decorative) */}
-        <svg className={styles.svgTrack}>
-          <path 
-            d="M 50 80 Q 200 20 400 80 T 750 80" 
-            className={styles.trackPath}
-          />
-        </svg>
+      {/* Selected Node Details Popup / Banner */}
+      {selectedNodeDetails && (
+        <div style={{
+          marginBottom: '14px',
+          padding: '12px 16px',
+          background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+          border: '1.5px solid #93c5fd',
+          borderRadius: '12px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          boxShadow: '0 2px 8px rgba(37, 99, 235, 0.1)'
+        }}>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#1e40af' }}>
+              STEP {selectedNodeDetails.index + 1}
+            </div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#1e3a8a' }}>
+              {selectedNodeDetails.fullTitle || selectedNodeDetails.name}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedNodeDetails(null)}
+            style={{
+              border: 'none',
+              background: '#bfdbfe',
+              color: '#1e40af',
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              fontSize: '0.8rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
-        <div className={styles.nodesContainer}>
+      <div className={styles.mapWrapper} ref={mapWrapperRef}>
+        <div className={styles.zigzagContainer}>
           {nodes.map((node, index) => {
             const task = taskMap.get(node.id) || tasks.find(t => 
               (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
@@ -294,76 +369,104 @@ export default function SugorokuMap({
 
             // Check if this node is in today's task range
             const isTodayTask = todayNodeIds.has(node.id);
+            const isCurrentNode = playerNodeId === node.id || isTodayTask;
 
-            // 各ステップ（ビデオ、テスト）の表示ステータス
-            let videoClass = styles.stepCircle;
-            let testClass = styles.stepCircle;
+            // Node Circle Class
+            let circleClass = `${styles.mainCircle} ${styles.circleLocked}`;
+            let mainIcon = '🔒';
+
+            if (isSkipped) {
+              circleClass = `${styles.mainCircle} ${styles.circleSkipped}`;
+              mainIcon = '⏭️';
+            } else if (isCompleted) {
+              circleClass = `${styles.mainCircle} ${styles.circleCompleted}`;
+              mainIcon = '👑';
+            } else if (isCurrentNode) {
+              circleClass = `${styles.mainCircle} ${styles.circleActive}`;
+              mainIcon = '⭐';
+            }
+
+            // 各ステップ（ビデオ、テスト）の表示ステータス & クラス名設定（テスト互換完全対応）
+            let videoClass = styles.stepPill;
+            let testClass = styles.stepPill;
 
             if (isSkipped) {
               videoClass += ` ${styles.stepSkipped}`;
               testClass += ` ${styles.stepSkipped}`;
             } else if (isCompleted) {
-              videoClass += ` ${styles.stepCompleted}`;
-              testClass += ` ${styles.stepCompleted}`;
+              videoClass += ` ${styles.stepCompleted} ${styles.stepPillDone}`;
+              testClass += ` ${styles.stepCompleted} ${styles.stepPillDone}`;
             } else if (isTodayTask) {
-              videoClass += ` ${styles.stepToday}`;
-              testClass += ` ${styles.stepToday}`;
+              videoClass += ` ${styles.stepToday} ${styles.stepPillActive}`;
+              testClass += ` ${styles.stepToday} ${styles.stepPillActive}`;
             } else {
               if (isVideoWatched) {
-                videoClass += ` ${styles.stepCompleted}`;
+                videoClass += ` ${styles.stepCompleted} ${styles.stepPillDone}`;
               } else if (playerNodeId === node.id && playerSubStep === 'video') {
-                videoClass += ` ${styles.stepWatchedOnly}`; // 進行中の動画アニメーション
+                videoClass += ` ${styles.stepWatchedOnly} ${styles.stepPillActive}`;
               } else {
                 videoClass += ` ${styles.stepUnstarted}`;
               }
 
               if (isTestPassed) {
-                testClass += ` ${styles.stepCompleted}`;
+                testClass += ` ${styles.stepCompleted} ${styles.stepPillDone}`;
               } else if (playerNodeId === node.id && playerSubStep === 'test') {
-                testClass += ` ${styles.stepWatchedOnly}`;
+                testClass += ` ${styles.stepWatchedOnly} ${styles.stepPillActive}`;
               } else {
                 testClass += ` ${styles.stepUnstarted}`;
               }
             }
 
-            const isCurrentNode = playerNodeId === node.id || isTodayTask;
+            const offsetClass = getZigzagOffsetClass(index);
 
             return (
               <div 
                 key={node.id} 
-                className={`${styles.nodeCard} ${isCurrentNode ? styles.activeNode : ''}`}
-                data-testid={`sugoroku-node-${node.id}`}
+                className={`${styles.nodeRow} ${offsetClass}`}
+                ref={isCurrentNode ? activeNodeElementRef : undefined}
               >
-                <div className={styles.nodeSteps}>
-                  {/* Video Node */}
-                  <div 
-                    className={videoClass} 
-                    title={`${node.fullTitle} - 動画視聴`}
-                    data-testid={`sugoroku-video-${node.id}`}
-                  >
-                    影
-                    <span className={styles.stepLabel}>動画</span>
-                    {isCurrentNode && playerSubStep === 'video' && !isCompleted && (
-                      <div className={styles.activePlayer} />
-                    )}
+                <div 
+                  className={`${styles.nodeCard} ${isCurrentNode ? styles.activeNode : ''}`}
+                  data-testid={`sugoroku-node-${node.id}`}
+                  onClick={() => setSelectedNodeDetails({ id: node.id, name: node.name, fullTitle: node.fullTitle, index })}
+                >
+                  {/* Current Position Tooltip */}
+                  {isCurrentNode && !isCompleted && (
+                    <div className={styles.speechBubble}>
+                      ここからスタート！
+                    </div>
+                  )}
+
+                  {/* Main 3D Node Button */}
+                  <div className={circleClass} title={node.fullTitle}>
+                    {mainIcon}
                   </div>
 
-                  {/* Test Node */}
-                  <div 
-                    className={testClass} 
-                    title={`${node.fullTitle} - テスト合格`}
-                    data-testid={`sugoroku-test-${node.id}`}
-                  >
-                    試
-                    <span className={styles.stepLabel}>テスト</span>
-                    {isCurrentNode && (playerSubStep === 'test' || isTodayTask) && !isCompleted && (
-                      <div className={styles.activePlayer} />
-                    )}
+                  {/* Sub-steps (Video & Test) for test compatibility and clear feedback */}
+                  <div className={styles.subStepsRow}>
+                    <span 
+                      className={videoClass}
+                      data-testid={`sugoroku-video-${node.id}`}
+                      title={`${node.fullTitle} - 動画`}
+                    >
+                      {isVideoWatched ? '✅' : '影'} 動画
+                    </span>
+                    <span 
+                      className={testClass}
+                      data-testid={`sugoroku-test-${node.id}`}
+                      title={`${node.fullTitle} - テスト`}
+                    >
+                      {isTestPassed ? '✅' : '試'} テスト
+                    </span>
                   </div>
-                </div>
 
-                <div className={styles.nodeName} title={node.fullTitle}>
-                  {index + 1}. {node.name}
+                  {/* Unit Label */}
+                  <div 
+                    className={`${styles.unitLabel} ${isCurrentNode ? styles.activeLabel : ''}`}
+                    title={node.fullTitle}
+                  >
+                    {index + 1}. {node.name}
+                  </div>
                 </div>
               </div>
             );
@@ -373,22 +476,23 @@ export default function SugorokuMap({
 
       <div className={styles.legend}>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }} />
-          <span>🟢 クリア（合格）</span>
+          <div className={styles.legendDot} style={{ background: '#22c55e' }} />
+          <span>👑 クリア済み</span>
         </div>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: 'linear-gradient(135deg, #f59e0b, #ea580c)' }} />
-          <span>🟠 本日の目標・挑戦中</span>
+          <div className={styles.legendDot} style={{ background: '#f59e0b' }} />
+          <span>⭐ 現在地・挑戦中</span>
         </div>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: '#f3f4f6', border: '2px solid #e5e7eb' }} />
-          <span>⚪️ 未着手</span>
+          <div className={styles.legendDot} style={{ background: '#cbd5e1' }} />
+          <span>🔒 未開放</span>
         </div>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: '#e0e7ff', border: '2px dashed #c7d2fe' }} />
+          <div className={styles.legendDot} style={{ background: '#c7d2fe' }} />
           <span>スキップ</span>
         </div>
       </div>
     </div>
   );
 }
+

@@ -1,16 +1,16 @@
 .container {
-  background: var(--card-bg, #ffffff);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  border: 2px solid #e2e8f0;
   margin-bottom: 24px;
-  overflow: hidden;
+  position: relative;
 }
 
 .darkTheme .container {
-  background: #1e1e24;
-  border-color: rgba(255, 255, 255, 0.08);
+  background: #1e293b;
+  border-color: #334155;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
@@ -19,66 +19,20 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
-  border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 2px solid #f1f5f9;
   padding-bottom: 12px;
   flex-wrap: wrap;
   gap: 8px;
 }
 
 .darkTheme .header {
-  border-color: rgba(255, 255, 255, 0.05);
-}
-
-.subjectTabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-
-.subjectTab {
-  padding: 6px 14px;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 0.82rem;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #475569;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.subjectTab:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-}
-
-.subjectTabActive {
-  background: linear-gradient(135deg, #4f46e5, #6366f1);
-  color: #ffffff;
-  border-color: #4f46e5;
-  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);
-}
-
-.darkTheme .subjectTab {
-  background: #1f2937;
-  border-color: #374151;
-  color: #9ca3af;
-}
-
-.darkTheme .subjectTabActive {
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: #ffffff;
-  border-color: #6366f1;
+  border-color: #334155;
 }
 
 .title {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: #1a1a1a;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -89,226 +43,344 @@
 }
 
 .badge {
-  background: linear-gradient(135deg, #4f46e5, #06b6d4);
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
   color: #ffffff;
   padding: 4px 12px;
   border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
 }
 
+/* Subject Tabs (Large touch-friendly pills) */
+.subjectTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  padding: 4px;
+  background: #f1f5f9;
+  border-radius: 14px;
+}
+
+.darkTheme .subjectTabs {
+  background: #0f172a;
+}
+
+.subjectTab {
+  flex: 1;
+  min-width: 72px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 0.88rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.subjectTab:hover {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.subjectTabActive {
+  background: #ffffff;
+  color: #2563eb;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+}
+
+.darkTheme .subjectTab {
+  color: #94a3b8;
+}
+
+.darkTheme .subjectTabActive {
+  background: #334155;
+  color: #60a5fa;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Duolingo Vertical Zigzag Skill Tree */
 .mapWrapper {
   position: relative;
-  min-height: 200px;
-  padding: 20px 10px;
+  max-height: 620px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 12px;
+  scroll-behavior: smooth;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+}
+
+.darkTheme .mapWrapper {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+.zigzagContainer {
   display: flex;
   flex-direction: column;
   align-items: center;
-}
-
-.svgTrack {
-  position: absolute;
-  top: 0;
-  left: 0;
+  gap: 20px;
   width: 100%;
-  height: 100%;
-  z-index: 1;
-  pointer-events: none;
-}
-
-.trackPath {
-  fill: none;
-  stroke: #e5e7eb;
-  stroke-width: 6;
-  stroke-dasharray: 8 4;
-  stroke-linecap: round;
-}
-
-.darkTheme .trackPath {
-  stroke: #374151;
-}
-
-.nodesContainer {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 40px 30px;
-  max-width: 800px;
+  max-width: 440px;
   margin: 0 auto;
+  position: relative;
+  padding-bottom: 30px;
 }
 
+.nodeRow {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  transition: transform 0.2s ease;
+}
+
+/* S-Curve Offset Classes for Duolingo Zigzag Path */
+.offsetCenter {
+  justify-content: center;
+}
+
+.offsetLeft {
+  justify-content: flex-start;
+  padding-left: 20%;
+}
+
+.offsetFarLeft {
+  justify-content: flex-start;
+  padding-left: 8%;
+}
+
+.offsetRight {
+  justify-content: flex-end;
+  padding-right: 20%;
+}
+
+.offsetFarRight {
+  justify-content: flex-end;
+  padding-right: 8%;
+}
+
+/* Main Duolingo 3D Node Button */
 .nodeCard {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 110px;
   position: relative;
+  cursor: pointer;
+  user-select: none;
 }
 
-.nodeSteps {
-  display: flex;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.stepCircle {
-  width: 32px;
-  height: 32px;
+.mainCircle {
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 3px solid #e5e7eb;
-  background: #f3f4f6;
-  color: #9ca3af;
+  font-size: 1.4rem;
+  font-weight: 800;
   position: relative;
+  transition: all 0.15s ease;
+  border: none;
+  cursor: pointer;
 }
 
-.darkTheme .stepCircle {
-  border-color: #374151;
-  background: #1f2937;
-  color: #4b5563;
-}
-
-/* Step states */
-.stepCompleted {
-  background: linear-gradient(135deg, #10b981, #059669);
-  border-color: #34d399;
+/* Node 3D States */
+/* 1. Completed: Emerald Green with 3D shadow */
+.circleCompleted {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
-  transform: scale(1.08);
+  box-shadow: 0 5px 0 #15803d, 0 8px 16px rgba(34, 197, 94, 0.35);
 }
 
-.stepWatchedOnly {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  border-color: #fbbf24;
-  color: #ffffff;
-  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);
-  animation: pulseWatch 2s infinite alternate;
+.circleCompleted:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #15803d, 0 10px 20px rgba(34, 197, 94, 0.4);
 }
 
-.stepToday {
+.circleCompleted:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #15803d;
+}
+
+/* 2. Active / Current / Today: Gold / Orange with Pulse */
+.circleActive {
   background: linear-gradient(135deg, #f59e0b, #ea580c);
-  border-color: #f97316;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.35);
-  animation: pulseWatch 1.8s infinite alternate;
+  box-shadow: 0 5px 0 #c2410c, 0 8px 20px rgba(234, 88, 12, 0.4);
+  animation: pulseActive 1.8s infinite;
 }
 
-.stepUnstarted {
-  background: #f3f4f6;
-  border-color: #e5e7eb;
-  color: #9ca3af;
+.circleActive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #c2410c, 0 10px 24px rgba(234, 88, 12, 0.5);
 }
 
-.darkTheme .stepUnstarted {
-  background: #1f2937;
-  border-color: #374151;
-  color: #6b7280;
+.circleActive:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #c2410c;
 }
 
-.stepSkipped {
+/* 3. Locked / Unstarted: Subtle Slate */
+.circleLocked {
+  background: #e2e8f0;
+  color: #94a3b8;
+  box-shadow: 0 4px 0 #cbd5e1;
+}
+
+.darkTheme .circleLocked {
+  background: #334155;
+  color: #64748b;
+  box-shadow: 0 4px 0 #1e293b;
+}
+
+.circleSkipped {
   background: #e0e7ff;
-  border-color: #c7d2fe;
   color: #6366f1;
-  border-style: dashed;
+  box-shadow: 0 4px 0 #c7d2fe;
 }
 
-.darkTheme .stepSkipped {
-  background: #1e1b4b;
-  border-color: #312e81;
-  color: #818cf8;
-}
-
-.nodeName {
+/* Speech Bubble / Start Tooltip */
+.speechBubble {
+  position: absolute;
+  top: -34px;
+  background: #ea580c;
+  color: #ffffff;
   font-size: 0.75rem;
-  font-weight: 600;
-  text-align: center;
-  color: #4b5563;
-  margin-top: 8px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 10px;
   white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  width: 100%;
+  box-shadow: 0 3px 8px rgba(234, 88, 12, 0.35);
+  animation: bounceBubble 1s infinite alternate;
+  pointer-events: none;
+  z-index: 10;
 }
 
-.darkTheme .nodeName {
-  color: #d1d5db;
-}
-
-.activeNode .nodeName {
-  color: #4f46e5;
-  font-weight: 700;
-}
-
-.darkTheme .activeNode .nodeName {
-  color: #818cf8;
-}
-
-.stepLabel {
+.speechBubble::after {
+  content: '';
   position: absolute;
-  bottom: -18px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  color: #9ca3af;
-  white-space: nowrap;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px 5px 0;
+  border-style: solid;
+  border-color: #ea580c transparent transparent transparent;
 }
 
-.darkTheme .stepLabel {
-  color: #6b7280;
-}
-
-.activePlayer {
-  position: absolute;
-  top: -12px;
-  right: -8px;
-  width: 16px;
-  height: 16px;
-  background: #ef4444;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 0 8px #ef4444;
-  animation: bounceMarker 0.8s infinite alternate;
-}
-
-@keyframes bounceMarker {
+@keyframes bounceBubble {
   0% { transform: translateY(0); }
   100% { transform: translateY(-4px); }
 }
 
-@keyframes pulseWatch {
-  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-  100% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+@keyframes pulseActive {
+  0% { box-shadow: 0 5px 0 #c2410c, 0 0 0 0 rgba(245, 158, 11, 0.6); }
+  70% { box-shadow: 0 5px 0 #c2410c, 0 0 0 12px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 5px 0 #c2410c, 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 
-.legend {
+/* Sub-step indicator pills (Video & Test compat) */
+.subStepsRow {
   display: flex;
-  justify-content: center;
-  gap: 16px;
-  margin-top: 24px;
-  font-size: 0.7rem;
-  color: #6b7280;
-}
-
-.darkTheme .legend {
-  color: #9ca3af;
-}
-
-.legendItem {
-  display: flex;
-  align-items: center;
   gap: 6px;
+  margin-top: 6px;
 }
 
-.legendDot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.1);
+.stepPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+  transition: all 0.2s ease;
 }
+
+.stepPillDone {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+
+.stepPillActive {
+  background: #ffedd5;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+/* Unit Name Label */
+.unitLabel {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #334155;
+  text-align: center;
+  max-width: 140px;
+  margin-top: 4px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.darkTheme .unitLabel {
+  color: #cbd5e1;
+}
+
+.activeLabel {
+  color: #2563eb;
+}
+
+.darkTheme .activeLabel {
+  color: #60a5fa;
+}
+
+/* Compatibility CSS Classes for existing tests & states */
+.stepCompleted {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+
+.stepToday {
+  background: #ffedd5;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+.stepWatchedOnly {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.stepUnstarted {
+  background: #f1f5f9;
+  color: #64748b;
+  border-color: #cbd5e1;
+}
+
+.stepSkipped {
+  background: #e0e7ff;
+  color: #6366f1;
+  border-color: #c7d2fe;
+}
+
+.activeNode {
+  /* Marker for active node */
+}
+
+
