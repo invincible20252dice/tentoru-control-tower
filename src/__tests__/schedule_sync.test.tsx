@@ -737,6 +737,12 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       />
     );
 
+    // 全学年表示ボタンをクリック（小1生徒のため初期状態は1年生フィルターになっている）
+    await waitFor(() => {
+      expect(timelineRender.getByTestId('elementary-timeline-grade-btn-全学年表示')).toBeInTheDocument();
+    });
+    fireEvent.click(timelineRender.getByTestId('elementary-timeline-grade-btn-全学年表示'));
+
     await waitFor(() => {
       // STEP 10 should show completed badge
       expect(timelineRender.getByTestId('timeline-item-cm-p3-m2')).toHaveTextContent('✓ 完了');

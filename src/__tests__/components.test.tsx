@@ -4290,6 +4290,12 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.queryByRole('columnheader', { name: '月' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: '週' })).not.toBeInTheDocument();
 
+    // 全学年表示ボタンをクリックして全学年のステップを表示
+    const allGradeBtn = screen.getByTestId('elementary-timeline-grade-btn-全学年表示');
+    await act(async () => {
+      fireEvent.click(allGradeBtn);
+    });
+
     // Verify milestone step cards are rendered with grade indicators across all elementary grades
     expect(screen.getByText('STEP 1')).toBeInTheDocument();
     expect(screen.getByText(/1から5までのかず/)).toBeInTheDocument();
@@ -4742,6 +4748,12 @@ describe('UI Components Render & Interaction Tests', () => {
 
     await waitFor(() => {
       expect(screen.getByText('⭐ スタートライン')).toBeInTheDocument();
+    });
+
+    // 全学年表示ボタンをクリックして前学年の完了ステップを表示
+    const allGradeBtn = screen.getByTestId('elementary-timeline-grade-btn-全学年表示');
+    await act(async () => {
+      fireEvent.click(allGradeBtn);
     });
 
     // Verify that the start unit step is displayed as 📍 現在地（取り組み中）

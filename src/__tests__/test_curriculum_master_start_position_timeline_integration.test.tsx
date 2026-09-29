@@ -101,6 +101,10 @@ describe('Curriculum Master, Subject Start Position, and Continuous Timeline Int
       expect(screen.getByTestId('elementary-timeline-container')).toBeInTheDocument();
     });
 
+    // 全学年表示に切り替え
+    const allGradeBtn = screen.getByTestId('elementary-timeline-grade-btn-全学年表示');
+    fireEvent.click(allGradeBtn);
+
     // タイムライン上に1年生・2年生のCSVマスタ項目が表示されていることを検証
     expect(screen.getAllByText(/かずと すうじ/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/たしざん/).length).toBeGreaterThan(0);

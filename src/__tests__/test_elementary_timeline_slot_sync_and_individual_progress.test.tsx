@@ -192,6 +192,7 @@ describe('Elementary Timeline Slot Synchronization and Individual Student Progre
       grade_category: 'elementary',
       school_name: '天登小学校',
       period_count: 2,
+      level: 'C',
       day_of_week: ['tue'],
       selected_subjects: ['国語'],
       completed_lesson_ids: [],

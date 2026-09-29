@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import TeacherDashboard from '../components/TeacherDashboard';
 import { db, Student, CurriculumMaster } from '../lib/db';
 
@@ -110,8 +110,13 @@ describe('Elementary Curriculum Timeline Filtering and Bulk Registration', () =>
       expect(screen.getByText(/小学生向け進度タイムライン/i)).toBeInTheDocument();
     });
 
-    // 小学生の算数単元が表示されていることを確認
+    // 小学生の算数単元が表示されていることを確認（初期状態は5年生で絞り込み）
     expect(screen.getByText(/小数×小数の筆算/i)).toBeInTheDocument();
+
+    // 全学年表示ボタンをクリック
+    const allGradeBtn = screen.getByTestId('elementary-timeline-grade-btn-全学年表示');
+    fireEvent.click(allGradeBtn);
+
     expect(screen.getByText(/分数×分数の計算/i)).toBeInTheDocument();
 
     // 中学生の数学単元（多項式の乗法と公式①）は小学生タイムラインに含まれていないことを確認

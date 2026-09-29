@@ -274,14 +274,14 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
       teacher_in_charge: '福田 尚弘',
       registered_year: 2026,
       registered_grade: '中2',
-      selected_days: ['monday', 'thursday'],
+      selected_days: ['monday', 'tuesday', 'thursday'],
       selected_subjects: ['数学'],
       start_unit_math: 'cm-jhs-eq-1',
       completed_lesson_ids: ['cm-jhs-eq-1'],
       period_count: 2
     };
 
-    localStorage.setItem('tentoru_curriculum_masters', JSON.stringify(jhsMasters));
+    await db.saveCurriculumMasters(jhsMasters);
     await db.saveStudent(jhsStudent);
 
     // 5.1 スケジューラでのスロット生成: 1コマ目が単元確認テスト、2コマ目も同日に新単元を先入れしない
@@ -305,9 +305,11 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
     await act(async () => {
       const renderRes = render(
         <TeacherDashboard 
+          students={[jhsStudent]}
           initialStudentId={jhsStudent.id} 
           teacherType="junior_high" 
           initialTab="schedule" 
+          curriculumMasters={jhsMasters}
         />
       );
       container = renderRes.container;

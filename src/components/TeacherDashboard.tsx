@@ -72,6 +72,9 @@ export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homew
 
 interface TeacherDashboardProps {
   students?: Student[];
+  schools?: any[];
+  curriculumMasters?: CurriculumMaster[];
+  tasks?: any[];
   initialStudentId?: string;
   initialTab?: DashboardTabType;
   onBackToPortal?: () => void;
@@ -100,6 +103,9 @@ function normalizeGrade(g?: string): string {
 
 export default function TeacherDashboard({
   students: propStudents,
+  schools: propSchools,
+  curriculumMasters: propCurriculumMasters,
+  tasks: propTasks,
   initialStudentId,
   initialTab,
   onBackToPortal,
@@ -308,7 +314,11 @@ export default function TeacherDashboard({
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
-  const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>(() => (typeof window !== 'undefined' ? db.getCurriculumMasters() : []));
+  const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>(() => (
+    propCurriculumMasters && propCurriculumMasters.length > 0
+      ? propCurriculumMasters
+      : (typeof window !== 'undefined' ? db.getCurriculumMasters() : [])
+  ));
   const [selectedStartGrades, setSelectedStartGrades] = useState<Record<string, string>>({});
 
   // レベル別・テンプレート機能用 State
@@ -431,6 +441,18 @@ export default function TeacherDashboard({
   const [isSavingTimetable, setIsSavingTimetable] = useState(false);
   const [timetableToast, setTimetableToast] = useState<string | null>(null);
 
+  // 小学生向け進度タイムラインの学年別フィルター ('小1' | '小2' | '小3' | '小4' | '小5' | '小6' | 'all')
+  const [elementaryTimelineGradeFilter, setElementaryTimelineGradeFilter] = useState<string>(() => {
+    const allSt = propStudents || db.getStudents();
+    const targetSt = initialStudentId ? allSt.find(s => s.id === initialStudentId) : allSt[0];
+    if (targetSt?.grade) {
+      const match = targetSt.grade.match(/^[小]?([1-6])/);
+      if (match) return `小${match[1]}`;
+      if (targetSt.grade === '園児') return '小1';
+    }
+    return 'all';
+  });
+
   // 校舎別 AI授業自動設定ルール State
   const [isBranchAIRulesModalOpen, setIsBranchAIRulesModalOpen] = useState(false);
   const [branchAIRulesForm, setBranchAIRulesForm] = useState<BranchAIRules>(DEFAULT_BRANCH_AI_RULES);
@@ -550,7 +572,7 @@ export default function TeacherDashboard({
     const listTemplates = db.getMilestoneTemplates();
     const listCc = db.getCustomClasses();
     const listBranches = db.getBranches();
-    const listMasters = db.getCurriculumMasters();
+    const listMasters = (propCurriculumMasters && propCurriculumMasters.length > 0) ? propCurriculumMasters : db.getCurriculumMasters();
 
     setStudents(listSt);
     setSchools(listSch);
@@ -563,11 +585,13 @@ export default function TeacherDashboard({
     setBranches(listBranches);
     setCurriculumMastersList(listMasters);
     // 非同期で Supabase のクラウドDBから生徒・学校・カリキュラムマスターデータを取得して同期
-    db.fetchCurriculumMasters().then(fetchedMasters => {
-      if (fetchedMasters && fetchedMasters.length > 0) {
-        setCurriculumMastersList(fetchedMasters);
-      }
-    }).catch(err => console.warn('fetchCurriculumMasters in loadData error:', err));
+    if (!propCurriculumMasters || propCurriculumMasters.length === 0) {
+      db.fetchCurriculumMasters().then(fetchedMasters => {
+        if (fetchedMasters && fetchedMasters.length > 0) {
+          setCurriculumMastersList(fetchedMasters);
+        }
+      }).catch(err => console.warn('fetchCurriculumMasters in loadData error:', err));
+    }
 
     db.fetchStudents().then(fetchedSt => {
       if (fetchedSt && fetchedSt.length > 0) {
@@ -991,6 +1015,17 @@ export default function TeacherDashboard({
           setSelectedSubject(pref);
         } else if (!elemSubjects.includes(selectedSubject)) {
           setSelectedSubject('算数');
+        }
+
+        if (selectedStudent.grade) {
+          const match = selectedStudent.grade.match(/^[小]?([1-6])/);
+          if (match) {
+            setElementaryTimelineGradeFilter(`小${match[1]}`);
+          } else if (selectedStudent.grade === '園児') {
+            setElementaryTimelineGradeFilter('小1');
+          } else {
+            setElementaryTimelineGradeFilter('all');
+          }
         }
       } else {
         const highSubjects = ['数学', '英語', '国語', '理科', '社会'];
@@ -6783,14 +6818,30 @@ export default function TeacherDashboard({
                   const excludedIdsSet = new Set((selectedStudent.excluded_lesson_ids || []).map(id => String(id).trim()));
 
                   // 除外されたアイテムをタイムラインから除外（一意のステップIDのみで判定し、巻き込みを防止。STEP番号も即時再採番）
-                  const timelineUnits = rawTimelineUnits
+                  let timelineUnits = rawTimelineUnits
                     .filter(u => !excludedIdsSet.has(String(u.id)))
                     .map((u, idx) => ({
                       ...u,
                       sequence_order: idx + 1
                     }));
+
+                  // 小学生向け進度タイムラインの学年フィルター適用
+                  if (isElementary && elementaryTimelineGradeFilter !== 'all') {
+                    const filterDigit = elementaryTimelineGradeFilter.replace(/[^0-9]/g, '');
+                    const filterNorm = normalizeGrade(elementaryTimelineGradeFilter);
+                    timelineUnits = timelineUnits.filter(u => {
+                      const rawG = (u as any).grade;
+                      if (!rawG) return false;
+                      const gNorm = normalizeGrade(rawG);
+                      const gStr = String(rawG);
+                      return gNorm === filterNorm || gStr.includes(elementaryTimelineGradeFilter) || gStr.includes(`${filterDigit}年`) || (filterDigit !== '' && gStr.includes(filterDigit));
+                    }).map((u, idx) => ({
+                      ...u,
+                      sequence_order: idx + 1
+                    }));
+                  }
                   
-                    const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
+                  const totalCount = timelineUnits.length > 0 ? timelineUnits.length : 18;
                   
                   const studentCompletedIds = new Set(
                     (selectedStudent.completed_lesson_ids || []).map(id => String(id).trim())
@@ -6962,51 +7013,109 @@ export default function TeacherDashboard({
                             const availableSubjects = Array.from(new Set([...studentSubjs, ...baseSubjs]));
 
                             return (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginRight: '4px' }}>対象教科:</label>
-                                <div 
-                                  data-testid="milestone-subject-button-group"
-                                  style={{ 
-                                    display: 'inline-flex', 
-                                    gap: '4px', 
-                                    backgroundColor: '#f1f5f9', 
-                                    padding: '4px', 
-                                    borderRadius: '10px',
-                                    border: '1px solid #cbd5e1'
-                                  }}
-                                >
-                                  {availableSubjects.map(sub => {
-                                    const isActive = selectedSubject === sub || (sub === '数学' && selectedSubject === '算数') || (sub === '算数' && selectedSubject === '数学');
-                                    const icon = getSubjectIcon(sub);
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginRight: '4px' }}>対象教科:</label>
+                                  <div 
+                                    data-testid="milestone-subject-button-group"
+                                    style={{ 
+                                      display: 'inline-flex', 
+                                      gap: '4px', 
+                                      backgroundColor: '#f1f5f9', 
+                                      padding: '4px', 
+                                      borderRadius: '10px',
+                                      border: '1px solid #cbd5e1'
+                                    }}
+                                  >
+                                    {availableSubjects.map(sub => {
+                                      const isActive = selectedSubject === sub || (sub === '数学' && selectedSubject === '算数') || (sub === '算数' && selectedSubject === '数学');
+                                      const icon = getSubjectIcon(sub);
 
-                                    return (
-                                      <button
-                                        key={sub}
-                                        type="button"
-                                        data-testid={`milestone-subject-btn-${sub}`}
-                                        onClick={() => setSelectedSubject(sub)}
-                                        style={{
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '6px',
-                                          padding: '6px 14px',
-                                          fontSize: '0.85rem',
-                                          fontWeight: 700,
-                                          borderRadius: '8px',
-                                          cursor: 'pointer',
-                                          transition: 'all 0.2s ease',
-                                          border: isActive ? '1px solid #3b82f6' : '1px solid transparent',
-                                          backgroundColor: isActive ? '#2563eb' : '#ffffff',
-                                          color: isActive ? '#ffffff' : '#475569',
-                                          boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.3)' : 'none',
-                                        }}
-                                      >
-                                        <span>{icon}</span>
-                                        <span>{sub}</span>
-                                      </button>
-                                    );
-                                  })}
+                                      return (
+                                        <button
+                                          key={sub}
+                                          type="button"
+                                          data-testid={`milestone-subject-btn-${sub}`}
+                                          onClick={() => setSelectedSubject(sub)}
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            padding: '6px 14px',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 700,
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease',
+                                            border: isActive ? '1px solid #3b82f6' : '1px solid transparent',
+                                            backgroundColor: isActive ? '#2563eb' : '#ffffff',
+                                            color: isActive ? '#ffffff' : '#475569',
+                                            boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.3)' : 'none',
+                                          }}
+                                        >
+                                          <span>{icon}</span>
+                                          <span>{sub}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
+
+                                {/* Elementary Grade Filter Button Group (1年生〜6年生 & 全学年表示) */}
+                                {isElementary && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px' }}>
+                                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginRight: '4px' }}>学年別:</label>
+                                    <div 
+                                      data-testid="elementary-timeline-grade-button-group"
+                                      style={{ 
+                                        display: 'inline-flex', 
+                                        gap: '4px', 
+                                        backgroundColor: '#f1f5f9', 
+                                        padding: '4px', 
+                                        borderRadius: '10px',
+                                        border: '1px solid #cbd5e1',
+                                        flexWrap: 'wrap'
+                                      }}
+                                    >
+                                      {[
+                                        { label: '1年生', value: '小1' },
+                                        { label: '2年生', value: '小2' },
+                                        { label: '3年生', value: '小3' },
+                                        { label: '4年生', value: '小4' },
+                                        { label: '5年生', value: '小5' },
+                                        { label: '6年生', value: '小6' },
+                                        { label: '全学年表示', value: 'all' }
+                                      ].map(item => {
+                                        const isActive = elementaryTimelineGradeFilter === item.value;
+                                        return (
+                                          <button
+                                            key={item.value}
+                                            type="button"
+                                            data-testid={`elementary-timeline-grade-btn-${item.label}`}
+                                            onClick={() => setElementaryTimelineGradeFilter(item.value)}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              padding: '5px 12px',
+                                              fontSize: '0.82rem',
+                                              fontWeight: 700,
+                                              borderRadius: '8px',
+                                              cursor: 'pointer',
+                                              transition: 'all 0.2s ease',
+                                              border: isActive ? '1px solid #2563eb' : '1px solid transparent',
+                                              backgroundColor: isActive ? '#2563eb' : '#ffffff',
+                                              color: isActive ? '#ffffff' : '#475569',
+                                              boxShadow: isActive ? '0 2px 6px rgba(37, 99, 235, 0.25)' : 'none'
+                                            }}
+                                          >
+                                            {item.label}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           })()}
@@ -7331,7 +7440,7 @@ export default function TeacherDashboard({
                           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '18px', overflow: 'hidden' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 14px 0', flexWrap: 'wrap', gap: '8px' }}>
                               <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                🚀 {selectedSubject} 無段階学習タイムライン（ステップ別カリキュラム）
+                                🚀 {selectedSubject} {elementaryTimelineGradeFilter !== 'all' ? `（${elementaryTimelineGradeFilter.replace('小', '')}年生）` : '（全学年）'} 無段階学習タイムライン（ステップ別カリキュラム）
                               </h4>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 {(selectedStudent.excluded_lesson_ids || []).length > 0 && (
@@ -7378,7 +7487,12 @@ export default function TeacherDashboard({
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {timelineUnits.map((unit, idx) => {
+                              {timelineUnits.length === 0 ? (
+                                <div data-testid="elementary-timeline-empty-message" style={{ textAlign: 'center', padding: '32px 16px', color: '#64748b', fontSize: '0.9rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                                  {`選択された学年（${elementaryTimelineGradeFilter !== 'all' ? `${elementaryTimelineGradeFilter.replace('小', '')}年生` : '全学年'}）の${selectedSubject}カリキュラムデータがありません。`}
+                                </div>
+                              ) : (
+                                timelineUnits.map((unit, idx) => {
                                 const stepNum = idx + 1;
                                 const isCurrent = currentStepIndices.has(idx);
                                 const isCompleted = !isCurrent && isUnitCompleted(unit, idx);
@@ -7517,7 +7631,8 @@ export default function TeacherDashboard({
                                     </div>
                                   </div>
                                 );
-                              })}
+                              })
+                            )}
                             </div>
                           </div>
                         </div>
