@@ -3,8 +3,6 @@ import styles from './StudentDashboard.module.css';
 import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
 import { ensureMathEnglishUnitTests, normalizeGrade } from '../lib/scheduler';
 import SugorokuMap from './SugorokuMap';
-import { TestScoreRadarChart } from './TestScoreRadarChart';
-import { WeeklyScheduleViewer } from './WeeklyScheduleViewer';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 
 interface StudentDashboardProps {
@@ -934,44 +932,6 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     loadData();
   };
 
-  // 4. シミュレーター用の「2日連続未達成」を擬似発生させる関数
-  const simulateTwoDaysFailure = async () => {
-    const d = new Date(currentDateStr);
-    const dMinus1 = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const targetToday = currentDateStr;
-
-    const allCurrentTasks = db.getLearningTasks();
-    const updated = allCurrentTasks.map(t => {
-      if (t.student_id === student.id) {
-        if (t.scheduled_date === dMinus1) {
-          return { ...t, status: 'unstarted' as const, video_watched: false, test_passed: false };
-        }
-        if (t.scheduled_date === targetToday) {
-          return { ...t, status: 'unstarted' as const, video_watched: false, test_passed: false, period: 1 };
-        }
-      }
-      return t;
-    });
-
-    await db.saveLearningTasks(updated);
-    
-    // 生徒ステータスもノーマルに戻す
-    await db.saveStudent({
-      ...student,
-      status: 'normal'
-    });
-
-    alert('【シミュレーション】過去2日間のタスクを未完了に設定しました。講師ダッシュボード側で「自動リスケジュール」を実行すると、残りのタスク量に応じて自動再編または「計画パンクアラート」が発生します。');
-    loadData();
-  };
-
-  // 5. シミュレーター用の「爆速前倒し」をテストする前状態に戻す関数
-  const resetToNormalState = () => {
-    // LocalStorageのモックデータを完全にリセット
-    db.clearMockData();
-    window.location.reload();
-  };
-
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'fast':
@@ -1564,57 +1524,6 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             todayTasks={todayTasks}
             theme={theme}
           />
-        </div>
-
-        {/* 週間スケジュール・仮予定表示ビュー */}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <WeeklyScheduleViewer
-            tasks={tasks}
-            scheduleConfig={scheduleConfig}
-            currentDateStr={currentDateStr}
-          />
-        </div>
-
-        {/* テスト結果レーダーチャート */}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <TestScoreRadarChart
-            title={`${student.name} さんの教科別理解度・得点レーダーチャート`}
-            data={student.grade.startsWith('小') ? [
-              { subject: '国語', score: 78 },
-              { subject: '算数', score: 85 },
-              { subject: '英語', score: 90 },
-              { subject: '理科', score: 72 },
-              { subject: '社会', score: 68 },
-            ] : [
-              { subject: '国語', score: 75 },
-              { subject: '数学', score: 88 },
-              { subject: '英語', score: 82 },
-              { subject: '理科', score: 79 },
-              { subject: '社会', score: 70 },
-            ]}
-          />
-        </div>
-
-        {/* Bottom Simulation Panel */}
-        <div className={styles.simPanel}>
-          <h3 className={styles.simTitle}>
-            {/* Settings Icon */}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            機能シミュレータ (デモ確認用)
-          </h3>
-          <div className={styles.simGrid}>
-            <button onClick={simulateTwoDaysFailure} className={styles.simBtn}>
-              <span className={styles.simBtnTitle}>⚠️ 2日連続未達成を作る</span>
-              <span className={styles.simBtnDesc}>昨日・今日のタスクを未完了にし、自動リスケジュールの判定トリガーを満たします。</span>
-            </button>
-            <button onClick={resetToNormalState} className={styles.simBtn}>
-              <span className={styles.simBtnTitle}>🔄 全データをリセット</span>
-              <span className={styles.simBtnDesc}>LocalStorageの進捗状況や登録したデータを初期のデモデータに戻します。</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

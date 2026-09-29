@@ -394,7 +394,7 @@ export default function SugorokuMap({
               mainIcon = '👑';
             } else if (isCurrentNode) {
               circleClass = `${styles.mainCircle} ${styles.circleActive}`;
-              mainIcon = '⭐';
+              mainIcon = '🌟';
             }
 
             // 各ステップ（ビデオ、テスト）の表示ステータス & クラス名設定（テスト互換完全対応）
@@ -431,55 +431,61 @@ export default function SugorokuMap({
             const offsetClass = getZigzagOffsetClass(index);
 
             return (
-              <div 
-                key={node.id} 
-                className={`${styles.nodeRow} ${offsetClass}`}
-                ref={isCurrentNode ? activeNodeElementRef : undefined}
-              >
+              <React.Fragment key={node.id}>
+                {index > 0 && (
+                  <div className={`${styles.pathRow} ${offsetClass}`} aria-hidden="true">
+                    <div className={styles.trailLine} />
+                  </div>
+                )}
                 <div 
-                  className={`${styles.nodeCard} ${isCurrentNode ? styles.activeNode : ''}`}
-                  data-testid={`sugoroku-node-${node.id}`}
-                  onClick={() => setSelectedNodeDetails({ id: node.id, name: node.name, fullTitle: node.fullTitle, index })}
+                  className={`${styles.nodeRow} ${offsetClass}`}
+                  ref={isCurrentNode ? activeNodeElementRef : undefined}
                 >
-                  {/* Current Position Tooltip */}
-                  {isCurrentNode && !isCompleted && (
-                    <div className={styles.speechBubble}>
-                      ここからスタート！
-                    </div>
-                  )}
-
-                  {/* Main 3D Node Button */}
-                  <div className={circleClass} title={node.fullTitle}>
-                    {mainIcon}
-                  </div>
-
-                  {/* Sub-steps (Video & Test) for test compatibility and clear feedback */}
-                  <div className={styles.subStepsRow}>
-                    <span 
-                      className={videoClass}
-                      data-testid={`sugoroku-video-${node.id}`}
-                      title={`${node.fullTitle} - 動画`}
-                    >
-                      {isVideoWatched ? '✅' : '影'} 動画
-                    </span>
-                    <span 
-                      className={testClass}
-                      data-testid={`sugoroku-test-${node.id}`}
-                      title={`${node.fullTitle} - テスト`}
-                    >
-                      {isTestPassed ? '✅' : '試'} テスト
-                    </span>
-                  </div>
-
-                  {/* Unit Label */}
                   <div 
-                    className={`${styles.unitLabel} ${isCurrentNode ? styles.activeLabel : ''}`}
-                    title={node.fullTitle}
+                    className={`${styles.nodeCard} ${isCurrentNode ? styles.activeNode : ''}`}
+                    data-testid={`sugoroku-node-${node.id}`}
+                    onClick={() => setSelectedNodeDetails({ id: node.id, name: node.name, fullTitle: node.fullTitle, index })}
                   >
-                    {index + 1}. {node.name}
+                    {/* Current Position Tooltip */}
+                    {isCurrentNode && !isCompleted && (
+                      <div className={styles.speechBubble}>
+                        ここからスタート！
+                      </div>
+                    )}
+
+                    {/* Main 3D Node Button */}
+                    <div className={circleClass} title={node.fullTitle}>
+                      {mainIcon}
+                    </div>
+
+                    {/* Sub-steps (Video & Test) for test compatibility and clear feedback */}
+                    <div className={styles.subStepsRow}>
+                      <span 
+                        className={videoClass}
+                        data-testid={`sugoroku-video-${node.id}`}
+                        title={`${node.fullTitle} - 動画`}
+                      >
+                        {isVideoWatched ? '✅' : '影'} 動画
+                      </span>
+                      <span 
+                        className={testClass}
+                        data-testid={`sugoroku-test-${node.id}`}
+                        title={`${node.fullTitle} - テスト`}
+                      >
+                        {isTestPassed ? '✅' : '試'} テスト
+                      </span>
+                    </div>
+
+                    {/* Unit Label */}
+                    <div 
+                      className={`${styles.unitLabel} ${isCurrentNode ? styles.activeLabel : ''}`}
+                      title={node.fullTitle}
+                    >
+                      {index + 1}. {node.name}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -487,20 +493,20 @@ export default function SugorokuMap({
 
       <div className={styles.legend}>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: '#22c55e' }} />
-          <span>👑 クリア済み</span>
+          <div className={styles.legendDot} style={{ background: '#10b981', border: '1.5px solid #facc15' }} />
+          <span>👑 クリア済み（メダル）</span>
         </div>
         <div className={styles.legendItem}>
-          <div className={styles.legendDot} style={{ background: '#f59e0b' }} />
-          <span>⭐ 現在地・挑戦中</span>
+          <div className={styles.legendDot} style={{ background: '#f97316', border: '1.5px solid #ffffff' }} />
+          <span>🌟 現在地・挑戦中（スター）</span>
         </div>
         <div className={styles.legendItem}>
           <div className={styles.legendDot} style={{ background: '#cbd5e1' }} />
-          <span>🔒 未開放</span>
+          <span>🔒 未開放ステージ</span>
         </div>
         <div className={styles.legendItem}>
           <div className={styles.legendDot} style={{ background: '#c7d2fe' }} />
-          <span>スキップ</span>
+          <span>⏭️ スキップ</span>
         </div>
       </div>
     </div>

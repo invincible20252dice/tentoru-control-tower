@@ -199,12 +199,10 @@ describe('UI Components Render & Interaction Tests', () => {
       expect(screen.getByText('不合格 (再挑戦)')).toBeInTheDocument();
     });
 
-    // 4. Simulator action (2 days failure)
-    const simFailBtn = screen.getByText('⚠️ 2日連続未達成を作る');
-    fireEvent.click(simFailBtn);
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenCalled();
-    });
+    // 4. Verify lower unnecessary sections are completely removed from student view
+    expect(screen.queryByText('⚠️ 2日連続未達成を作る')).not.toBeInTheDocument();
+    expect(screen.queryByText(/教科別理解度・得点レーダーチャート/)).not.toBeInTheDocument();
+    expect(screen.queryByText('週間スケジュール・授業予定ビュー')).not.toBeInTheDocument();
 
     window.location = originalLocation;
   });

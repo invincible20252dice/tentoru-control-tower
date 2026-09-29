@@ -103,7 +103,18 @@ describe('Student Dashboard & Sugoroku Map UI Fixes Verification', () => {
     }
   });
 
-  it('Fix #3 Right Column: SugorokuMap should render nodes with 64px 3D circles, pulse active node, and support scrolling', async () => {
+  it('Fix #1 Bottom Sections: should completely remove weekly schedule, radar chart, and simulator from student screen', () => {
+    render(<StudentDashboard student={mockStudentElem} onBackToPortal={() => {}} />);
+
+    // Verify complete removal of lower noise sections
+    expect(screen.queryByText('週間スケジュール・授業予定ビュー')).not.toBeInTheDocument();
+    expect(screen.queryByText(/教科別理解度・得点レーダーチャート/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/機能シミュレータ/)).not.toBeInTheDocument();
+    expect(screen.queryByText('⚠️ 2日連続未達成を作る')).not.toBeInTheDocument();
+    expect(screen.queryByText('🔄 全データをリセット')).not.toBeInTheDocument();
+  });
+
+  it('Fix #3 Right Column: SugorokuMap should render RPG world map with trail path, glowing star node, and gold/emerald medal', async () => {
     const { container } = render(
       <SugorokuMap
         student={mockStudentElem}
@@ -116,8 +127,10 @@ describe('Student Dashboard & Sugoroku Map UI Fixes Verification', () => {
       />
     );
 
-    // 1. Should render subject title
+    // 1. Should render subject title & RPG board container
     expect(screen.getByText('算数の学習マップ')).toBeInTheDocument();
+    const wrapper = container.querySelector('[class*="mapWrapper"]');
+    expect(wrapper).toBeInTheDocument();
 
     // 2. Should render all nodes
     const node1 = screen.getByTestId('sugoroku-node-cm-p1-m1');
@@ -130,12 +143,12 @@ describe('Student Dashboard & Sugoroku Map UI Fixes Verification', () => {
     fireEvent.click(node1);
     expect(screen.getByText(/STEP 1/)).toBeInTheDocument();
 
-    // 5. Check map wrapper exists and has scroll container
-    const wrapper = container.querySelector('[class*="mapWrapper"]');
-    expect(wrapper).toBeInTheDocument();
+    // 5. Check RPG trail line connectors exist between nodes
+    const trailLines = container.querySelectorAll('[class*="trailLine"]');
+    expect(trailLines.length).toBeGreaterThan(0);
 
-    // 6. Check node circle exists
-    const circle = node1.querySelector('[class*="mainCircle"]');
-    expect(circle).toBeInTheDocument();
+    // 6. Check RPG legend items
+    expect(screen.getByText(/👑 クリア済み（メダル）/)).toBeInTheDocument();
+    expect(screen.getByText(/🌟 現在地・挑戦中（スター）/)).toBeInTheDocument();
   });
 });
