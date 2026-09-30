@@ -4787,59 +4787,86 @@ export default function TeacherDashboard({
                         onChangeDate={setScheduleDate} 
                         selectedDays={selectedStudent.selected_days || ['tuesday', 'friday']}
                       />
-                      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
-                        <input 
-                      type="date" 
-                          value={scheduleDate} 
-                          onChange={e => setScheduleDate(e.target.value)}
-                          className={styles.input}
-                          style={{ width: 'auto', display: 'inline-block' }}
-                        />
-                        {scheduleDate && (() => {
-                          const d = new Date(scheduleDate);
-                          if (isNaN(d.getTime())) return null;
-                          const month = d.getMonth() + 1;
-                          const date = d.getDate();
-                          const days = ['日', '月', '火', '水', '木', '金', '土'];
-                          const dayOfWeek = days[d.getDay()];
-                          const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
-                          const weekNum = Math.ceil((date + firstDay.getDay()) / 7);
-                          const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
-                          const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
+                      <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
+                          <input 
+                            type="date" 
+                            value={scheduleDate} 
+                            onChange={e => setScheduleDate(e.target.value)}
+                            className={styles.input}
+                            style={{ width: 'auto', display: 'inline-block' }}
+                          />
+                          {scheduleDate && (() => {
+                            const d = new Date(scheduleDate);
+                            if (isNaN(d.getTime())) return null;
+                            const month = d.getMonth() + 1;
+                            const date = d.getDate();
+                            const days = ['日', '月', '火', '水', '木', '金', '土'];
+                            const dayOfWeek = days[d.getDay()];
+                            const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+                            const weekNum = Math.ceil((date + firstDay.getDay()) / 7);
+                            const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
+                            const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
 
-                          return (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span 
-                                data-testid="japanese-date-badge"
-                                style={{ 
-                                  padding: '4px 10px', 
-                                  background: isAttendance ? '#eff6ff' : '#f1f5f9', 
-                                  color: isAttendance ? '#1e40af' : '#475569', 
-                                  borderRadius: '6px', 
-                                  fontWeight: 600, 
-                                  fontSize: '0.82rem',
-                                  border: isAttendance ? '1px solid #bfdbfe' : '1px solid #cbd5e1'
-                                }}
-                              >
-                                📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
-                              </span>
-                              <span
-                                style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '6px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  backgroundColor: isAttendance ? '#dbeafe' : '#f8fafc',
-                                  color: isAttendance ? '#1d4ed8' : '#64748b',
-                                  border: isAttendance ? '1px solid #93c5fd' : '1px solid #e2e8f0'
-                                }}
-                              >
-                                {isAttendance ? `📌 通塾設定日 (標準${selectedStudent.default_slots || selectedStudent.period_count || 2}コマ)` : '☕ 休塾設定日（自習）'}
-                              </span>
-                            </div>
-                          );
-                        })()}
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span 
+                                  data-testid="japanese-date-badge"
+                                  style={{ 
+                                    padding: '4px 10px', 
+                                    background: isAttendance ? '#eff6ff' : '#f1f5f9', 
+                                    color: isAttendance ? '#1e40af' : '#475569', 
+                                    borderRadius: '6px', 
+                                    fontWeight: 600, 
+                                    fontSize: '0.82rem',
+                                    border: isAttendance ? '1px solid #bfdbfe' : '1px solid #cbd5e1'
+                                  }}
+                                >
+                                  📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
+                                </span>
+                                <span
+                                  style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    backgroundColor: isAttendance ? '#dbeafe' : '#f8fafc',
+                                    color: isAttendance ? '#1d4ed8' : '#64748b',
+                                    border: isAttendance ? '1px solid #93c5fd' : '1px solid #e2e8f0'
+                                  }}
+                                >
+                                  {isAttendance ? `📌 通塾設定日 (標準${selectedStudent.default_slots || selectedStudent.period_count || 2}コマ)` : '☕ 休塾設定日（自習）'}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* クイック保存ボタン（上部配置） */}
+                        <button
+                          type="button"
+                          onClick={handleSaveTimetable}
+                          disabled={isSavingTimetable}
+                          className={styles.btn}
+                          style={{
+                            width: 'auto',
+                            padding: '6px 14px',
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            fontWeight: 700,
+                            fontSize: '0.8rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            opacity: isSavingTimetable ? 0.7 : 1,
+                            cursor: isSavingTimetable ? 'not-allowed' : 'pointer',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+                          }}
+                          title="現在のコマ割りを保存"
+                        >
+                          {isSavingTimetable ? '反映中...' : '💾 コマ割りを反映'}
+                        </button>
                       </div>
                       
                       {/* 教科別スタートライン（基準単元）設定状況 - 非表示 */}
@@ -5881,14 +5908,14 @@ export default function TeacherDashboard({
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                         <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
-                            <th style={{ padding: '10px' }}>日付</th>
-                            <th style={{ padding: '10px' }}>生徒名</th>
-                            <th style={{ padding: '10px' }}>テスト内容</th>
-                            <th style={{ padding: '10px', width: '100px' }}>レベル/合格点</th>
-                            <th style={{ padding: '10px', width: '120px' }}>点数</th>
-                            <th style={{ padding: '10px', width: '100px' }}>合否</th>
-                            <th style={{ padding: '10px', width: '80px' }}>操作</th>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>テスト内容</th>
+                            <th style={{ padding: '10px', width: '100px', textAlign: 'left' }}>レベル/合格点</th>
+                            <th style={{ padding: '10px', width: '120px', textAlign: 'right' }}>点数</th>
+                            <th style={{ padding: '10px', width: '100px', textAlign: 'center' }}>合否</th>
+                            <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5958,12 +5985,12 @@ export default function TeacherDashboard({
 
                               return (
                                  <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                  <td style={{ padding: '10px' }}>{r.date}</td>
-                                  <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
-                                  <td style={{ padding: '10px' }}>{r.test_content}</td>
-                                  <td style={{ padding: '10px' }}>{displayPassingLine}</td>
-                                  <td style={{ padding: '10px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>{r.date}</td>
+                                  <td style={{ padding: '10px', fontWeight: 600, textAlign: 'left' }}>{student ? student.name : '不明な生徒'}</td>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>{r.test_content}</td>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>{displayPassingLine}</td>
+                                  <td style={{ padding: '10px', textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
                                       <input
                                         type="number"
                                         min="0"
@@ -6005,20 +6032,20 @@ export default function TeacherDashboard({
                                           handleAutoSaveMiniTestScore(r, val, autoPassedStr);
                                         }}
                                         className={styles.input}
-                                        style={{ width: '70px', padding: '4px 6px', fontSize: '0.8rem', display: 'inline-block' }}
+                                        style={{ width: '70px', padding: '4px 6px', fontSize: '0.8rem', textAlign: 'right', display: 'inline-block' }}
                                         placeholder="未入力"
                                       />
-                                      <span>点</span>
+                                      <span style={{ fontSize: '0.8rem', color: '#64748b' }}>点</span>
                                     </div>
                                   </td>
-                                  <td style={{ padding: '10px 12px' }}>
+                                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                                     {(() => {
                                       const currentStatus = tempPassedStatuses[r.id] || (r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted');
                                       const statusStyle = currentStatus === 'passed'
-                                        ? { backgroundColor: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }
+                                        ? { backgroundColor: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }
                                         : currentStatus === 'failed'
-                                          ? { backgroundColor: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3' }
-                                          : { backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' };
+                                          ? { backgroundColor: '#ffe4e6', color: '#9f1239', border: '1px solid #fecdd3' }
+                                          : { backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' };
 
                                       return (
                                         <select
@@ -6032,7 +6059,7 @@ export default function TeacherDashboard({
                                             handleAutoSaveMiniTestScore(r, undefined, newPassedStr);
                                           }}
                                           className={styles.select}
-                                          style={{ padding: '4px 8px', fontSize: '0.8rem', width: 'auto', fontWeight: 700, borderRadius: '6px', ...statusStyle }}
+                                          style={{ padding: '4px 8px', fontSize: '0.8rem', width: 'auto', fontWeight: 700, borderRadius: '6px', textAlign: 'center', margin: '0 auto', ...statusStyle }}
                                         >
                                           <option value="unstarted">未受験</option>
                                           <option value="passed">合格</option>
@@ -6042,12 +6069,13 @@ export default function TeacherDashboard({
                                     })()}
                                   </td>
                                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                    {/* 控えめなゴミ箱ボタン（危険操作の改善） */}
+                                    {/* 控えめなゴミ箱ボタン（中央配置 & 危険操作の改善） */}
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteMiniTestResult(r.id)}
                                       className={styles.btnIconDelete}
-                                      title="削除する"
+                                      style={{ margin: '0 auto' }}
+                                      title="小テスト結果を削除する"
                                       aria-label="🗑️ 削除"
                                     >
                                       <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🗑️</span>
@@ -6202,13 +6230,13 @@ export default function TeacherDashboard({
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                         <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
-                            <th style={{ padding: '10px' }}>日付</th>
-                            <th style={{ padding: '10px' }}>生徒名</th>
-                            <th style={{ padding: '10px' }}>宿題内容</th>
-                            <th style={{ padding: '10px' }}>提出期限</th>
-                            <th style={{ padding: '10px', width: '150px' }}>提出状況</th>
-                            <th style={{ padding: '10px', width: '80px' }}>操作</th>
+                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>宿題内容</th>
+                            <th style={{ padding: '10px', textAlign: 'left' }}>提出期限</th>
+                            <th style={{ padding: '10px', width: '150px', textAlign: 'center' }}>提出状況</th>
+                            <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -6290,10 +6318,10 @@ export default function TeacherDashboard({
                                     transition: 'background-color 0.15s ease'
                                   }}
                                 >
-                                  <td style={{ padding: '10px' }}>{r.date}</td>
-                                  <td style={{ padding: '10px', fontWeight: 600 }}>{student ? student.name : '不明な生徒'}</td>
-                                  <td style={{ padding: '10px' }}>{r.homework_content}</td>
-                                  <td style={{ padding: '10px' }}>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>{r.date}</td>
+                                  <td style={{ padding: '10px', fontWeight: 600, textAlign: 'left' }}>{student ? student.name : '不明な生徒'}</td>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>{r.homework_content}</td>
+                                  <td style={{ padding: '10px', textAlign: 'left' }}>
                                     {isOverdue ? (
                                       <span style={{ color: '#ef4444', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                         ⚠️ {deadline} (期限超過)
@@ -6302,7 +6330,7 @@ export default function TeacherDashboard({
                                       <span>{deadline || 'なし'}</span>
                                     )}
                                   </td>
-                                  <td style={{ padding: '10px' }}>
+                                  <td style={{ padding: '10px', textAlign: 'center' }}>
                                     <button
                                       type="button"
                                       data-testid={`toggle-homework-status-${r.id}`}
@@ -6318,9 +6346,10 @@ export default function TeacherDashboard({
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '4px',
+                                        margin: '0 auto',
                                         border: isSubmitted ? '1px solid #a7f3d0' : '1px solid #fde68a',
-                                        backgroundColor: isSubmitted ? '#ecfdf5' : '#fffbeb',
-                                        color: isSubmitted ? '#047857' : '#b45309',
+                                        backgroundColor: isSubmitted ? '#d1fae5' : '#fef3c7',
+                                        color: isSubmitted ? '#065f46' : '#92400e',
                                         boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)'
                                       }}
                                       title={isSubmitted ? 'クリックして未提出に戻す' : 'クリックして提出済みにする'}
@@ -6329,12 +6358,13 @@ export default function TeacherDashboard({
                                     </button>
                                   </td>
                                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                    {/* 控えめなゴミ箱ボタン（危険操作の改善） */}
+                                    {/* 控えめなゴミ箱ボタン（中央配置 & 危険操作の改善） */}
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteHomeworkResult(r.id)}
                                       className={styles.btnIconDelete}
-                                      title="削除する"
+                                      style={{ margin: '0 auto' }}
+                                      title="宿題記録を削除する"
                                       aria-label="🗑️ 削除"
                                     >
                                       <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🗑️</span>
@@ -7950,31 +7980,47 @@ export default function TeacherDashboard({
                       <span>基本情報・属性設定</span>
                     </div>
 
-                    {/* 3タブ切り替えバー */}
-                    <div className={styles.detailTabBar} data-testid="student-detail-sub-tabs">
+                    {/* 3タブ切り替えバー & クイック保存ボタン */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', borderBottom: '2px solid #e2e8f0', marginBottom: '20px', paddingBottom: '2px' }}>
+                      <div className={styles.detailTabBar} data-testid="student-detail-sub-tabs" style={{ borderBottom: 'none', marginBottom: 0, paddingBottom: 0 }}>
+                        <button
+                          type="button"
+                          data-testid="subtab-basic"
+                          onClick={() => setStudentDetailSubTab('basic')}
+                          className={`${styles.detailTabBtn} ${studentDetailSubTab === 'basic' ? styles.detailTabBtnActive : ''}`}
+                        >
+                          👤 基本・保護者情報
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="subtab-conditions"
+                          onClick={() => setStudentDetailSubTab('conditions')}
+                          className={`${styles.detailTabBtn} ${studentDetailSubTab === 'conditions' ? styles.detailTabBtnActive : ''}`}
+                        >
+                          📅 通塾条件・受講教科
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="subtab-start-and-personality"
+                          onClick={() => setStudentDetailSubTab('start-and-personality')}
+                          className={`${styles.detailTabBtn} ${studentDetailSubTab === 'start-and-personality' ? styles.detailTabBtnActive : ''}`}
+                        >
+                          🎯 教科別スタート位置・個性
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        data-testid="subtab-basic"
-                        onClick={() => setStudentDetailSubTab('basic')}
-                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'basic' ? styles.detailTabBtnActive : ''}`}
+                        onClick={e => {
+                          const form = e.currentTarget.closest(`.${styles.card}`)?.querySelector('form');
+                          if (form) {
+                            form.requestSubmit();
+                          }
+                        }}
+                        className={styles.btn}
+                        style={{ width: 'auto', background: '#10b981', color: '#ffffff', fontWeight: 700, padding: '6px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                        title="生徒情報の変更を保存"
                       >
-                        👤 基本・保護者情報
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="subtab-conditions"
-                        onClick={() => setStudentDetailSubTab('conditions')}
-                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'conditions' ? styles.detailTabBtnActive : ''}`}
-                      >
-                        📅 通塾条件・受講教科
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="subtab-start-and-personality"
-                        onClick={() => setStudentDetailSubTab('start-and-personality')}
-                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'start-and-personality' ? styles.detailTabBtnActive : ''}`}
-                      >
-                        🎯 教科別スタート位置・個性
+                        💾 変更を保存
                       </button>
                     </div>
 
@@ -8950,7 +8996,7 @@ export default function TeacherDashboard({
                               }
 
                               return (
-                                <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: isSelected ? 1 : 0.65 }}>
+                                <div key={item.key} className={styles.subjectStartRow} style={{ opacity: isSelected ? 1 : 0.65 }}>
                                   <label style={{ fontSize: '0.8rem', fontWeight: 600, width: '80px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
                                     {item.label}:
                                     {isSelected && (
@@ -8975,8 +9021,8 @@ export default function TeacherDashboard({
                                         }
                                       }
                                     }}
-                                    className={styles.select}
-                                    style={{ width: '130px', fontSize: '0.8rem', padding: '4px 6px' }}
+                                    className={`${styles.select} ${styles.subjectStartSelect}`}
+                                    style={{ width: '130px', height: '36px' }}
                                   >
                                     <option value="">-- 学年を選択 --</option>
                                     {gradeOptions.map(g => (
@@ -8992,8 +9038,8 @@ export default function TeacherDashboard({
                                       const chosenVal = e.target.value;
                                       setEditForm({ ...editForm, [item.key]: chosenVal || null });
                                     }}
-                                    className={styles.select}
-                                    style={{ flex: 1, fontSize: '0.8rem', padding: '4px 6px' }}
+                                    className={`${styles.select} ${styles.subjectStartSelect}`}
+                                    style={{ flex: 1, height: '36px' }}
                                   >
                                     <option value="">-- スタート位置を選択 (最初から) --</option>
                                     {!curGrade && mastersForSubject.length > 0 ? (
@@ -9157,8 +9203,11 @@ export default function TeacherDashboard({
                       </div>
                     </div>{/* End of Sub-Tab 3: 教科別スタート位置・個性 */}
 
-                      <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
-                        <button type="submit" className={styles.btn} style={{ background: '#10b981', fontWeight: 700, padding: '10px 20px', width: '100%' }}>
+                      <div className={styles.stickySaveActionBar}>
+                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                          💡 入力・変更内容は右の保存ボタンで即座に確定・反映されます
+                        </span>
+                        <button type="submit" className={styles.btn} style={{ background: '#10b981', fontWeight: 700, padding: '10px 24px', width: 'auto', minWidth: '180px' }}>
                           変更を保存する
                         </button>
                       </div>

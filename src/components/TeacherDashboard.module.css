@@ -182,14 +182,21 @@
 
 /* Account Generation Form */
 .formGroup {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .formGroup label {
   display: block;
   font-size: 0.75rem;
   font-weight: 600;
-  margin-bottom: 4px;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.darkTheme .formGroup label {
+  color: #94a3b8;
 }
 
 .input {
@@ -197,8 +204,14 @@
   padding: 8px 12px;
   border-radius: 6px;
   border: 1px solid #cbd5e1;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
+  color: #1e293b;
   box-sizing: border-box;
+}
+
+.input::placeholder {
+  color: #94a3b8;
+  font-size: 0.875rem;
 }
 
 .darkTheme .input {
@@ -207,16 +220,43 @@
   color: #ffffff;
 }
 
+.darkTheme .input::placeholder {
+  color: #71717a;
+}
+
 .select {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 0.875rem;
+  color: #1e293b;
+  box-sizing: border-box;
+  background-color: #ffffff;
+}
+
+.darkTheme .select {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #ffffff;
+}
+
+.textarea {
   width: 100%;
   padding: 8px 12px;
   border-radius: 6px;
   border: 1px solid #cbd5e1;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
+  color: #1e293b;
   box-sizing: border-box;
 }
 
-.darkTheme .select {
+.textarea::placeholder {
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.darkTheme .textarea {
   background: #27272a;
   border-color: #3f3f46;
   color: #ffffff;
@@ -901,4 +941,54 @@
   clip: rect(0, 0, 0, 0) !important;
   border: 0 !important;
 }
+
+/* 教科別学習スタート位置行（横ガイド感 & 均一な高さ） */
+.subjectStartRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.subjectStartRow:hover {
+  background-color: #f8fafc;
+}
+
+.darkTheme .subjectStartRow:hover {
+  background-color: #27272a;
+}
+
+.subjectStartSelect {
+  height: 36px;
+  font-size: 0.875rem;
+  padding: 4px 28px 4px 8px;
+}
+
+/* 固定保存アクションバー（常に視界に入る保存導線） */
+.stickySaveActionBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  border-radius: 0 0 16px 16px;
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.darkTheme .stickySaveActionBar {
+  background: rgba(30, 30, 36, 0.96);
+  border-color: #3f3f46;
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.25);
+}
+
 
