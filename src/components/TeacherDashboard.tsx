@@ -4919,7 +4919,7 @@ export default function TeacherDashboard({
                                     {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
                                       const lessons = getLessonsForSubject(currentConfig.subject);
                                       return (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'rgba(248, 250, 252, 0.85)', padding: '14px 16px', borderRadius: '12px', border: 'none' }}>
                                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                             <div>
                                               <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
@@ -4930,7 +4930,7 @@ export default function TeacherDashboard({
                                                 value={currentConfig.startLessonId || currentConfig.unitId || ''}
                                                 onChange={e => handleStartLessonChange(p, e.target.value)}
                                                 className={styles.select}
-                                                style={{ fontSize: '0.8rem' }}
+                                                style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                               >
                                                 <option value="">-- 開始授業を選択 --</option>
                                                 {lessons.map(l => (
@@ -4949,7 +4949,7 @@ export default function TeacherDashboard({
                                                 value={currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || ''}
                                                 onChange={e => handleEndLessonChange(p, e.target.value)}
                                                 className={styles.select}
-                                                style={{ fontSize: '0.8rem' }}
+                                                style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                               >
                                                 <option value="">-- 終了目標授業を選択 --</option>
                                                 {lessons.map(l => (
@@ -4960,18 +4960,18 @@ export default function TeacherDashboard({
                                               </select>
                                             </div>
                                           </div>
-                                          {/* 授業範囲プレビューバッジ */}
+                                          {/* 授業範囲プレビュー (薄いテキストラベル) */}
                                           {(currentConfig.lessonRange || currentConfig.startLessonName) && (
                                             <div 
                                               data-testid={`period-lesson-range-badge-${p}`}
                                               style={{ 
                                                 fontSize: '0.75rem', 
-                                                padding: '4px 8px', 
-                                                borderRadius: '4px', 
-                                                backgroundColor: '#eff6ff', 
-                                                color: '#1e40af', 
-                                                border: '1px solid #bfdbfe',
-                                                fontWeight: 600
+                                                padding: '4px 0 0 0', 
+                                                color: '#64748b', 
+                                                fontWeight: 500,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '4px'
                                               }}
                                             >
                                               📖 授業進捗範囲: {currentConfig.lessonRange || formatLessonRange(currentConfig.startLessonName, currentConfig.endLessonName)}
@@ -5062,7 +5062,7 @@ export default function TeacherDashboard({
                       )}
 
                       {/* 本日のテスト (教科選択 ＋ 自動セット ＋ 自由記述) */}
-                      <div data-testid="today-tests-container" style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div data-testid="today-tests-container" style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>本日のテスト (教科別 ＋ 単元テスト自動選択 ＋ 自由記述):</label>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>単元完了時・手動登録対応</span>
@@ -5071,7 +5071,7 @@ export default function TeacherDashboard({
                           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録されたテストはありません。</div>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '8px' }}>
-                            {todayTests.map((test) => {
+                            {todayTests.map((test, idx) => {
                               const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
                               const allMasters = ensureMathEnglishUnitTests(curriculumMastersList);
                               const unitTestMasters = allMasters.filter(m => 
@@ -5080,14 +5080,14 @@ export default function TeacherDashboard({
                               );
 
                               return (
-                                <div key={test.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                                <div key={test.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 4px', background: 'transparent', borderBottom: idx === todayTests.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     {/* 教科選択 */}
                                     <select
                                       value={testSub}
                                       onChange={e => handleUpdateTest(test.id, 'subject', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                     >
                                       <option value="算数">算数</option>
                                       <option value="数学">数学</option>
@@ -5103,7 +5103,7 @@ export default function TeacherDashboard({
                                       value={test.testType || 'custom'}
                                       onChange={e => handleUpdateTest(test.id, 'testType', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '130px' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '130px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                     >
                                       <option value="unit_test">📝 単元テスト</option>
                                       <option value="custom">✏️ 自由記述</option>
@@ -5130,7 +5130,7 @@ export default function TeacherDashboard({
                                           }
                                         }}
                                         className={styles.select}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '4px 8px', border: '1px solid #8b5cf6', backgroundColor: '#f5f3ff', fontWeight: 600 }}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '4px 8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff', fontWeight: 600, borderRadius: '8px' }}
                                       >
                                         <option value="">-- 単元テストマスタから選択 --</option>
                                         {unitTestMasters.map(m => {
@@ -5151,7 +5151,7 @@ export default function TeacherDashboard({
                                         onChange={e => handleUpdateTest(test.id, 'content', e.target.value)}
                                         placeholder="例: たしざん(1) 単元確認テスト または 漢字テスト10問"
                                         className={styles.input}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                       />
                                     )}
 
@@ -5174,7 +5174,7 @@ export default function TeacherDashboard({
                                         onChange={e => handleUpdateTest(test.id, 'passingLine', e.target.value)}
                                         placeholder="例: 80%以上, 90点"
                                         className={styles.input}
-                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: '130px' }}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: '130px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                       />
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -5183,7 +5183,7 @@ export default function TeacherDashboard({
                                         value={test.targetScope || 'individual'}
                                         onChange={e => handleUpdateTest(test.id, 'targetScope', e.target.value)}
                                         className={styles.select}
-                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto' }}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                       >
                                         <option value="individual">個人 (この生徒のみ)</option>
                                         <option value="grade">学年全員</option>
@@ -5208,7 +5208,7 @@ export default function TeacherDashboard({
                       </div>
 
                       {/* 宿題 (教科選択 ＋ 種別選択 ＋ 2回目演習自動生成/自由記述 ＋ 期限 ＋ 対象) */}
-                      <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>宿題:<span style={{ fontSize: '0.7rem', fontWeight: 500, color: '#475569', marginLeft: '4px' }}>(教科別 ＋ 当日授業2回目演習自動入力 ＋ 提出期限 ＋ 自由記述)</span></label>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>自動生成・手動編集対応</span>
@@ -5217,19 +5217,19 @@ export default function TeacherDashboard({
                           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録された宿題はありません。</div>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
-                            {todayHomeworks.map((hw) => {
+                            {todayHomeworks.map((hw, idx) => {
                               const hwSub = hw.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
                               const hwType = hw.type || (hw.content.includes('2回目演習') ? 'drill_2nd' : 'custom');
 
                               return (
-                                <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                                <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 4px', background: 'transparent', borderBottom: idx === todayHomeworks.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     {/* 教科選択 */}
                                     <select
                                       value={hwSub}
                                       onChange={e => handleUpdateHomework(hw.id, 'subject', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                     >
                                       <option value="算数">算数</option>
                                       <option value="数学">数学</option>
@@ -5245,7 +5245,7 @@ export default function TeacherDashboard({
                                       value={hwType}
                                       onChange={e => handleUpdateHomework(hw.id, 'type', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '175px' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '175px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                     >
                                       <option value="drill_2nd">🔄 当日授業の2回目（演習）</option>
                                       <option value="custom">✏️ 自由記述</option>
@@ -5259,7 +5259,7 @@ export default function TeacherDashboard({
                                         onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
                                         placeholder="当日授業の2回目（演習）範囲"
                                         className={styles.input}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #3b82f6', backgroundColor: '#eff6ff', fontWeight: 600 }}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#eff6ff', fontWeight: 600 }}
                                       />
                                     ) : (
                                       <input
@@ -5268,7 +5268,7 @@ export default function TeacherDashboard({
                                         onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
                                         placeholder="宿題の内容を入力（例：ワークP24-25, 漢字ノート）"
                                         className={styles.input}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                       />
                                     )}
 
@@ -5290,7 +5290,7 @@ export default function TeacherDashboard({
                                         value={hw.deadline || getNextAttendanceDateForStudent(scheduleDate, selectedStudent)}
                                         onChange={e => handleUpdateHomework(hw.id, 'deadline', e.target.value)}
                                         className={styles.input}
-                                        style={{ fontSize: '0.75rem', padding: '3px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', width: 'auto' }}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'auto' }}
                                       />
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -5299,7 +5299,7 @@ export default function TeacherDashboard({
                                         value={hw.targetScope || 'individual'}
                                         onChange={e => handleUpdateHomework(hw.id, 'targetScope', e.target.value)}
                                         className={styles.select}
-                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto' }}
+                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                                       >
                                         <option value="individual">個人 (この生徒のみ)</option>
                                         <option value="grade">学年全員</option>
@@ -7506,7 +7506,7 @@ export default function TeacherDashboard({
                           </div>
 
                           {/* Continuous Timeline List */}
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '18px', overflow: 'hidden' }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', padding: '18px', overflow: 'hidden' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 14px 0', flexWrap: 'wrap', gap: '8px' }}>
                               <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 🚀 {selectedSubject} {elementaryTimelineGradeFilter !== 'all' ? `（${elementaryTimelineGradeFilter.replace('小', '')}年生）` : '（全学年）'} 無段階学習タイムライン（ステップ別カリキュラム）
@@ -7555,7 +7555,7 @@ export default function TeacherDashboard({
                               </div>
                             </div>
 
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0px', borderRadius: '8px', overflow: 'hidden' }}>
                               {timelineUnits.length === 0 ? (
                                 <div data-testid="elementary-timeline-empty-message" style={{ textAlign: 'center', padding: '32px 16px', color: '#64748b', fontSize: '0.9rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
                                   {`選択された学年（${elementaryTimelineGradeFilter !== 'all' ? `${elementaryTimelineGradeFilter.replace('小', '')}年生` : '全学年'}）の${selectedSubject}カリキュラムデータがありません。`}
@@ -7565,6 +7565,7 @@ export default function TeacherDashboard({
                                 const stepNum = idx + 1;
                                 const isCurrent = currentStepIndices.has(idx);
                                 const isCompleted = !isCurrent && isUnitCompleted(unit, idx);
+                                const isEven = idx % 2 === 1;
 
                                 return (
                                   <div
@@ -7574,11 +7575,17 @@ export default function TeacherDashboard({
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'space-between',
-                                      padding: '10px 16px',
-                                      borderRadius: '8px',
-                                      backgroundColor: isCompleted ? '#f0fdf4' : (isCurrent ? '#eff6ff' : '#f8fafc'),
-                                      border: isCurrent ? '2px solid #3b82f6' : (isCompleted ? '1px solid #bbf7d0' : '1px solid #e2e8f0'),
-                                      boxShadow: isCurrent ? '0 2px 6px rgba(59, 130, 246, 0.2)' : 'none',
+                                      padding: '10px 14px',
+                                      borderRadius: isCurrent ? '6px' : '0px',
+                                      backgroundColor: isCurrent 
+                                        ? '#eff6ff' 
+                                        : (isCompleted 
+                                          ? (isEven ? '#f0fdf4' : '#f7fee7') 
+                                          : (isEven ? 'rgba(248, 250, 252, 0.65)' : '#ffffff')),
+                                      border: 'none',
+                                      borderLeft: isCurrent ? '4px solid #2563eb' : (isCompleted ? '4px solid #22c55e' : '4px solid transparent'),
+                                      borderBottom: idx === timelineUnits.length - 1 ? 'none' : '1px solid #f1f5f9',
+                                      boxShadow: isCurrent ? '0 1px 4px rgba(37, 99, 235, 0.12)' : 'none',
                                       transition: 'all 0.15s ease'
                                     }}
                                   >

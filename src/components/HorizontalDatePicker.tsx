@@ -110,10 +110,10 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
       style={{
         backgroundColor: '#ffffff',
         borderRadius: '16px',
-        padding: '12px 16px',
-        border: '1px solid #e2e8f0',
+        padding: '14px 16px',
+        border: 'none',
         marginBottom: '16px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       }}
     >
       {/* Hidden Fallback Input for Accessibility and Backwards Compatibility */}
@@ -147,7 +147,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
           style={{
             background: 'none',
             border: 'none',
-            color: '#0066cc',
+            color: '#2563eb',
             cursor: 'pointer',
             padding: '6px',
             borderRadius: '50%',
@@ -180,7 +180,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
           style={{
             background: 'none',
             border: 'none',
-            color: '#0066cc',
+            color: '#2563eb',
             cursor: 'pointer',
             padding: '6px',
             borderRadius: '50%',
@@ -201,7 +201,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-          gap: '8px',
+          gap: '6px',
         }}
       >
         {weekDays.map((item) => {
@@ -215,20 +215,18 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
               style={{
                 width: '100%',
                 minHeight: '66px',
-                borderRadius: '16px',
+                borderRadius: '12px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '1px',
                 cursor: 'pointer',
-                transition: 'all 0.2s ease-in-out',
-                backgroundColor: isActive ? '#0066cc' : (item.isAttendanceDay ? '#f0f7ff' : '#ffffff'),
-                border: isActive
-                  ? '2px solid #0066cc'
-                  : (item.isAttendanceDay ? '1.5px solid #93c5fd' : '1px solid #e2e8f0'),
+                transition: 'all 0.15s ease-in-out',
+                backgroundColor: isActive ? '#2563eb' : (item.isAttendanceDay ? '#eff6ff' : 'transparent'),
+                border: 'none',
                 boxShadow: isActive
-                  ? '0 4px 12px rgba(0, 102, 204, 0.35)'
+                  ? '0 4px 12px rgba(37, 99, 235, 0.28)'
                   : 'none',
                 padding: '6px 0',
               }}
@@ -239,7 +237,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
                     fontSize: '0.62rem',
                     padding: '1px 5px',
                     borderRadius: '6px',
-                    backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : '#dbeafe',
+                    backgroundColor: isActive ? 'rgba(255,255,255,0.22)' : '#dbeafe',
                     color: isActive ? '#ffffff' : '#1d4ed8',
                     fontWeight: 700,
                     lineHeight: 1.2,
@@ -254,8 +252,8 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
                       fontSize: '0.6rem',
                       padding: '1px 4px',
                       borderRadius: '6px',
-                      backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : '#f8fafc',
-                      color: isActive ? '#cbd5e1' : '#94a3b8',
+                      backgroundColor: isActive ? 'rgba(255,255,255,0.15)' : 'transparent',
+                      color: isActive ? '#ffffff' : '#94a3b8',
                       fontWeight: 600,
                       lineHeight: 1.2,
                     }}
@@ -268,7 +266,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
                 style={{
                   fontSize: '0.75rem',
                   fontWeight: 700,
-                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#1e40af' : '#475569'),
+                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#1e40af' : '#64748b'),
                 }}
               >
                 {item.dayOfWeek}
@@ -277,7 +275,7 @@ export const HorizontalDatePicker: React.FC<HorizontalDatePickerProps> = ({
                 style={{
                   fontSize: '0.95rem',
                   fontWeight: 800,
-                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#0066cc' : '#334155'),
+                  color: isActive ? '#ffffff' : (item.isAttendanceDay ? '#1d4ed8' : '#334155'),
                   lineHeight: 1.1,
                 }}
               >
