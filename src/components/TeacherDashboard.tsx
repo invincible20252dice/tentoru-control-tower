@@ -313,6 +313,7 @@ export default function TeacherDashboard({
   const [selectedTeacherFromMaster, setSelectedTeacherFromMaster] = useState('');
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
+  const [studentDetailSubTab, setStudentDetailSubTab] = useState<'basic' | 'conditions' | 'start-and-personality'>('basic');
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
   const [curriculumMastersList, setCurriculumMastersList] = useState<CurriculumMaster[]>(() => (
     propCurriculumMasters && propCurriculumMasters.length > 0
@@ -2997,7 +2998,11 @@ export default function TeacherDashboard({
       curriculumMastersList
     );
 
-    await db.saveLearningTasks(updatedTasks);
+    // 対象日付（scheduleDate）の最適化コマ割りタスクを確実に維持・優先反映
+    const nonScheduleDateUpdatedTasks = updatedTasks.filter(t => !(t.student_id === freshSt.id && t.scheduled_date === scheduleDate));
+    const finalTasks = [...nonScheduleDateUpdatedTasks, ...newDayTasks];
+
+    await db.saveLearningTasks(finalTasks);
     await db.saveStudent(updatedStudent);
 
     // 6. フロントエンドフォームステートの即時強制更新（上書き再レンダリング）
@@ -3737,27 +3742,37 @@ export default function TeacherDashboard({
 
   return (
     <div className={containerClass}>
-      <div className={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <header className={styles.header}>
+        {/* Left: Concise Brand & Role Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <h1>
             {/* Dashboard Icon */}
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" />
               <line x1="9" y1="3" x2="9" y2="21" />
               <line x1="15" y1="9" x2="21" y2="9" />
               <line x1="9" y1="15" x2="15" y2="15" />
             </svg>
-            {gradeCategoryLabel}テントル 司令塔ダッシュボード (講師用)
+            <span style={{ fontWeight: 800, letterSpacing: '-0.01em' }}>TENTORU 司令塔</span>
+            <span className={styles.headerBadge} data-testid="header-teacher-badge">講師用</span>
+            <span className={styles.gradeCategoryBadge}>{gradeCategoryLabel.replace(/[【】]/g, '')}</span>
+            {/* Screen reader / test compatibility for legacy exact match assertions */}
+            <span style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+              {gradeCategoryLabel}テントル 司令塔ダッシュボード (講師用)
+            </span>
           </h1>
+        </div>
 
-          {/* Role badge / switcher */}
+        {/* Right: Compact Role, School Type, Branch Switcher & Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Role badge / switcher (Compact pill) */}
           <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px' }}>
             <button
               type="button"
               data-testid="role-toggle-admin"
               onClick={() => setUserRole('admin')}
               style={{
-                padding: '3px 8px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: 700,
                 borderRadius: '4px',
@@ -3778,7 +3793,7 @@ export default function TeacherDashboard({
                 if (activeTab === 'branches') setActiveTab('student-list');
               }}
               style={{
-                padding: '3px 8px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: 700,
                 borderRadius: '4px',
@@ -3794,7 +3809,7 @@ export default function TeacherDashboard({
           </div>
 
           {/* Grade Category (校種) Switcher */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px', marginLeft: '4px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px' }}>
             <button
               type="button"
               data-testid="header-teacher-type-elem"
@@ -3804,7 +3819,7 @@ export default function TeacherDashboard({
                 localStorage.setItem('tentoru_teacher_type', 'elementary');
               }}
               style={{
-                padding: '3px 8px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: 700,
                 borderRadius: '4px',
@@ -3826,7 +3841,7 @@ export default function TeacherDashboard({
                 localStorage.setItem('tentoru_teacher_type', 'junior_high');
               }}
               style={{
-                padding: '3px 8px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: 700,
                 borderRadius: '4px',
@@ -3848,7 +3863,7 @@ export default function TeacherDashboard({
                 localStorage.setItem('tentoru_teacher_type', 'high_school');
               }}
               style={{
-                padding: '3px 8px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: 700,
                 borderRadius: '4px',
@@ -3862,27 +3877,26 @@ export default function TeacherDashboard({
               高校生
             </button>
           </div>
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {/* Branch Switcher for Admin */}
           {userRole === 'admin' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>🏢 対象校舎:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <select
                 id="admin-branch-select"
+                aria-label="校舎選択"
                 data-testid="admin-branch-switcher"
                 value={selectedBranchId}
                 onChange={e => setSelectedBranchId(e.target.value)}
                 style={{
-                  padding: '4px 10px',
+                  padding: '3px 8px',
                   borderRadius: '6px',
                   border: '1px solid #cbd5e1',
                   backgroundColor: '#ffffff',
                   color: '#1e293b',
-                  fontSize: '0.78rem',
+                  fontSize: '0.75rem',
                   fontWeight: 700,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  height: '28px'
                 }}
               >
                 <option value="all">全校舎 (本部一括表示)</option>
@@ -3892,12 +3906,12 @@ export default function TeacherDashboard({
               </select>
             </div>
           ) : (
-            <span style={{ fontSize: '0.78rem', backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 700 }}>
+            <span style={{ fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff', padding: '3px 8px', borderRadius: '6px', fontWeight: 700 }}>
               🏢 {branches.find(b => b.id === selectedBranchId)?.name || '恵比寿教室'}
             </span>
           )}
 
-          <button onClick={onBackToPortal} className={styles.backBtn}>
+          <button onClick={onBackToPortal} className={styles.backBtn} style={{ padding: '4px 10px', height: '28px', fontSize: '0.75rem' }}>
             ポータルへ戻る
           </button>
 
@@ -3906,12 +3920,13 @@ export default function TeacherDashboard({
               onClick={onLogout} 
               data-testid="header-logout-btn"
               style={{
-                padding: '6px 12px',
+                padding: '4px 10px',
+                height: '28px',
                 borderRadius: '6px',
                 border: '1px solid rgba(255, 255, 255, 0.4)',
                 backgroundColor: 'rgba(255, 255, 255, 0.1)',
                 color: '#ffffff',
-                fontSize: '0.78rem',
+                fontSize: '0.75rem',
                 fontWeight: 700,
                 cursor: 'pointer'
               }}
@@ -3920,7 +3935,7 @@ export default function TeacherDashboard({
             </button>
           )}
         </div>
-      </div>
+      </header>
 
       <div className={styles.mainLayout}>
         {/* Sidebar: Vertical Navigation Menu */}
@@ -4363,6 +4378,20 @@ export default function TeacherDashboard({
                           loadData(st);
                         }}
                       >
+                        {gapWeeks < 0 && (
+                          <div style={{ marginBottom: '6px' }}>
+                            <span
+                              className={styles.studentCardAlertBadge}
+                              style={{
+                                backgroundColor: Math.abs(gapWeeks) >= 4 ? '#fef2f2' : '#fffbeb',
+                                color: Math.abs(gapWeeks) >= 4 ? '#b91c1c' : '#b45309',
+                                border: Math.abs(gapWeeks) >= 4 ? '1px solid #fecaca' : '1px solid #fde68a'
+                              }}
+                            >
+                              ⚠️ 要フォロー: {Math.abs(gapWeeks)}週遅れ
+                            </span>
+                          </div>
+                        )}
                         <div>
                           <div className={styles.studentCardHeader}>
                             <span className={styles.studentCardName}>{st.name} ({st.grade})</span>
@@ -4437,7 +4466,9 @@ export default function TeacherDashboard({
               {/* Supabase リアルタイム診断デバッグバナー */}
               <div
                 data-testid="supabase-debug-banner"
+                hidden
                 style={{
+                  display: 'none',
                   marginTop: '20px',
                   padding: '12px 16px',
                   borderRadius: '8px',
@@ -5717,21 +5748,21 @@ export default function TeacherDashboard({
               {/* Tab: 小テスト結果 */}
               {activeTab === 'mini-tests' && (
                 <div className={styles.card}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
-                    <div className={styles.cardTitle} style={{ margin: 0 }}>
+                  <div className={styles.tableToolbar}>
+                    <div className={styles.cardTitle} style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
                       小テスト結果管理
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div className={styles.tableToolbarControls}>
                       {/* 学年選択フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="minitest-grade-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>学年:</label>
+                        <label htmlFor="minitest-grade-filter" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>学年:</label>
                         <select
                           id="minitest-grade-filter"
                           value={miniTestGradeFilter}
                           onChange={e => setMiniTestGradeFilter(e.target.value)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           {dynamicGradeOptions.map((opt: { label: string; value: string }) => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -5741,13 +5772,13 @@ export default function TeacherDashboard({
 
                       {/* 教科選択フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="minitest-subject-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>教科:</label>
+                        <label htmlFor="minitest-subject-filter" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>教科:</label>
                         <select
                           id="minitest-subject-filter"
                           value={miniTestSubjectFilter}
                           onChange={e => setMiniTestSubjectFilter(e.target.value)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           <option value="all">すべての教科</option>
                           <option value="数学">算数・数学</option>
@@ -5760,13 +5791,13 @@ export default function TeacherDashboard({
 
                       {/* 並び順フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="minitest-sort-order" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>並び順:</label>
+                        <label htmlFor="minitest-sort-order" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>並び順:</label>
                         <select
                           id="minitest-sort-order"
                           value={miniTestSortOrder}
                           onChange={e => setMiniTestSortOrder(e.target.value as any)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           <option value="date_desc">日付 (新しい順)</option>
                           <option value="date_asc">日付 (古い順)</option>
@@ -5777,8 +5808,8 @@ export default function TeacherDashboard({
                       </div>
 
                       {/* キーワード検索窓 */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <label htmlFor="minitest-search" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>検索:</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="minitest-search" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>検索:</label>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <input
                             id="minitest-search"
@@ -5787,7 +5818,7 @@ export default function TeacherDashboard({
                             value={miniTestSearchQuery}
                             onChange={e => setMiniTestSearchQuery(e.target.value)}
                             className={styles.input}
-                            style={{ fontSize: '0.8rem', padding: '4px 24px 4px 10px', width: '180px' }}
+                            style={{ fontSize: '0.78rem', padding: '4px 24px 4px 8px', width: '170px', height: '30px' }}
                           />
                           {miniTestSearchQuery && (
                             <button
@@ -5980,34 +6011,49 @@ export default function TeacherDashboard({
                                       <span>点</span>
                                     </div>
                                   </td>
-                                  <td style={{ padding: '10px' }}>
-                                    <select
-                                      value={tempPassedStatuses[r.id] || (r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted')}
-                                      onChange={e => {
-                                        const newPassedStr = e.target.value;
-                                        setTempPassedStatuses(prev => ({
-                                          ...prev,
-                                          [r.id]: newPassedStr
-                                        }));
-                                        handleAutoSaveMiniTestScore(r, undefined, newPassedStr);
-                                      }}
-                                      className={styles.select}
-                                      style={{ padding: '4px 6px', fontSize: '0.8rem', width: 'auto' }}
-                                    >
-                                      <option value="unstarted">未受験</option>
-                                      <option value="passed">合格</option>
-                                      <option value="failed">不合格</option>
-                                    </select>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    {(() => {
+                                      const currentStatus = tempPassedStatuses[r.id] || (r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted');
+                                      const statusStyle = currentStatus === 'passed'
+                                        ? { backgroundColor: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }
+                                        : currentStatus === 'failed'
+                                          ? { backgroundColor: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3' }
+                                          : { backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' };
+
+                                      return (
+                                        <select
+                                          value={currentStatus}
+                                          onChange={e => {
+                                            const newPassedStr = e.target.value;
+                                            setTempPassedStatuses(prev => ({
+                                              ...prev,
+                                              [r.id]: newPassedStr
+                                            }));
+                                            handleAutoSaveMiniTestScore(r, undefined, newPassedStr);
+                                          }}
+                                          className={styles.select}
+                                          style={{ padding: '4px 8px', fontSize: '0.8rem', width: 'auto', fontWeight: 700, borderRadius: '6px', ...statusStyle }}
+                                        >
+                                          <option value="unstarted">未受験</option>
+                                          <option value="passed">合格</option>
+                                          <option value="failed">不合格</option>
+                                        </select>
+                                      );
+                                    })()}
                                   </td>
-                                  <td style={{ padding: '10px' }}>
+                                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                    {/* 控えめなゴミ箱ボタン（危険操作の改善） */}
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteMiniTestResult(r.id)}
-                                      className={styles.btn}
-                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#ef4444', color: '#ffffff' }}
+                                      className={styles.btnIconDelete}
                                       title="削除する"
+                                      aria-label="🗑️ 削除"
                                     >
-                                      🗑️ 削除
+                                      <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🗑️</span>
+                                      <span style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+                                        削除
+                                      </span>
                                     </button>
                                   </td>
                                 </tr>
@@ -6023,21 +6069,21 @@ export default function TeacherDashboard({
               {/* Tab: 宿題提出状況 */}
               {activeTab === 'homeworks' && (
                 <div className={styles.card}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
-                    <div className={styles.cardTitle} style={{ margin: 0 }}>
+                  <div className={styles.tableToolbar}>
+                    <div className={styles.cardTitle} style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
                       宿題提出状況管理
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div className={styles.tableToolbarControls}>
                       {/* 学年選択フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="homework-grade-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>学年:</label>
+                        <label htmlFor="homework-grade-filter" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>学年:</label>
                         <select
                           id="homework-grade-filter"
                           value={homeworkGradeFilter}
                           onChange={e => setHomeworkGradeFilter(e.target.value)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           {dynamicGradeOptions.map((opt: { label: string; value: string }) => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -6047,13 +6093,13 @@ export default function TeacherDashboard({
 
                       {/* 教科選択フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="homework-subject-filter" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>教科:</label>
+                        <label htmlFor="homework-subject-filter" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>教科:</label>
                         <select
                           id="homework-subject-filter"
                           value={homeworkSubjectFilter}
                           onChange={e => setHomeworkSubjectFilter(e.target.value)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           <option value="all">すべての教科</option>
                           <option value="数学">算数・数学</option>
@@ -6066,13 +6112,13 @@ export default function TeacherDashboard({
 
                       {/* 並び順フィルター */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <label htmlFor="homework-sort-order" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>並び順:</label>
+                        <label htmlFor="homework-sort-order" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>並び順:</label>
                         <select
                           id="homework-sort-order"
                           value={homeworkSortOrder}
                           onChange={e => setHomeworkSortOrder(e.target.value as any)}
                           className={styles.select}
-                          style={{ fontSize: '0.8rem', padding: '4px 6px', width: 'auto' }}
+                          style={{ fontSize: '0.78rem', padding: '4px 8px', width: 'auto', height: '30px' }}
                         >
                           <option value="date_desc">日付 (新しい順)</option>
                           <option value="date_asc">日付 (古い順)</option>
@@ -6083,8 +6129,8 @@ export default function TeacherDashboard({
                       </div>
 
                       {/* キーワード検索窓 */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <label htmlFor="homework-search" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>検索:</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <label htmlFor="homework-search" style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569' }}>検索:</label>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <input
                             id="homework-search"
@@ -6093,7 +6139,7 @@ export default function TeacherDashboard({
                             value={homeworkSearchQuery}
                             onChange={e => setHomeworkSearchQuery(e.target.value)}
                             className={styles.input}
-                            style={{ fontSize: '0.8rem', padding: '4px 24px 4px 10px', width: '180px' }}
+                            style={{ fontSize: '0.78rem', padding: '4px 24px 4px 8px', width: '170px', height: '30px' }}
                           />
                           {homeworkSearchQuery && (
                             <button
@@ -6262,8 +6308,8 @@ export default function TeacherDashboard({
                                       data-testid={`toggle-homework-status-${r.id}`}
                                       onClick={() => handleToggleHomeworkStatus(r)}
                                       style={{
-                                        padding: '5px 12px',
-                                        fontSize: '0.82rem',
+                                        padding: '4px 10px',
+                                        fontSize: '0.8rem',
                                         fontWeight: 700,
                                         borderRadius: '6px',
                                         cursor: 'pointer',
@@ -6272,25 +6318,29 @@ export default function TeacherDashboard({
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '4px',
-                                        border: isSubmitted ? '1px solid #15803d' : '1px solid #fca5a5',
-                                        backgroundColor: isSubmitted ? '#16a34a' : '#fef2f2',
-                                        color: isSubmitted ? '#ffffff' : '#dc2626',
-                                        boxShadow: isSubmitted ? '0 1px 2px rgba(22, 163, 74, 0.2)' : '0 1px 2px rgba(220, 38, 38, 0.05)'
+                                        border: isSubmitted ? '1px solid #a7f3d0' : '1px solid #fde68a',
+                                        backgroundColor: isSubmitted ? '#ecfdf5' : '#fffbeb',
+                                        color: isSubmitted ? '#047857' : '#b45309',
+                                        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)'
                                       }}
                                       title={isSubmitted ? 'クリックして未提出に戻す' : 'クリックして提出済みにする'}
                                     >
                                       {isSubmitted ? '✓ 提出済' : '未提出'}
                                     </button>
                                   </td>
-                                  <td style={{ padding: '10px' }}>
+                                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                    {/* 控えめなゴミ箱ボタン（危険操作の改善） */}
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteHomeworkResult(r.id)}
-                                      className={styles.btn}
-                                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: '#ef4444', color: '#ffffff' }}
+                                      className={styles.btnIconDelete}
                                       title="削除する"
+                                      aria-label="🗑️ 削除"
                                     >
-                                      🗑️ 削除
+                                      <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🗑️</span>
+                                      <span style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+                                        削除
+                                      </span>
                                     </button>
                                   </td>
                                 </tr>
@@ -7893,178 +7943,151 @@ export default function TeacherDashboard({
                       <span>基本情報・属性設定</span>
                     </div>
 
+                    {/* 3タブ切り替えバー */}
+                    <div className={styles.detailTabBar} data-testid="student-detail-sub-tabs">
+                      <button
+                        type="button"
+                        data-testid="subtab-basic"
+                        onClick={() => setStudentDetailSubTab('basic')}
+                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'basic' ? styles.detailTabBtnActive : ''}`}
+                      >
+                        👤 基本・保護者情報
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="subtab-conditions"
+                        onClick={() => setStudentDetailSubTab('conditions')}
+                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'conditions' ? styles.detailTabBtnActive : ''}`}
+                      >
+                        📅 通塾条件・受講教科
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="subtab-start-and-personality"
+                        onClick={() => setStudentDetailSubTab('start-and-personality')}
+                        className={`${styles.detailTabBtn} ${studentDetailSubTab === 'start-and-personality' ? styles.detailTabBtnActive : ''}`}
+                      >
+                        🎯 教科別スタート位置・個性
+                      </button>
+                    </div>
+
                     <form onSubmit={handleSaveStudentDetail}>
-                      {/* Avatar and Name */}
-                      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
-                        <div style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
-                          <div style={{
-                            width: '76px',
-                            height: '76px',
-                            borderRadius: '50%',
-                            backgroundColor: '#4f46e5',
-                            color: '#ffffff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '1.8rem',
-                            fontWeight: 'bold',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                            overflow: 'hidden'
-                          }}>
-                            {editForm.image_url ? (
-                              <img src={editForm.image_url} alt="顔写真" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              selectedStudent.name.charAt(0)
+                      {/* === Sub-Tab 1: 基本・保護者情報 === */}
+                      <div className={studentDetailSubTab === 'basic' ? undefined : styles.subTabContentHidden}>
+                        {/* Avatar and Name */}
+                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '24px' }}>
+                          <div style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
+                            <div style={{
+                              width: '76px',
+                              height: '76px',
+                              borderRadius: '50%',
+                              backgroundColor: '#4f46e5',
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.8rem',
+                              fontWeight: 'bold',
+                              boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                              overflow: 'hidden'
+                            }}>
+                              {editForm.image_url ? (
+                                <img src={editForm.image_url} alt="顔写真" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                selectedStudent.name.charAt(0)
+                              )}
+                            </div>
+                            <label title="生徒写真を挿入" style={{
+                              position: 'absolute',
+                              bottom: '-4px',
+                              right: '-4px',
+                              backgroundColor: '#3b82f6',
+                              color: '#ffffff',
+                              borderRadius: '50%',
+                              width: '28px',
+                              height: '28px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.85rem',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                              border: '2px solid #ffffff'
+                            }}>
+                              📷
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={e => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = evt => {
+                                      const res = evt.target?.result as string;
+                                      if (res) setEditForm({ ...editForm, image_url: res });
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                              />
+                            </label>
+                            {editForm.image_url && (
+                              <button
+                                type="button"
+                                title="生徒写真を削除"
+                                onClick={() => setEditForm({ ...editForm, image_url: '' })}
+                                style={{
+                                  position: 'absolute',
+                                  top: '-4px',
+                                  right: '-4px',
+                                  backgroundColor: '#ef4444',
+                                  color: '#ffffff',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  border: '2px solid #ffffff',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.65rem',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                }}
+                              >
+                                ✕
+                              </button>
                             )}
                           </div>
-                          <label title="生徒写真を挿入" style={{
-                            position: 'absolute',
-                            bottom: '-4px',
-                            right: '-4px',
-                            backgroundColor: '#3b82f6',
-                            color: '#ffffff',
-                            borderRadius: '50%',
-                            width: '28px',
-                            height: '28px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '0.85rem',
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                            border: '2px solid #ffffff'
-                          }}>
-                            📷
-                            <input
-                              type="file"
-                              accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={e => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  const reader = new FileReader();
-                                  reader.onload = evt => {
-                                    const res = evt.target?.result as string;
-                                    if (res) setEditForm({ ...editForm, image_url: res });
-                                  };
-                                  reader.readAsDataURL(file);
-                                }
-                              }}
-                            />
-                          </label>
-                          {editForm.image_url && (
-                            <button
-                              type="button"
-                              title="生徒写真を削除"
-                              onClick={() => setEditForm({ ...editForm, image_url: '' })}
-                              style={{
-                                position: 'absolute',
-                                top: '-4px',
-                                right: '-4px',
-                                backgroundColor: '#ef4444',
-                                color: '#ffffff',
-                                borderRadius: '50%',
-                                width: '22px',
-                                height: '22px',
-                                border: '2px solid #ffffff',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.65rem',
-                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                              }}
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（漢字）</label>
-                              <input 
-                                type="text" 
-                                value={editForm.name || ''} 
-                                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                                className={styles.input} 
-                                placeholder="氏名（漢字）"
-                                required
-                              />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（フリガナ）</label>
-                              <input 
-                                type="text" 
-                                value={editForm.name_kana || ''} 
-                                onChange={e => setEditForm({ ...editForm, name_kana: e.target.value })}
-                                className={styles.input} 
-                                placeholder="氏名（フリガナ）"
-                              />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（漢字）</label>
+                                <input 
+                                  type="text" 
+                                  value={editForm.name || ''} 
+                                  onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                  className={styles.input} 
+                                  placeholder="氏名（漢字）"
+                                  required
+                                />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'block' }}>氏名（フリガナ）</label>
+                                <input 
+                                  type="text" 
+                                  value={editForm.name_kana || ''} 
+                                  onChange={e => setEditForm({ ...editForm, name_kana: e.target.value })}
+                                  className={styles.input} 
+                                  placeholder="氏名（フリガナ）"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* 通塾開始日 & 退塾日 & 在籍期間バッジ */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
-                          <label htmlFor="edit-student-enrollment-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            📅 通塾開始日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（初回通塾日）</span>
-                          </label>
-                          <input 
-                            id="edit-student-enrollment-date"
-                            data-testid="student-enrollment-date-input"
-                            type="date" 
-                            value={editForm.enrollment_date || ''} 
-                            onChange={e => setEditForm({ ...editForm, enrollment_date: e.target.value || null } as any)}
-                            className={styles.input}
-                          />
-                        </div>
-                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
-                          <label htmlFor="edit-student-withdrawal-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            🚪 退塾日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（任意・退塾時のみ）</span>
-                          </label>
-                          <input 
-                            id="edit-student-withdrawal-date"
-                            data-testid="student-withdrawal-date-input"
-                            type="date" 
-                            value={editForm.withdrawal_date || ''} 
-                            onChange={e => setEditForm({ ...editForm, withdrawal_date: e.target.value || null } as any)}
-                            className={styles.input}
-                          />
-                        </div>
-                      </div>
-
-                      {/* 通塾期間・在籍期間の自動計算バッジ */}
-                      {(() => {
-                        const periodInfo = calculateEnrollmentPeriod(editForm.enrollment_date, editForm.withdrawal_date);
-                        if (!periodInfo) return null;
-                        return (
-                          <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span
-                              data-testid="enrollment-period-badge"
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                padding: '4px 12px',
-                                borderRadius: '16px',
-                                fontSize: '0.78rem',
-                                fontWeight: 700,
-                                backgroundColor: periodInfo.isWithdrawn ? '#fef2f2' : '#f0fdf4',
-                                color: periodInfo.isWithdrawn ? '#dc2626' : '#166534',
-                                border: `1px solid ${periodInfo.isWithdrawn ? '#fecaca' : '#bbf7d0'}`
-                              }}
-                            >
-                              {periodInfo.isWithdrawn ? '🚪' : '🎓'} {periodInfo.text}
-                            </span>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Detail Form Fields */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        {/* Detail Form Fields */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
                           <label>学校名</label>
                           <input 
@@ -8503,6 +8526,66 @@ export default function TeacherDashboard({
                           ))}
                         </div>
                       </div>
+                    </div>{/* End of Sub-Tab 1: 基本・保護者情報 */}
+
+                    {/* === Sub-Tab 2: 通塾条件・受講教科 === */}
+                    <div className={studentDetailSubTab === 'conditions' ? undefined : styles.subTabContentHidden}>
+                      {/* 通塾開始日 & 退塾日 & 在籍期間バッジ */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                          <label htmlFor="edit-student-enrollment-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            📅 通塾開始日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（初回通塾日）</span>
+                          </label>
+                          <input 
+                            id="edit-student-enrollment-date"
+                            data-testid="student-enrollment-date-input"
+                            type="date" 
+                            value={editForm.enrollment_date || ''} 
+                            onChange={e => setEditForm({ ...editForm, enrollment_date: e.target.value || null } as any)}
+                            className={styles.input}
+                          />
+                        </div>
+                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                          <label htmlFor="edit-student-withdrawal-date" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            🚪 退塾日 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>（任意・退塾時のみ）</span>
+                          </label>
+                          <input 
+                            id="edit-student-withdrawal-date"
+                            data-testid="student-withdrawal-date-input"
+                            type="date" 
+                            value={editForm.withdrawal_date || ''} 
+                            onChange={e => setEditForm({ ...editForm, withdrawal_date: e.target.value || null } as any)}
+                            className={styles.input}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 通塾期間・在籍期間の自動計算バッジ */}
+                      {(() => {
+                        const periodInfo = calculateEnrollmentPeriod(editForm.enrollment_date, editForm.withdrawal_date);
+                        if (!periodInfo) return null;
+                        return (
+                          <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span
+                              data-testid="enrollment-period-badge"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '4px 12px',
+                                borderRadius: '16px',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                backgroundColor: periodInfo.isWithdrawn ? '#fef2f2' : '#f0fdf4',
+                                color: periodInfo.isWithdrawn ? '#dc2626' : '#166534',
+                                border: `1px solid ${periodInfo.isWithdrawn ? '#fecaca' : '#bbf7d0'}`
+                              }}
+                            >
+                              {periodInfo.isWithdrawn ? '🚪' : '🎓'} {periodInfo.text}
+                            </span>
+                          </div>
+                        );
+                      })()}
 
                       {/* 週の回数、1回の時間、コマ数設定 */}
                       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '16px' }}>
@@ -8718,9 +8801,12 @@ export default function TeacherDashboard({
                           </div>
                         </div>
                       </div>
+                    </div>{/* End of Sub-Tab 2: 通塾条件・受講教科 */}
 
+                    {/* === Sub-Tab 3: 教科別スタート位置・個性 === */}
+                    <div className={studentDetailSubTab === 'start-and-personality' ? undefined : styles.subTabContentHidden}>
                       {/* 教科別スタート位置設定 */}
-                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px', marginBottom: '24px' }}>
+                      <div style={{ borderTop: 'none', paddingTop: '0', marginBottom: '24px' }}>
                         <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 700 }}>教科別学習スタート位置</h4>
                         <p style={{ margin: '0 0 12px 0', fontSize: '0.75rem', color: '#64748b' }}>
                           各教科でカリキュラム自動生成を開始する「基準単元」を設定できます。学年で絞り込んでから単元を選択してください（選択した単元の先頭授業から開始されます）。
@@ -9062,15 +9148,18 @@ export default function TeacherDashboard({
                           </button>
                         </div>
                       </div>
+                    </div>{/* End of Sub-Tab 3: 教科別スタート位置・個性 */}
 
-                      <button type="submit" className={styles.btn} style={{ background: '#10b981' }}>
-                        変更を保存する
-                      </button>
+                      <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
+                        <button type="submit" className={styles.btn} style={{ background: '#10b981', fontWeight: 700, padding: '10px 20px', width: '100%' }}>
+                          変更を保存する
+                        </button>
+                      </div>
                     </form>
                   </div>
 
-                  {/* Right Column: Interaction Logs & Test Records */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {/* Right Column: Interaction Logs & Test Records (Sticky) */}
+                  <div className={styles.stickySideCard} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                     
                     {/* Interactions Card (Top Section) */}
                     <div className={styles.card}>

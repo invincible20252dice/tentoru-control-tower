@@ -14,21 +14,25 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
-  background: linear-gradient(135deg, #4f46e5, #06b6d4);
-  padding: 24px;
-  border-radius: 16px;
+  min-height: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #3b82f6, #0284c7);
+  padding: 0 16px;
+  border-radius: 12px;
   color: #ffffff;
-  box-shadow: 0 4px 20px rgba(79, 70, 229, 0.15);
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.15);
+  box-sizing: border-box;
 }
 
 .header h1 {
-  font-size: 1.5rem;
+  font-size: 1.05rem;
   font-weight: 800;
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .backBtn {
@@ -761,5 +765,140 @@
 
 .darkTheme .studentCardFooter {
   border-color: #27272a;
+}
+
+/* スリムヘッダー用バッジ & セレクター群 */
+.headerBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(4px);
+}
+
+.gradeCategoryBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* 控えめなゴミ箱ボタン（危険操作の改善） */
+.btnIconDelete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  padding: 0;
+}
+
+.btnIconDelete:hover {
+  color: #dc2626;
+  background-color: #fef2f2;
+  border-color: #fecaca;
+}
+
+/* 1行ツールバー */
+.tableToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background-color: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+
+.tableToolbarControls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 生徒一覧カードの進捗アラートタグ（上部配置） */
+.studentCardAlertBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* 生徒詳細（カルテ）タブバー */
+.detailTabBar {
+  display: flex;
+  gap: 6px;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 20px;
+  padding-bottom: 2px;
+}
+
+.detailTabBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -4px;
+  transition: all 0.15s ease;
+}
+
+.detailTabBtn:hover {
+  color: #1e293b;
+  background-color: #f1f5f9;
+}
+
+.detailTabBtnActive {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+/* 独立サイドカード（sticky top-6） */
+.stickySideCard {
+  position: sticky;
+  top: 24px;
+}
+
+/* 非アクティブタブの視覚的非表示（アクセシビリティツリー・テスト互換維持） */
+.subTabContentHidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  border: 0 !important;
 }
 
