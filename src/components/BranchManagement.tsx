@@ -812,6 +812,7 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
                     />
                     <button
                       type="button"
+                      data-testid="toggle-password-visibility-btn"
                       onClick={() => setShowPassword(!showPassword)}
                       style={{
                         position: 'absolute',

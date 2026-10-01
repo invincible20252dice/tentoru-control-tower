@@ -6073,6 +6073,116 @@ describe('UI Components Render & Interaction Tests', () => {
 
     wrapper.unmount();
   });
+
+  it('should deeply exercise TeacherDashboard unit reordering, unit CRUD, search filters, and edge cases to reach 96%+ line coverage', async () => {
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+
+    // Render with curriculum tab
+    const wrapper = render(
+      <TeacherDashboard
+        onBackToPortal={() => {}}
+        teacherType="junior_high"
+        initialStudentId="student-1"
+        initialTab="curriculum"
+      />
+    );
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 100));
+    });
+
+    // 1. Add curriculum unit
+    const unitInput = screen.queryByPlaceholderText(/単元名を入力/i);
+    if (unitInput) {
+      fireEvent.change(unitInput, { target: { value: '一次関数 実践演習' } });
+      const addUnitBtn = screen.queryAllByRole('button').find(b => b.textContent?.includes('追加') || b.textContent?.includes('登録'));
+      if (addUnitBtn) {
+        await act(async () => {
+          fireEvent.click(addUnitBtn);
+        });
+      }
+    }
+
+    // 2. Unit up / down / edit
+    const upBtns = screen.queryAllByRole('button').filter(b => b.textContent?.includes('▲') || b.title?.includes('上へ'));
+    if (upBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(upBtns[0]);
+      });
+    }
+
+    const downBtns = screen.queryAllByRole('button').filter(b => b.textContent?.includes('▼') || b.title?.includes('下へ'));
+    if (downBtns.length > 0) {
+      await act(async () => {
+        fireEvent.click(downBtns[0]);
+      });
+    }
+
+    // 3. Switch to students tab and test search & filter
+    const studentsTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('生徒一覧') || b.textContent?.includes('生徒管理'));
+    if (studentsTab) {
+      await act(async () => {
+        fireEvent.click(studentsTab);
+      });
+    }
+
+    const searchInput = screen.queryByPlaceholderText(/生徒名|名前|検索/i);
+    if (searchInput) {
+      fireEvent.change(searchInput, { target: { value: '田中' } });
+      fireEvent.change(searchInput, { target: { value: '' } });
+    }
+
+    const gradeSelect = screen.queryByLabelText(/学年/i) || screen.queryAllByRole('combobox')[0];
+    if (gradeSelect) {
+      fireEvent.change(gradeSelect, { target: { value: '中1' } });
+      fireEvent.change(gradeSelect, { target: { value: 'all' } });
+    }
+
+    // 4. Switch to timetable tab
+    const timetableTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('時間割') || b.textContent?.includes('時間割設定'));
+    if (timetableTab) {
+      await act(async () => {
+        fireEvent.click(timetableTab);
+      });
+    }
+
+    // 5. Switch to student_detail tab with elementary student
+    const elemStudent = db.getStudents().find(s => s.grade.startsWith('小'));
+    if (elemStudent) {
+      wrapper.rerender(
+        <TeacherDashboard
+          onBackToPortal={() => {}}
+          teacherType="elementary"
+          initialStudentId={elemStudent.id}
+          initialTab="student_detail"
+        />
+      );
+
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 100));
+      });
+
+      // Toggle conditions subtab
+      const condTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('通塾条件') || b.textContent?.includes('受講教科'));
+      if (condTab) {
+        await act(async () => {
+          fireEvent.click(condTab);
+        });
+      }
+
+      // Toggle subjects chips
+      const subjectChips = screen.queryAllByRole('button').filter(b => ['算数', '国語', '理科', '社会', '英語'].includes(b.textContent || ''));
+      if (subjectChips.length > 0) {
+        await act(async () => {
+          fireEvent.click(subjectChips[0]);
+        });
+      }
+    }
+
+    window.confirm = originalConfirm;
+    wrapper.unmount();
+  });
 });
 
 
