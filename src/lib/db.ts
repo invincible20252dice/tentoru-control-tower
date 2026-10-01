@@ -1871,16 +1871,16 @@ class DatabaseService {
       toSave.registered_year = curYear;
     }
 
-function isValidUUID(str?: string | null): boolean {
-  if (!str) return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
-}
+    const isValidUUID = (str?: string | null): boolean => {
+      if (!str) return false;
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+    };
 
     let savedData: any = null;
 
     if (!this.isMockMode && this.supabase) {
-      // Keep school_name in payloadToSave, only strip transient properties like school, units, tasks
-      const { school, units, tasks, ...rawPayload } = toSave as any;
+      // Strip transient/calculated properties that do not exist as columns in Supabase students table
+      const { school, units, tasks, school_name, ...rawPayload } = toSave as any;
       const payloadToSave: any = { ...rawPayload };
 
       // Sanitize UUID fields so non-UUID mock values (like 'unit-102-1' or 'sch-1') never cause Postgres 22P02 syntax errors
@@ -1902,42 +1902,58 @@ function isValidUUID(str?: string | null): boolean {
 
       console.log('[DEBUG] Save Payload:', payloadToSave);
 
-      let { data, error } = await this.supabase.from('students').upsert(payloadToSave).select().single();
-      if (error) {
-        console.error('Supabase saveStudent upsert error:', error);
-        
-        // UUID構文エラー (22P02) の場合のUUID自動フォールバック
-        if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
-          const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
-          const retryPayload = { ...payloadToSave };
-          if (validUUID) {
-            retryPayload.id = validUUID;
-            toSave.id = validUUID;
-          } else {
-            delete retryPayload.id;
-          }
-          const retryRes = await this.supabase.from('students').upsert(retryPayload).select().single();
-          if (!retryRes.error && retryRes.data) {
-            savedData = retryRes.data;
-          }
+      // Attempt upsert with automatic column stripping for schema mismatches (PGRST204)
+      let currentPayload = { ...payloadToSave };
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let { data, error } = await this.supabase.from('students').upsert(currentPayload).select().single();
+        if (!error && data) {
+          savedData = data;
+          break;
         }
 
-        // If column assigned_teachers or selected_subjects or school_name is not present on Supabase, fallback by saving minimal clean payload
-        if (!savedData) {
-          const minimalCleanPayload: any = {
-            student_id: payloadToSave.student_id,
-            name: payloadToSave.name,
-            email: payloadToSave.email,
-            grade: payloadToSave.grade,
-            status: payloadToSave.status || 'normal',
-            period_count: payloadToSave.period_count || 2,
-            created_at: payloadToSave.created_at || new Date().toISOString()
-          };
-          if (payloadToSave.id && isValidUUID(payloadToSave.id)) {
-            minimalCleanPayload.id = payloadToSave.id;
+        lastError = error;
+        console.warn(`Supabase saveStudent attempt ${attempt + 1} error:`, error);
+
+        if (error) {
+          // 1. Column not found error (PGRST204): dynamically strip the missing column and retry
+          const missingColMatch = error.message?.match(/Could not find the '([^']+)' column/i) ||
+                                  error.details?.match(/Could not find the '([^']+)' column/i);
+          if (missingColMatch && missingColMatch[1]) {
+            const missingCol = missingColMatch[1];
+            console.warn(`Stripping missing column '${missingCol}' from students payload and retrying...`);
+            delete currentPayload[missingCol];
+            continue;
           }
-          if (payloadToSave.school_id && isValidUUID(payloadToSave.school_id)) {
-            minimalCleanPayload.school_id = payloadToSave.school_id;
+
+          // 2. UUID syntax error (22P02)
+          if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
+            const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
+            if (validUUID) {
+              currentPayload.id = validUUID;
+              toSave.id = validUUID;
+            } else {
+              delete currentPayload.id;
+            }
+            continue;
+          }
+
+          // 3. Fallback to minimal core fields
+          const minimalCleanPayload: any = {
+            student_id: currentPayload.student_id,
+            name: currentPayload.name,
+            email: currentPayload.email,
+            grade: currentPayload.grade,
+            status: currentPayload.status || 'normal',
+            period_count: currentPayload.period_count || 2,
+            created_at: currentPayload.created_at || new Date().toISOString()
+          };
+          if (currentPayload.id && isValidUUID(currentPayload.id)) {
+            minimalCleanPayload.id = currentPayload.id;
+          }
+          if (currentPayload.school_id && isValidUUID(currentPayload.school_id)) {
+            minimalCleanPayload.school_id = currentPayload.school_id;
           }
           const { data: fbData, error: fbError } = await this.supabase
             .from('students')
@@ -1946,25 +1962,14 @@ function isValidUUID(str?: string | null): boolean {
             .single();
           if (!fbError && fbData) {
             savedData = fbData;
+            break;
           }
+          break;
         }
+      }
 
-        if (!savedData && payloadToSave.id) {
-          const { data: updateData, error: updateError } = await this.supabase
-            .from('students')
-            .update(payloadToSave)
-            .eq('id', payloadToSave.id)
-            .select()
-            .single();
-          if (!updateError && updateData) {
-            savedData = updateData;
-          }
-        }
-        if (!savedData) {
-          throw new Error(`Supabase Error [${error.code || 'UNKNOWN'}]: ${error.message || error.details || JSON.stringify(error)}`);
-        }
-      } else {
-        savedData = data;
+      if (!savedData && lastError) {
+        throw new Error(`Supabase Error [${lastError.code || 'UNKNOWN'}]: ${lastError.message || lastError.details || JSON.stringify(lastError)}`);
       }
     }
 
