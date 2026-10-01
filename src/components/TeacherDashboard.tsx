@@ -2820,215 +2820,220 @@ export default function TeacherDashboard({
   const handleAutoReschedule = async () => {
     if (!selectedStudent) return;
 
-    const freshSt = db.getStudents().find(s => s.id === selectedStudent.id) || selectedStudent;
-    const freshTasks = db.getLearningTasks();
-    const targetBranchId = freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1');
-    const branchRules = db.getBranchAIRules(targetBranchId);
+    try {
+      const freshSt = db.getStudents().find(s => s.id === selectedStudent.id) || selectedStudent;
+      const freshTasks = db.getLearningTasks();
+      const targetBranchId = freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1');
+      const branchRules = db.getBranchAIRules(targetBranchId);
 
-    // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
-    const loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || periodCount || 3;
-    const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
-    const optimizedPeriods = generateSlotsForSelectedSubjects({
-      student: freshSt,
-      periodCount: loadedPeriodCount,
-      selectedSubjects: freshSt.selected_subjects,
-      tasks: freshTasks,
-      branchRules,
-      curriculumMasters: rawMasters,
-      curriculumUnits: allCurriculumUnits,
-      schoolId: freshSt.school_id,
-      lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
-      miniTestResults: db.getMiniTestResults(freshSt.id)
-    });
+      // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
+      const loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || periodCount || 3;
+      const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+      const optimizedPeriods = generateSlotsForSelectedSubjects({
+        student: freshSt,
+        periodCount: loadedPeriodCount,
+        selectedSubjects: freshSt.selected_subjects,
+        tasks: freshTasks,
+        branchRules,
+        curriculumMasters: rawMasters,
+        curriculumUnits: allCurriculumUnits,
+        schoolId: freshSt.school_id,
+        lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
+        miniTestResults: db.getMiniTestResults(freshSt.id)
+      });
 
-    // 各コマの単元テスト To 固定チェック & 範囲補正
-    Object.keys(optimizedPeriods).forEach(pKey => {
-      const p = parseInt(pKey);
-      const sel = optimizedPeriods[p];
-      if (sel && sel.startLessonName) {
-        const isUnitTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
-        if (isUnitTest) {
-          sel.endLessonId = sel.startLessonId;
-          sel.endLessonName = sel.startLessonName;
-          sel.lessonRange = sel.startLessonName;
-        }
-      }
-    });
-
-    // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出 (State完全リセット＆完了済みテスト除外)
-    const extractedTodayTests: typeof todayTests = [];
-    const allMasters = ensureMathEnglishUnitTests(rawMasters);
-    Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
-      if (!sel || !sel.subject || !sel.startLessonName) return;
-      const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト');
-      if (isTest) {
-        const testContent = sel.lessonRange || sel.startLessonName;
-        const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
-        
-        // 完了済み(合格済み)テストの除外判定
-        if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
-          const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
-          if (!exists) {
-            let unitName = sel.startLessonName ? (sel.startLessonName.includes(' - ') ? sel.startLessonName.split(' - ')[0].trim() : sel.startLessonName.split(' ')[0]) : '単元テスト';
-            const matchedMaster = allMasters.find(m =>
-              m.id === sel.startLessonId ||
-              m.id === sel.unitId ||
-              m.lesson_name === cleanContent ||
-              m.lesson_name === testContent ||
-              `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent ||
-              ((m.item_type === 'unit_test' || m.lesson_name.includes('テスト')) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
-            );
-            const passingLine = matchedMaster?.passing_line || '80%以上';
-
-            extractedTodayTests.push({
-              id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
-              subject: sel.subject,
-              testType: 'unit_test',
-              unitName: unitName,
-              content: testContent,
-              passingLine: passingLine,
-              targetScope: 'individual'
-            });
+      // 各コマの単元テスト To 固定チェック & 範囲補正
+      Object.keys(optimizedPeriods).forEach(pKey => {
+        const p = parseInt(pKey);
+        const sel = optimizedPeriods[p];
+        if (sel && sel.startLessonName) {
+          const isUnitTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
+          if (isUnitTest) {
+            sel.endLessonId = sel.startLessonId;
+            sel.endLessonName = sel.startLessonName;
+            sel.lessonRange = sel.startLessonName;
           }
         }
+      });
+
+      // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出 (State完全リセット＆完了済みテスト除外)
+      const extractedTodayTests: typeof todayTests = [];
+      const allMasters = ensureMathEnglishUnitTests(rawMasters);
+      Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
+        if (!sel || !sel.subject || !sel.startLessonName) return;
+        const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト');
+        if (isTest) {
+          const testContent = sel.lessonRange || sel.startLessonName;
+          const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+          
+          // 完了済み(合格済み)テストの除外判定
+          if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
+            const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
+            if (!exists) {
+              let unitName = sel.startLessonName ? (sel.startLessonName.includes(' - ') ? sel.startLessonName.split(' - ')[0].trim() : sel.startLessonName.split(' ')[0]) : '単元テスト';
+              const matchedMaster = allMasters.find(m =>
+                m.id === sel.startLessonId ||
+                m.id === sel.unitId ||
+                m.lesson_name === cleanContent ||
+                m.lesson_name === testContent ||
+                `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent ||
+                ((m.item_type === 'unit_test' || m.lesson_name.includes('テスト')) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
+              );
+              const passingLine = matchedMaster?.passing_line || '80%以上';
+
+              extractedTodayTests.push({
+                id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
+                subject: sel.subject,
+                testType: 'unit_test',
+                unitName: unitName,
+                content: testContent,
+                passingLine: passingLine,
+                targetScope: 'individual'
+              });
+            }
+          }
+        }
+      });
+
+      // 「-- 単元テストマスタから選択 --」などの空行および無効行を完全除外
+      const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
+
+      // DBへの保存 (本日のテスト)
+      await db.deleteMiniTestResultByDate(freshSt.id, scheduleDate);
+      for (const t of cleanedTests) {
+        await db.saveMiniTestResult({
+          id: t.id,
+          student_id: freshSt.id,
+          date: scheduleDate,
+          subject: t.subject,
+          test_type: 'unit_test',
+          unit_name: t.unitName,
+          test_content: t.content,
+          score: null,
+          passing_line: t.passingLine,
+          target_scope: 'individual',
+          created_at: new Date().toISOString()
+        });
       }
-    });
 
-    // 「-- 単元テストマスタから選択 --」などの空行および無効行を完全除外
-    const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
+      // 3. 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
+      const newDayTasks: LearningTask[] = [];
+      Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
+        const p = parseInt(pStr);
+        if (!sel || !sel.subject) return;
 
-    // DBへの保存 (本日のテスト)
-    await db.deleteMiniTestResultByDate(freshSt.id, scheduleDate);
-    for (const t of cleanedTests) {
-      await db.saveMiniTestResult({
-        id: t.id,
-        student_id: freshSt.id,
-        date: scheduleDate,
-        subject: t.subject,
-        test_type: 'unit_test',
-        unit_name: t.unitName,
-        test_content: t.content,
-        score: null,
-        passing_line: t.passingLine,
-        target_scope: 'individual',
-        created_at: new Date().toISOString()
-      });
-    }
+        const unit = allCurriculumUnits.find(u => u.id === sel.unitId);
+        const master = curriculumMastersList.find(m => m.id === sel.unitId || String(m.sort_order) === String(sel.unitId));
 
-    // 3. 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
-    const newDayTasks: LearningTask[] = [];
-    Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
-      const p = parseInt(pStr);
-      if (!sel || !sel.subject) return;
-
-      const unit = allCurriculumUnits.find(u => u.id === sel.unitId);
-      const master = curriculumMastersList.find(m => m.id === sel.unitId || String(m.sort_order) === String(sel.unitId));
-
-      newDayTasks.push({
-        id: `task-${freshSt.id}-${scheduleDate}-${p}`,
-        student_id: freshSt.id,
-        scheduled_date: scheduleDate,
-        period: p,
-        subject: sel.subject,
-        unit_id: sel.unitId || (master ? master.id : ''),
-        custom_unit_name: sel.customTheme || '',
-        start_lesson_id: sel.startLessonId || '',
-        end_lesson_id: sel.endLessonId || '',
-        start_lesson_name: sel.startLessonName || '',
-        end_lesson_name: sel.endLessonName || '',
-        lesson_range: sel.lessonRange || formatLessonRange(sel.startLessonName, sel.endLessonName),
-        status: 'unstarted',
-        video_watched: false,
-        test_passed: false,
-        office_note: commonOfficeNote || '',
-        created_at: new Date().toISOString()
-      });
-    });
-
-    if (newDayTasks.length > 0) {
-      await db.deleteLearningTasksForDate(freshSt.id, scheduleDate);
-      await db.saveLearningTasks(newDayTasks);
-    }
-
-    // 4. 自動宿題 (2回目演習) の生成
-    const autoHwsText = getAutoDrillHomeworkText(freshSt.grade?.startsWith('中') ? '数学' : '算数', optimizedPeriods);
-    const autoHomeworks: typeof todayHomeworks = [];
-    if (autoHwsText) {
-      const hwDate = getNextAttendanceDateForStudent(scheduleDate, freshSt);
-      autoHomeworks.push({
-        id: `hw-auto-${freshSt.id}-${scheduleDate}-1`,
-        subject: freshSt.grade?.startsWith('中') ? '数学' : '算数',
-        type: 'drill_2nd',
-        content: autoHwsText,
-        deadline: hwDate,
-        targetScope: 'individual'
+        newDayTasks.push({
+          id: `task-${freshSt.id}-${scheduleDate}-${p}`,
+          student_id: freshSt.id,
+          scheduled_date: scheduleDate,
+          period: p,
+          subject: sel.subject,
+          unit_id: sel.unitId || (master ? master.id : ''),
+          custom_unit_name: sel.customTheme || '',
+          start_lesson_id: sel.startLessonId || '',
+          end_lesson_id: sel.endLessonId || '',
+          start_lesson_name: sel.startLessonName || '',
+          end_lesson_name: sel.endLessonName || '',
+          lesson_range: sel.lessonRange || formatLessonRange(sel.startLessonName, sel.endLessonName),
+          status: 'unstarted',
+          video_watched: false,
+          test_passed: false,
+          office_note: commonOfficeNote || '',
+          created_at: new Date().toISOString()
+        });
       });
 
-      await db.deleteHomeworkResultsByDate(freshSt.id, scheduleDate);
-      await db.saveHomeworkResult({
-        id: autoHomeworks[0].id,
-        student_id: freshSt.id,
-        date: scheduleDate,
-        subject: autoHomeworks[0].subject,
-        homework_type: 'drill_2nd',
-        homework_content: autoHwsText,
-        homework_deadline: hwDate,
-        status: 'incomplete',
-        target_scope: 'individual',
-        created_at: new Date().toISOString()
-      });
-    }
-
-    // 5. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
-    const futureDates: string[] = generateAttendanceDates(
-      scheduleDate,
-      freshSt.selected_days || ['tuesday', 'friday'],
-      10
-    ).filter(dStr => dStr > scheduleDate);
-
-    const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
-      freshSt,
-      db.getLearningTasks(),
-      scheduleDate,
-      futureDates,
-      loadedPeriodCount,
-      milestonePlans,
-      allCurriculumUnits,
-      branchRules,
-      curriculumMastersList
-    );
-
-    // 対象日付（scheduleDate）の最適化コマ割りタスクを確実に維持・優先反映
-    const nonScheduleDateUpdatedTasks = updatedTasks.filter(t => !(t.student_id === freshSt.id && t.scheduled_date === scheduleDate));
-    const finalTasks = [...nonScheduleDateUpdatedTasks, ...newDayTasks];
-
-    await db.saveLearningTasks(finalTasks);
-    await db.saveStudent(updatedStudent);
-
-    // 6. フロントエンドフォームステートの即時強制更新（上書き再レンダリング）
-    setPeriodSelections(optimizedPeriods);
-    setPeriodCount(loadedPeriodCount);
-    setTodayTests(cleanedTests);
-    setTodayHomeworks(autoHomeworks);
-
-    // 日付フォーマット
-    const dObj = new Date(scheduleDate);
-    const formattedDate = !isNaN(dObj.getTime())
-      ? `${dObj.getMonth() + 1}月${dObj.getDate()}日`
-      : scheduleDate;
-
-    if (isPunked) {
-      alert(`【要判断：計画パンクアラート発火】\n自動リスケジュールを試みましたが、1日あたりのタスク量が現在の設定コマ数(${loadedPeriodCount}コマ)を超えたため、自動適用をストップしました。目標期日の変更や単元の間引きを検討してください。生徒ステータスが警告(パンク)に更新されます。`);
-    } else {
-      setTimetableToast(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
-      setTimeout(() => setTimetableToast(null), 4000);
-      if (typeof window !== 'undefined') {
-        window.alert(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
+      if (newDayTasks.length > 0) {
+        await db.deleteLearningTasksForDate(freshSt.id, scheduleDate);
+        await db.saveLearningTasks(newDayTasks);
       }
-    }
 
-    setSelectedStudent(updatedStudent);
-    loadData();
+      // 4. 自動宿題 (2回目演習) の生成
+      const autoHwsText = getAutoDrillHomeworkText(freshSt.grade?.startsWith('中') ? '数学' : '算数', optimizedPeriods);
+      const autoHomeworks: typeof todayHomeworks = [];
+      if (autoHwsText) {
+        const hwDate = getNextAttendanceDateForStudent(scheduleDate, freshSt);
+        autoHomeworks.push({
+          id: `hw-auto-${freshSt.id}-${scheduleDate}-1`,
+          subject: freshSt.grade?.startsWith('中') ? '数学' : '算数',
+          type: 'drill_2nd',
+          content: autoHwsText,
+          deadline: hwDate,
+          targetScope: 'individual'
+        });
+
+        await db.deleteHomeworkResultsByDate(freshSt.id, scheduleDate);
+        await db.saveHomeworkResult({
+          id: autoHomeworks[0].id,
+          student_id: freshSt.id,
+          date: scheduleDate,
+          subject: autoHomeworks[0].subject,
+          homework_type: 'drill_2nd',
+          homework_content: autoHwsText,
+          homework_deadline: hwDate,
+          status: 'incomplete',
+          target_scope: 'individual',
+          created_at: new Date().toISOString()
+        });
+      }
+
+      // 5. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
+      const futureDates: string[] = generateAttendanceDates(
+        scheduleDate,
+        freshSt.selected_days || ['tuesday', 'friday'],
+        10
+      ).filter(dStr => dStr > scheduleDate);
+
+      const { updatedTasks, updatedStudent, isPunked } = rescheduleDelayedTasks(
+        freshSt,
+        db.getLearningTasks(),
+        scheduleDate,
+        futureDates,
+        loadedPeriodCount,
+        milestonePlans,
+        allCurriculumUnits,
+        branchRules,
+        curriculumMastersList
+      );
+
+      // 対象日付（scheduleDate）の最適化コマ割りタスクを確実に維持・優先反映
+      const nonScheduleDateUpdatedTasks = updatedTasks.filter(t => !(t.student_id === freshSt.id && t.scheduled_date === scheduleDate));
+      const finalTasks = [...nonScheduleDateUpdatedTasks, ...newDayTasks];
+
+      await db.saveLearningTasks(finalTasks);
+      await db.saveStudent(updatedStudent);
+
+      // 6. フロントエンドフォームステートの即時強制更新（上書き再レンダリング）
+      setPeriodSelections(optimizedPeriods);
+      setPeriodCount(loadedPeriodCount);
+      setTodayTests(cleanedTests);
+      setTodayHomeworks(autoHomeworks);
+
+      // 日付フォーマット
+      const dObj = new Date(scheduleDate);
+      const formattedDate = !isNaN(dObj.getTime())
+        ? `${dObj.getMonth() + 1}月${dObj.getDate()}日`
+        : scheduleDate;
+
+      if (isPunked) {
+        alert(`【要判断：計画パンクアラート発火】\n自動リスケジュールを試みましたが、1日あたりのタスク量が現在の設定コマ数(${loadedPeriodCount}コマ)を超えたため、自動適用をストップしました。目標期日の変更や単元の間引きを検討してください。生徒ステータスが警告(パンク)に更新されます。`);
+      } else {
+        setTimetableToast(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
+        setTimeout(() => setTimetableToast(null), 4000);
+        if (typeof window !== 'undefined') {
+          window.alert(`✅ ${formattedDate}の学習計画を最新の進捗に合わせて最適化しました`);
+        }
+      }
+
+      setSelectedStudent(updatedStudent);
+      await loadData();
+    } catch (err: any) {
+      console.error('Failed to auto reschedule:', err);
+      alert(`自動リスケジュール処理中にエラーが発生しました: ${err.message || err}`);
+    }
   };
 
   // 6. 定期テスト結果記録

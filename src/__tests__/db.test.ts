@@ -285,18 +285,35 @@ describe('Database Service CRUD Tests', () => {
       return p;
     };
 
-    (localDb as any).supabase = {
-      from: vi.fn().mockReturnValue({
-        upsert: vi.fn().mockImplementation(() => ({
+    const mockChain: any = {
+      select: vi.fn().mockImplementation(() => {
+        const chain: any = createMockPromise({ id: 'sup-id', code: 'sup-id', student_id: 'S', email: 'S' });
+        chain.eq = vi.fn().mockImplementation(() => {
+          const subChain: any = createMockPromise({ id: 'sup-id', code: 'sup-id', student_id: 'S', email: 'S' });
+          subChain.limit = vi.fn().mockReturnValue(createMockPromise([{ id: 'sup-id', code: 'sup-id', student_id: 'S', email: 'S' }]));
+          return subChain;
+        });
+        chain.limit = vi.fn().mockReturnValue(createMockPromise([{ id: 'sup-id', code: 'sup-id', student_id: 'S', email: 'S' }]));
+        return chain;
+      }),
+      upsert: vi.fn().mockImplementation(() => ({
+        select: vi.fn().mockImplementation(() => createMockPromise({ id: 'sup-id', code: 'sup-id' }))
+      })),
+      insert: vi.fn().mockImplementation(() => ({
+        select: vi.fn().mockImplementation(() => createMockPromise({ id: 'sup-id', code: 'sup-id' }))
+      })),
+      update: vi.fn().mockImplementation(() => ({
+        eq: vi.fn().mockImplementation(() => ({
           select: vi.fn().mockImplementation(() => createMockPromise({ id: 'sup-id', code: 'sup-id' }))
-        })),
-        insert: vi.fn().mockImplementation(() => ({
-          select: vi.fn().mockImplementation(() => createMockPromise({ id: 'sup-id', code: 'sup-id' }))
-        })),
-        delete: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ error: null })
-        })
+        }))
+      })),
+      delete: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null })
       })
+    };
+
+    (localDb as any).supabase = {
+      from: vi.fn().mockReturnValue(mockChain)
     };
 
     const school = { id: 'sup-1', name: 'S', type: 'junior_high' as const, created_at: '' };

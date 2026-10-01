@@ -1890,6 +1890,26 @@ class DatabaseService {
       if (payloadToSave.start_unit_id && !isValidUUID(payloadToSave.start_unit_id)) {
         payloadToSave.start_unit_id = null;
       }
+
+      // 1. Check if student already exists in Supabase by student_id or email to guarantee correct ID matching
+      if (payloadToSave.student_id || payloadToSave.email) {
+        try {
+          let checkQuery = this.supabase.from('students').select('id, student_id, email');
+          if (payloadToSave.student_id) {
+            checkQuery = checkQuery.eq('student_id', payloadToSave.student_id);
+          } else if (payloadToSave.email) {
+            checkQuery = checkQuery.eq('email', payloadToSave.email);
+          }
+          const { data: existingRows } = await checkQuery.limit(1);
+          if (existingRows && existingRows.length > 0 && existingRows[0].id) {
+            payloadToSave.id = existingRows[0].id;
+            toSave.id = existingRows[0].id;
+          }
+        } catch (checkErr) {
+          console.warn('Supabase check existing student error:', checkErr);
+        }
+      }
+
       if (payloadToSave.id && !isValidUUID(payloadToSave.id)) {
         const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
         if (validUUID) {
@@ -1902,11 +1922,39 @@ class DatabaseService {
 
       console.log('[DEBUG] Save Payload:', payloadToSave);
 
-      // Attempt upsert with automatic column stripping for schema mismatches (PGRST204)
+      // Attempt upsert with automatic column stripping for schema mismatches (PGRST204) and conflict recovery (23505)
       let currentPayload = { ...payloadToSave };
       let lastError: any = null;
 
       for (let attempt = 0; attempt < 5; attempt++) {
+        // Try direct update first if we have a valid ID or student_id to avoid unique constraint collisions
+        if (currentPayload.id && isValidUUID(currentPayload.id)) {
+          const { data: updateData, error: updateError } = await this.supabase
+            .from('students')
+            .update(currentPayload)
+            .eq('id', currentPayload.id)
+            .select()
+            .single();
+
+          if (!updateError && updateData) {
+            savedData = updateData;
+            break;
+          }
+        } else if (currentPayload.student_id) {
+          const { data: updateData, error: updateError } = await this.supabase
+            .from('students')
+            .update(currentPayload)
+            .eq('student_id', currentPayload.student_id)
+            .select()
+            .single();
+
+          if (!updateError && updateData) {
+            savedData = updateData;
+            break;
+          }
+        }
+
+        // Try upsert
         let { data, error } = await this.supabase.from('students').upsert(currentPayload).select().single();
         if (!error && data) {
           savedData = data;
@@ -1927,7 +1975,36 @@ class DatabaseService {
             continue;
           }
 
-          // 2. UUID syntax error (22P02)
+          // 2. Unique constraint violation (23505, e.g., students_email_key or students_student_id_key)
+          if (error.code === '23505' || error.message?.includes('duplicate key value violates unique constraint')) {
+            console.warn('Unique constraint violation encountered. Attempting targeted update by student_id or email...');
+            if (currentPayload.student_id) {
+              const { data: updData, error: updErr } = await this.supabase
+                .from('students')
+                .update(currentPayload)
+                .eq('student_id', currentPayload.student_id)
+                .select()
+                .single();
+              if (!updErr && updData) {
+                savedData = updData;
+                break;
+              }
+            }
+            if (currentPayload.email) {
+              const { data: updData, error: updErr } = await this.supabase
+                .from('students')
+                .update(currentPayload)
+                .eq('email', currentPayload.email)
+                .select()
+                .single();
+              if (!updErr && updData) {
+                savedData = updData;
+                break;
+              }
+            }
+          }
+
+          // 3. UUID syntax error (22P02)
           if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
             const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
             if (validUUID) {
@@ -1939,7 +2016,7 @@ class DatabaseService {
             continue;
           }
 
-          // 3. Fallback to minimal core fields
+          // 4. Fallback to minimal core fields
           const minimalCleanPayload: any = {
             student_id: currentPayload.student_id,
             name: currentPayload.name,
