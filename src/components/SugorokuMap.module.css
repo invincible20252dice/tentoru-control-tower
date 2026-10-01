@@ -111,21 +111,29 @@
 .mapWrapper {
   position: relative;
   max-height: calc(100vh - 180px);
-  min-height: 480px;
+  min-height: 520px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 36px 16px 50px 16px;
+  padding: 36px 16px 60px 16px;
   scroll-behavior: smooth;
-  border-radius: 20px;
-  background: linear-gradient(180deg, #d1fae5 0%, #ccfbf1 45%, #fef3c7 100%);
-  border: 3px solid rgba(16, 185, 129, 0.35);
-  box-shadow: inset 0 2px 16px rgba(16, 185, 129, 0.15), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border-radius: 24px;
+  background-color: #d1fae5;
+  background-image: url('/rpg_adventure_map_bg.jpg');
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  border: 4px solid #b45309;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.25), 0 10px 30px rgba(180, 83, 9, 0.2);
 }
 
 .darkTheme .mapWrapper {
-  background: linear-gradient(180deg, #064e3b 0%, #134e4a 45%, #451a03 100%);
-  border-color: rgba(5, 150, 105, 0.6);
-  box-shadow: inset 0 2px 16px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2);
+  background-color: #064e3b;
+  background-image: linear-gradient(rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.65)), url('/rpg_adventure_map_bg.jpg');
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  border-color: #78350f;
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.6), 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 .zigzagContainer {
@@ -445,24 +453,39 @@
 .unitLabel {
   font-size: 0.82rem;
   font-weight: 800;
-  color: #334155;
+  color: #1e293b;
   text-align: center;
   max-width: 220px;
   margin-top: 6px;
   line-height: 1.35;
   word-break: break-word;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.08);
 }
 
 .darkTheme .unitLabel {
-  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.88);
+  color: #f1f5f9;
+  border-color: rgba(51, 65, 85, 0.8);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
 }
 
 .activeLabel {
-  color: #2563eb;
+  color: #ea580c;
+  font-weight: 900;
+  background: rgba(255, 247, 237, 0.95);
+  border-color: #fdba74;
+  box-shadow: 0 4px 10px rgba(234, 88, 12, 0.18);
 }
 
 .darkTheme .activeLabel {
-  color: #60a5fa;
+  color: #fb923c;
+  background: rgba(67, 20, 7, 0.9);
+  border-color: #ea580c;
 }
 
 /* Compatibility CSS Classes for existing tests & states */
