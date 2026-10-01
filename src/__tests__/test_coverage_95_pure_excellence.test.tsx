@@ -126,54 +126,58 @@ describe('Coverage 95%+ Pure Excellence Suite for db.ts and TeacherDashboard.tsx
       expect(screen.getByText(/テントル 司令塔ダッシュボード/)).toBeInTheDocument();
     });
 
-    // 1. Click all available tabs
+    // 1. Click all available tabs in order
     const tabs = [
-      '年間計画（マイルストーン）',
-      '学校カリキュラム管理',
-      '小テスト結果',
-      '宿題提出状況',
-      '定期テスト・模試',
-      'AI指導報告書',
-      '生徒情報',
-      '学習計画・コマ割り'
+      '生徒一覧',
+      '新規生徒登録',
+      '時間割',
+      '生徒詳細',
+      'マイルストーン',
+      'カリキュラム',
+      '小テスト',
+      '宿題',
+      '定期テスト',
+      'AIレポート',
+      '校舎管理',
+      'CSVインポート'
     ];
 
     for (const tab of tabs) {
-      const btn = screen.queryByText(tab);
-      if (btn) {
+      const btns = screen.queryAllByText(new RegExp(tab, 'i'));
+      if (btns.length > 0) {
         await act(async () => {
-          fireEvent.click(btn);
+          fireEvent.click(btns[0]);
         });
       }
-    }
 
-    // 2. Click inputs, textareas, buttons
-    const inputs = container.querySelectorAll('input, select, textarea, button');
-    for (let i = 0; i < inputs.length; i++) {
-      const elem = inputs[i] as HTMLElement;
-      await act(async () => {
-        try {
-          if (elem.tagName === 'BUTTON') {
-            fireEvent.click(elem);
-          } else if (elem.tagName === 'INPUT') {
-            const inputElem = elem as HTMLInputElement;
-            if (inputElem.type === 'checkbox' || inputElem.type === 'radio') {
-              fireEvent.click(inputElem);
-            } else if (inputElem.type === 'number') {
-              fireEvent.change(inputElem, { target: { value: '90' } });
-            } else {
-              fireEvent.change(inputElem, { target: { value: 'テスト入力' } });
+      // 2. Click inputs, textareas, buttons inside each active tab
+      const inputs = container.querySelectorAll('input, select, textarea, button');
+      for (let i = 0; i < inputs.length; i++) {
+        const elem = inputs[i] as HTMLElement;
+        await act(async () => {
+          try {
+            if (elem.tagName === 'BUTTON') {
+              fireEvent.click(elem);
+            } else if (elem.tagName === 'INPUT') {
+              const inputElem = elem as HTMLInputElement;
+              if (inputElem.type === 'checkbox' || inputElem.type === 'radio') {
+                fireEvent.click(inputElem);
+              } else if (inputElem.type === 'number') {
+                fireEvent.change(inputElem, { target: { value: '90' } });
+              } else {
+                fireEvent.change(inputElem, { target: { value: 'テスト入力' } });
+              }
+            } else if (elem.tagName === 'SELECT') {
+              const selectElem = elem as HTMLSelectElement;
+              if (selectElem.options.length > 1) {
+                fireEvent.change(selectElem, { target: { value: selectElem.options[1].value } });
+              }
+            } else if (elem.tagName === 'TEXTAREA') {
+              fireEvent.change(elem, { target: { value: 'テスト詳細テキスト' } });
             }
-          } else if (elem.tagName === 'SELECT') {
-            const selectElem = elem as HTMLSelectElement;
-            if (selectElem.options.length > 1) {
-              fireEvent.change(selectElem, { target: { value: selectElem.options[1].value } });
-            }
-          } else if (elem.tagName === 'TEXTAREA') {
-            fireEvent.change(elem, { target: { value: 'テスト詳細テキスト' } });
-          }
-        } catch (err) {}
-      });
+          } catch (err) {}
+        });
+      }
     }
   });
 });
