@@ -153,9 +153,10 @@ describe("Borderless Clean UI Tests (枠線削減 & 背景面グルーピング�
       fireEvent.click(addHwBtn);
     });
 
-    const passingLineInput = screen.getByPlaceholderText(/例: 80%以上, 90点/i) as HTMLElement;
-    expect(passingLineInput.style.border).toMatch(/e2e8f0|226, 232, 240/);
-    expect(passingLineInput.style.borderRadius).toBe("8px");
+    const passingLineInputs = screen.getAllByPlaceholderText(/例: 80%以上, 90点/i);
+    expect(passingLineInputs.length).toBeGreaterThan(0);
+    expect(passingLineInputs[0].style.border).toMatch(/e2e8f0|226, 232, 240/);
+    expect(passingLineInputs[0].style.borderRadius).toBe("8px");
   });
 
   it("4. TeacherDashboard 年間計画タイムライン: 各STEPのボックス枠線が廃止され、ゼブラストライプと極薄仕切り線のテーブルUIになっていること", async () => {

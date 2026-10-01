@@ -137,7 +137,7 @@ describe('Student Dashboard & Sugoroku Map UI Fixes Verification', () => {
     expect(node1).toBeInTheDocument();
 
     // 3. Active node has active styling / speech bubble
-    expect(screen.getByText('ここからスタート！')).toBeInTheDocument();
+    expect(screen.getByText('いまここ！')).toBeInTheDocument();
 
     // 4. Tap node to show details banner
     fireEvent.click(node1);

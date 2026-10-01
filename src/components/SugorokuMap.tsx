@@ -468,10 +468,15 @@ export default function SugorokuMap({
                     data-testid={`sugoroku-node-${node.id}`}
                     onClick={() => setSelectedNodeDetails({ id: node.id, name: node.name, fullTitle: node.fullTitle, index })}
                   >
-                    {/* Current Position Tooltip */}
+                    {/* Current Position Character Pin & Tooltip */}
                     {isCurrentNode && !isCompleted && (
-                      <div className={styles.speechBubble}>
-                        ここからスタート！
+                      <div className={styles.characterPin} data-testid={`sugoroku-pin-${node.id}`}>
+                        <div className={styles.speechBubble}>
+                          いまここ！
+                        </div>
+                        <div className={styles.pinAvatar}>
+                          📍
+                        </div>
                       </div>
                     )}
 

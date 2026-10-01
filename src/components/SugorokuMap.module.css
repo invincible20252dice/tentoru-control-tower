@@ -1,17 +1,17 @@
 .container {
   background: #ffffff;
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-  border: 2px solid #e2e8f0;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.04), 0 10px 25px rgba(0, 0, 0, 0.05);
+  border: 4px solid rgba(146, 64, 14, 0.2);
   margin-bottom: 0;
   position: relative;
 }
 
 .darkTheme .container {
   background: #1e293b;
-  border-color: #334155;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  border-color: rgba(217, 119, 6, 0.3);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.3);
 }
 
 .header {
@@ -114,16 +114,16 @@
   min-height: 480px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 32px 16px 50px 16px;
+  padding: 36px 16px 50px 16px;
   scroll-behavior: smooth;
   border-radius: 20px;
-  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdfa 45%, #f0f9ff 100%);
-  border: 2px solid rgba(167, 243, 208, 0.6);
-  box-shadow: inset 0 2px 14px rgba(16, 185, 129, 0.1), 0 4px 16px rgba(0, 0, 0, 0.03);
+  background: linear-gradient(180deg, #d1fae5 0%, #ccfbf1 45%, #fef3c7 100%);
+  border: 3px solid rgba(16, 185, 129, 0.35);
+  box-shadow: inset 0 2px 16px rgba(16, 185, 129, 0.15), 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
 .darkTheme .mapWrapper {
-  background: linear-gradient(180deg, #064e3b 0%, #042f2e 45%, #082f49 100%);
+  background: linear-gradient(180deg, #064e3b 0%, #134e4a 45%, #451a03 100%);
   border-color: rgba(5, 150, 105, 0.6);
   box-shadow: inset 0 2px 16px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2);
 }
@@ -140,7 +140,7 @@
   padding-bottom: 40px;
 }
 
-/* Stage Path Trail (Thick 3D Earthen Road) */
+/* Stage Path Trail (Thick 3D Cobblestone Road) */
 .pathRow {
   display: flex;
   width: 100%;
@@ -152,13 +152,13 @@
 }
 
 .trailLine {
-  width: 12px;
-  height: 38px;
-  background: linear-gradient(90deg, #b45309 0%, #d97706 40%, #f59e0b 60%, #b45309 100%);
-  border-radius: 6px;
-  border-left: 1.5px solid #78350f;
-  border-right: 1.5px solid #78350f;
-  box-shadow: 0 3px 0 #78350f, 0 3px 6px rgba(0, 0, 0, 0.18);
+  width: 14px;
+  height: 40px;
+  background: linear-gradient(90deg, #fde68a 0%, #fef3c7 50%, #fde68a 100%);
+  border-left: 2px solid #f59e0b;
+  border-right: 2px solid #f59e0b;
+  border-radius: 9999px;
+  box-shadow: 0 4px 8px rgba(180, 83, 9, 0.25);
   filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.15));
   transition: transform 0.2s ease;
 }
@@ -337,21 +337,39 @@
   box-shadow: 0 4px 0 #c7d2fe;
 }
 
-/* Speech Bubble / Start Tooltip */
+/* Speech Bubble / Start Tooltip & Character Pin */
+.characterPin {
+  position: absolute;
+  top: -48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 15;
+  pointer-events: none;
+  animation: bouncePin 1.2s infinite ease-in-out;
+}
+
+.pinAvatar {
+  font-size: 1.6rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.25));
+}
+
 .speechBubble {
   position: absolute;
   top: -34px;
-  background: #ea580c;
+  background: linear-gradient(135deg, #f97316, #ea580c);
   color: #ffffff;
   font-size: 0.75rem;
   font-weight: 800;
   padding: 4px 10px;
-  border-radius: 10px;
+  border-radius: 12px;
   white-space: nowrap;
-  box-shadow: 0 3px 8px rgba(234, 88, 12, 0.35);
-  animation: bounceBubble 1s infinite alternate;
+  box-shadow: 0 4px 10px rgba(234, 88, 12, 0.4);
+  animation: bouncePin 1.2s infinite ease-in-out;
   pointer-events: none;
   z-index: 10;
+  border: 1.5px solid #ffedd5;
 }
 
 .speechBubble::after {
@@ -365,9 +383,13 @@
   border-color: #ea580c transparent transparent transparent;
 }
 
-@keyframes bounceBubble {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(-4px); }
+@keyframes bouncePin {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 @keyframes pulseActive {

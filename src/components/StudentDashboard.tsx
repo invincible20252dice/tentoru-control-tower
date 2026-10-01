@@ -1234,7 +1234,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                           type="number"
                           min="0"
                           max="100"
-                          value={studentScores[test.id]}
+                          value={studentScores[test.id] !== undefined ? studentScores[test.id] : (test.score !== null && test.score !== undefined ? String(test.score) : '')}
                           onChange={e => setStudentScores({ ...studentScores, [test.id]: e.target.value })}
                           placeholder="点数を入力"
                           className={styles.scoreInput}
@@ -1246,7 +1246,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                           className={styles.btn3dRed}
                           data-testid={`test-save-btn-${test.id}`}
                         >
-                          結果を保存
+                          撃破報告（保存） ⚔️
                         </button>
                         {statusBadge}
                       </div>
@@ -1312,176 +1312,192 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     uniqueTaskMap.set(key, task);
                   }
                 });
-                return Array.from(uniqueTaskMap.values()).sort((a, b) => (a.period || 0) - (b.period || 0));
-              })().map(task => {
-                const unit = units.find(u => u.id === task.unit_id);
-                const subjectName = task.subject || (unit ? unit.subject : 'その他');
-                const themeName = task.lesson_range 
-                  || (task.start_lesson_name && task.end_lesson_name && task.start_lesson_name !== task.end_lesson_name 
-                      ? `${task.start_lesson_name} 〜 ${task.end_lesson_name}` 
-                      : (task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし')));
-                const googleDriveUrl = unit?.google_drive_url;
-                const isCustomTask = !unit;
+                const taskList = Array.from(uniqueTaskMap.values()).sort((a, b) => (a.period || 0) - (b.period || 0));
+                const firstIncompleteTask = taskList.find(t => t.status !== 'completed');
+                const mainQuestTaskId = firstIncompleteTask ? firstIncompleteTask.id : (taskList[0] ? taskList[0].id : null);
 
-                const stepLessons = getTaskStepLessons(task);
-                const completedStepIds = new Set<string>();
-                (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
-                (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
-                if (task.status === 'completed' || task.test_passed) {
-                  stepLessons.forEach(s => completedStepIds.add(String(s.id)));
-                }
+                return taskList.map(task => {
+                  const unit = units.find(u => u.id === task.unit_id);
+                  const subjectName = task.subject || (unit ? unit.subject : 'その他');
+                  const themeName = task.lesson_range 
+                    || (task.start_lesson_name && task.end_lesson_name && task.start_lesson_name !== task.end_lesson_name 
+                        ? `${task.start_lesson_name} 〜 ${task.end_lesson_name}` 
+                        : (task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし')));
+                  const googleDriveUrl = unit?.google_drive_url;
+                  const isCustomTask = !unit;
+                  const isMainQuest = task.id === mainQuestTaskId && task.status !== 'completed';
 
-                const completedCount = stepLessons.filter(s => completedStepIds.has(String(s.id))).length;
+                  const stepLessons = getTaskStepLessons(task);
+                  const completedStepIds = new Set<string>();
+                  (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                  (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                  if (task.status === 'completed' || task.test_passed) {
+                    stepLessons.forEach(s => completedStepIds.add(String(s.id)));
+                  }
 
-                // 教科バッジスタイル
-                let subjectBadgeClass = styles.subjectBadgeMath;
-                if (subjectName.includes('英語')) subjectBadgeClass = styles.subjectBadgeEnglish;
-                else if (subjectName.includes('国語')) subjectBadgeClass = styles.subjectBadgeJapanese;
-                else if (subjectName.includes('理科')) subjectBadgeClass = styles.subjectBadgeScience;
-                else if (subjectName.includes('社会')) subjectBadgeClass = styles.subjectBadgeSocial;
+                  const completedCount = stepLessons.filter(s => completedStepIds.has(String(s.id))).length;
 
-                return (
-                  <div key={task.id} className={styles.periodRow} data-testid={`period-row-${task.period}`}>
-                    <div className={styles.periodNumber}>{task.period}</div>
-                    <div className={styles.periodContent}>
-                      <div className={styles.periodHeader}>
-                        <span className={styles.subjectName}>
-                          <span className={subjectBadgeClass}>{subjectName}</span>
-                        </span>
-                        <div>
-                          {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`} data-testid={`task-completed-badge-${task.period}`}>合格完了！</span>}
-                          {task.status === 'failed' && <span className={`${styles.badge} ${styles.statusWarning}`}>不合格 (再挑戦)</span>}
-                        </div>
-                      </div>
-                      <div className={styles.unitName}>{themeName}</div>
+                  // 教科バッジスタイル
+                  let subjectBadgeClass = styles.subjectBadgeMath;
+                  if (subjectName.includes('英語')) subjectBadgeClass = styles.subjectBadgeEnglish;
+                  else if (subjectName.includes('国語')) subjectBadgeClass = styles.subjectBadgeJapanese;
+                  else if (subjectName.includes('理科')) subjectBadgeClass = styles.subjectBadgeScience;
+                  else if (subjectName.includes('社会')) subjectBadgeClass = styles.subjectBadgeSocial;
 
-                      {/* Step-by-Step Lesson Progress Cards */}
-                      {stepLessons.length > 0 && (
-                        <div className={styles.stepCardContainer}>
-                          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span>進捗ステップ</span>
-                            <span data-testid={`step-progress-count-${task.period}`}>{completedCount} / {stepLessons.length} 完了</span>
+                  return (
+                    <div 
+                      key={task.id} 
+                      className={`${styles.periodRow} ${isMainQuest ? styles.mainQuestRow : ''}`} 
+                      data-testid={`period-row-${task.period}`}
+                    >
+                      <div className={styles.periodNumber}>{task.period}</div>
+                      <div className={styles.periodContent}>
+                        <div className={styles.periodHeader}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span className={styles.subjectName}>
+                              <span className={subjectBadgeClass}>{subjectName}</span>
+                            </span>
+                            {isMainQuest && (
+                              <span className={styles.mainQuestBadge}>
+                                ★ 今日のメインクエスト
+                              </span>
+                            )}
                           </div>
-                          {stepLessons.map((step, sIdx) => {
-                            const isStepDone = completedStepIds.has(String(step.id));
-                            return (
-                              <div 
-                                key={step.id || sIdx} 
-                                className={`${styles.stepCard} ${isStepDone ? styles.stepCardCompleted : ''}`}
-                                data-testid={`step-card-${task.period}-${sIdx}`}
-                              >
-                                <div className={styles.stepTitle}>
-                                  <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>STEP {sIdx + 1}:</span>
-                                  <span style={{ minWidth: 0, wordBreak: 'break-word', flex: '1 1 auto' }}>{step.name || step.fullTitle}</span>
-                                </div>
-                                <div style={{ flexShrink: 0, minWidth: 'max-content' }}>
-                                  {isStepDone ? (
-                                    <span className={styles.stepCompletedBadge} data-testid={`step-done-badge-${task.period}-${sIdx}`}>
-                                      ✅ 受講完了
-                                    </span>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleCompleteLessonStep(task, step, sIdx, stepLessons);
-                                      }}
-                                      className={styles.stepCompleteBtn}
-                                      data-testid={`step-complete-btn-${task.period}-${sIdx}`}
-                                    >
-                                      🎯 完了にする
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
+                          <div>
+                            {task.status === 'completed' && <span className={`${styles.badge} ${styles.statusNormal}`} data-testid={`task-completed-badge-${task.period}`}>合格完了！</span>}
+                            {task.status === 'failed' && <span className={`${styles.badge} ${styles.statusWarning}`}>不合格 (再挑戦)</span>}
+                          </div>
                         </div>
-                      )}
+                        <div className={styles.unitName}>{themeName}</div>
 
-                      {/* Period-specific office note */}
-                      {task.office_note && (
-                        <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', padding: '4px 10px', borderRadius: '6px', display: 'inline-block', fontWeight: 600 }}>
-                          📝 連絡: {task.office_note}
-                        </div>
-                      )}
-
-                      {/* Google Drive Link for printing materials */}
-                      {googleDriveUrl && (
-                        <div style={{ marginTop: '6px' }}>
-                          <a 
-                            href={googleDriveUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className={styles.printLink}
-                          >
-                            {/* Document Icon */}
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                              <polyline points="14 2 14 8 20 8" />
-                              <line x1="16" y1="13" x2="8" y2="13" />
-                              <line x1="16" y1="17" x2="8" y2="17" />
-                              <polyline points="10 9 9 9 8 9" />
-                            </svg>
-                            授業教材（Googleドライブを印刷）
-                          </a>
-                        </div>
-                      )}
-
-                      {/* Student Tasks Actions */}
-                      <div className={styles.actions}>
-                        {isCustomTask ? (
-                          task.status !== 'completed' && (
-                            <button 
-                              onClick={() => handleCompleteCustomTask(task)} 
-                              className={`${styles.btn} ${styles.btnSuccess}`}
-                              data-testid={`complete-task-btn-${task.period}`}
-                            >
-                              {stepLessons.length > 1 ? 'このコマの全ステップを一括完了にする' : 'この授業を完了にする'}
-                            </button>
-                          )
-                        ) : (
-                          <>
-                            {!task.video_watched && task.status !== 'completed' ? (
-                              <button 
-                                onClick={() => handleWatchVideo(task)} 
-                                className={`${styles.btn} ${styles.btnPrimary}`}
-                              >
-                                動画を視聴する (10分)
-                              </button>
-                            ) : (
-                              task.status !== 'completed' && (
-                                <span className={`${styles.btn} ${styles.btnSecondary}`} style={{ cursor: 'default' }}>
-                                  動画視聴済み
-                                </span>
-                              )
-                            )}
-
-                            {task.status !== 'completed' && (
-                              <>
-                                <button 
-                                  onClick={() => handlePassTest(task)} 
-                                  className={`${styles.btn} ${styles.btnSuccess}`}
-                                  data-testid={`complete-task-btn-${task.period}`}
+                        {/* Step-by-Step Lesson Progress Cards */}
+                        {stepLessons.length > 0 && (
+                          <div className={styles.stepCardContainer}>
+                            <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#475569', marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>進捗ステップ</span>
+                              <span data-testid={`step-progress-count-${task.period}`}>{completedCount} / {stepLessons.length} 完了</span>
+                            </div>
+                            {stepLessons.map((step, sIdx) => {
+                              const isStepDone = completedStepIds.has(String(step.id));
+                              return (
+                                <div 
+                                  key={step.id || sIdx} 
+                                  className={`${styles.stepCard} ${isStepDone ? styles.stepCardCompleted : ''}`}
+                                  data-testid={`step-card-${task.period}-${sIdx}`}
                                 >
-                                  単元テストを受ける (合格)
-                                </button>
-                                <button 
-                                  onClick={() => handleFailTest(task)} 
-                                  className={`${styles.btn} ${styles.btnSecondary}`}
-                                >
-                                  テストを受ける (不合格)
-                                </button>
-                              </>
-                            )}
-                          </>
+                                  <div className={styles.stepTitle}>
+                                    <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>STEP {sIdx + 1}:</span>
+                                    <span style={{ minWidth: 0, wordBreak: 'break-word', flex: '1 1 auto' }}>{step.name || step.fullTitle}</span>
+                                  </div>
+                                  <div style={{ flexShrink: 0, minWidth: 'max-content' }}>
+                                    {isStepDone ? (
+                                      <span className={styles.stepCompletedBadge} data-testid={`step-done-badge-${task.period}-${sIdx}`}>
+                                        ✅ 受講完了
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleCompleteLessonStep(task, step, sIdx, stepLessons);
+                                        }}
+                                        className={styles.stepCompleteBtn}
+                                        data-testid={`step-complete-btn-${task.period}-${sIdx}`}
+                                      >
+                                        🎯 完了にする
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
+
+                        {/* Period-specific office note */}
+                        {task.office_note && (
+                          <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', padding: '4px 10px', borderRadius: '6px', display: 'inline-block', fontWeight: 600 }}>
+                            📝 連絡: {task.office_note}
+                          </div>
+                        )}
+
+                        {/* Google Drive Link for printing materials */}
+                        {googleDriveUrl && (
+                          <div style={{ marginTop: '6px' }}>
+                            <a 
+                              href={googleDriveUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className={styles.printLink}
+                            >
+                              {/* Document Icon */}
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                                <polyline points="10 9 9 9 8 9" />
+                              </svg>
+                              授業教材（Googleドライブを印刷）
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Student Tasks Actions */}
+                        <div className={styles.actions}>
+                          {isCustomTask ? (
+                            task.status !== 'completed' && (
+                              <button 
+                                onClick={() => handleCompleteCustomTask(task)} 
+                                className={isMainQuest ? styles.btn3dQuest : `${styles.btn} ${styles.btnSuccess}`}
+                                data-testid={`complete-task-btn-${task.period}`}
+                              >
+                                {stepLessons.length > 1 ? 'このコマの全ステップを一括完了にする' : (isMainQuest ? '学習をスタート！ ▶' : 'この授業を完了にする')}
+                              </button>
+                            )
+                          ) : (
+                            <>
+                              {!task.video_watched && task.status !== 'completed' ? (
+                                <button 
+                                  onClick={() => handleWatchVideo(task)} 
+                                  className={isMainQuest ? styles.btn3dQuest : `${styles.btn} ${styles.btnPrimary}`}
+                                >
+                                  {isMainQuest ? '学習をスタート！ ▶ (動画10分)' : '動画を視聴する (10分)'}
+                                </button>
+                              ) : (
+                                task.status !== 'completed' && (
+                                  <span className={`${styles.btn} ${styles.btnSecondary}`} style={{ cursor: 'default' }}>
+                                    動画視聴済み
+                                  </span>
+                                )
+                              )}
+
+                              {task.status !== 'completed' && (
+                                <>
+                                  <button 
+                                    onClick={() => handlePassTest(task)} 
+                                    className={`${styles.btn} ${styles.btnSuccess}`}
+                                    data-testid={`complete-task-btn-${task.period}`}
+                                  >
+                                    単元テストを受ける (合格)
+                                  </button>
+                                  <button 
+                                    onClick={() => handleFailTest(task)} 
+                                    className={`${styles.btn} ${styles.btnSecondary}`}
+                                  >
+                                    テストを受ける (不合格)
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
               {todayTasks.length > 0 && todayTasks.every(t => t.status === 'completed') && (
                 <div style={{ marginTop: '16px', padding: '18px', background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', borderRadius: '16px', border: '2px solid #34d399', textAlign: 'center' }}>
                   <h4 style={{ margin: '0 0 8px 0', color: '#065f46', fontSize: '1.05rem', fontWeight: 800 }}>

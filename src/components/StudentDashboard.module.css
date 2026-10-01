@@ -345,12 +345,17 @@
 
 /* Boss / Challenge Test Card */
 .bossTestCard {
-  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
-  border: 2.5px solid #fecdd3;
+  background: rgba(255, 241, 242, 0.5);
+  border: 2px solid #fda4af;
   border-radius: 18px;
   padding: 18px;
   margin: 16px 0;
-  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.1);
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.08);
+}
+
+.darkTheme .bossTestCard {
+  background: rgba(76, 5, 25, 0.4);
+  border-color: #be123c;
 }
 
 .bossTestHeader {
@@ -358,18 +363,27 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 14px;
-  color: #9f1239;
-  font-size: 1rem;
+  color: #be123c;
+  font-size: 1.05rem;
   font-weight: 800;
+}
+
+.darkTheme .bossTestHeader {
+  color: #fda4af;
 }
 
 .bossTestItem {
   background: #ffffff;
   border: 1.5px solid #fecdd3;
   border-radius: 14px;
-  padding: 14px;
+  padding: 16px;
   margin-bottom: 10px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.darkTheme .bossTestItem {
+  background: #1e293b;
+  border-color: #4c0519;
 }
 
 .bossTestItem:last-child {
@@ -379,43 +393,55 @@
 .testScoreInputGroup {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
   flex-wrap: wrap;
 }
 
 .scoreInput {
-  height: 44px;
-  width: 90px;
+  height: 46px;
+  width: 100px;
   padding: 4px 8px;
-  font-size: 1.1rem;
-  font-weight: 800;
+  font-size: 1.125rem;
+  font-weight: 700;
   text-align: center;
-  border: 2px solid #cbd5e1;
+  border: 2px solid #fecdd3;
   border-radius: 12px;
   color: #0f172a;
-  background: #f8fafc;
+  background: #fff1f2;
   outline: none;
   transition: all 0.2s ease;
 }
 
+.darkTheme .scoreInput {
+  background: #27272a;
+  border-color: #881337;
+  color: #ffffff;
+}
+
 .scoreInput:focus {
-  border-color: #e11d48;
+  border-color: #f43f5e;
   background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.15);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2);
+}
+
+.darkTheme .scoreInput:focus {
+  background: #18181b;
 }
 
 .btn3dRed {
   height: 44px;
-  padding: 0 16px;
-  font-size: 0.88rem;
-  font-weight: 800;
+  padding: 0 18px;
+  font-size: 0.9rem;
+  font-weight: 700;
   color: #ffffff;
-  background: #e11d48;
+  background: #f43f5e;
   border: none;
   border-radius: 12px;
+  border-bottom: 4px solid #be123c;
   cursor: pointer;
-  box-shadow: 0 4px 0 #9f1239;
+  box-shadow: 0 4px 10px rgba(244, 63, 94, 0.25);
   transition: all 0.1s ease;
   display: inline-flex;
   align-items: center;
@@ -425,7 +451,13 @@
 }
 
 .btn3dRed:hover {
-  background: #f43f5e;
+  background: #e11d48;
+}
+
+.btn3dRed:active {
+  border-bottom: 0 solid transparent;
+  transform: translateY(4px);
+  box-shadow: 0 1px 4px rgba(244, 63, 94, 0.2);
 }
 
 .btn3dRed:active {
@@ -488,6 +520,61 @@
 .darkTheme .periodRow {
   background: #1e293b;
   border-color: #334155;
+}
+
+/* ★ 今日のメインクエスト（最優先タスクのゴールド強調枠） */
+.mainQuestRow {
+  border: 2.5px solid #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35), 0 8px 20px rgba(245, 158, 11, 0.12);
+}
+
+.darkTheme .mainQuestRow {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #451a03 0%, #78350f 100%);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
+}
+
+.mainQuestBadge {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.02em;
+}
+
+.btn3dQuest {
+  background: #f59e0b;
+  color: #ffffff;
+  font-weight: 800;
+  padding: 10px 20px;
+  border-radius: 12px;
+  border: none;
+  border-bottom: 4px solid #b45309;
+  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.btn3dQuest:hover {
+  background: #d97706;
+}
+
+.btn3dQuest:active {
+  border-bottom: 0 solid transparent;
+  transform: translateY(4px);
+  box-shadow: 0 1px 4px rgba(245, 158, 11, 0.2);
 }
 
 .periodNumber {
