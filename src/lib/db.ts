@@ -1880,7 +1880,7 @@ class DatabaseService {
 
     if (!this.isMockMode && this.supabase) {
       // Strip transient/calculated properties that do not exist as columns in Supabase students table
-      const { school, units, tasks, school_name, ...rawPayload } = toSave as any;
+      const { school, units, tasks, ...rawPayload } = toSave as any;
       const payloadToSave: any = { ...rawPayload };
 
       // Sanitize UUID fields so non-UUID mock values (like 'unit-102-1' or 'sch-1') never cause Postgres 22P02 syntax errors

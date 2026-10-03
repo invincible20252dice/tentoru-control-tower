@@ -1273,18 +1273,18 @@ export default function TeacherDashboard({
         : (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0 ? selectedStudent.selected_subjects : defaultSubjs);
 
       const finalizedSchoolName = editForm.school_name !== undefined 
-        ? editForm.school_name 
-        : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || '');
+        ? editForm.school_name.trim() 
+        : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || '').trim();
 
       let targetSchoolId = editForm.school_id || selectedStudent.school_id;
       const matchedSchool = schools.find(s => s.name === finalizedSchoolName);
       if (matchedSchool) {
         targetSchoolId = matchedSchool.id;
-      } else if (finalizedSchoolName && finalizedSchoolName.trim()) {
+      } else if (finalizedSchoolName) {
         const newSchId = `sch-${Date.now()}`;
         const newSch = {
           id: newSchId,
-          name: finalizedSchoolName.trim(),
+          name: finalizedSchoolName,
           type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
           created_at: new Date().toISOString()
         };
@@ -1293,13 +1293,15 @@ export default function TeacherDashboard({
         setSchools(db.getSchools());
       }
 
+      const personalityList = editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || [];
+
       const updated = {
         ...selectedStudent,
         ...editForm,
         enrollment_date: editForm.enrollment_date || null,
         withdrawal_date: editForm.withdrawal_date || null,
-        personalities: editForm.personalities || [],
-        personality_tags: editForm.personalities || [],
+        personalities: personalityList,
+        personality_tags: personalityList,
         school_name: finalizedSchoolName,
         school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
@@ -1320,8 +1322,8 @@ export default function TeacherDashboard({
         ...saved,
         enrollment_date: saved.enrollment_date || null,
         withdrawal_date: saved.withdrawal_date || null,
-        personalities: saved.personalities || saved.personality_tags || [],
-        personality_tags: saved.personalities || saved.personality_tags || [],
+        personalities: saved.personalities || saved.personality_tags || personalityList,
+        personality_tags: saved.personalities || saved.personality_tags || personalityList,
         school_name: saved.school_name || finalizedSchoolName,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
@@ -1432,10 +1434,10 @@ export default function TeacherDashboard({
   // 個性の追加（自由入力時は個性マスタにも自動登録＆即時反映）
   const handleAddPersonality = async () => {
     if (!selectedStudent) return;
-    const tagToAdd = newPersonalityInput.trim() || selectedPersonalityFromMaster;
+    const tagToAdd = (newPersonalityInput.trim() || selectedPersonalityFromMaster || '').trim();
     if (!tagToAdd) return;
     
-    const currentTags = editForm.personalities || [];
+    const currentTags = (editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || []) as string[];
     if (currentTags.includes(tagToAdd)) {
       alert('この個性は既に登録されています。');
       setNewPersonalityInput('');
@@ -1451,7 +1453,7 @@ export default function TeacherDashboard({
       }
       
       const updatedTags = [...currentTags, tagToAdd];
-      setEditForm({ ...editForm, personalities: updatedTags, personality_tags: updatedTags });
+      setEditForm(prev => ({ ...prev, personalities: updatedTags, personality_tags: updatedTags }));
       setNewPersonalityInput('');
       setSelectedPersonalityFromMaster('');
     } catch (err) {
@@ -1478,9 +1480,9 @@ export default function TeacherDashboard({
 
   // 個性の削除・生徒割り当て解除
   const handleRemovePersonality = (tagToRemove: string) => {
-    const currentTags = editForm.personalities || [];
+    const currentTags = (editForm.personalities || (editForm as any).personality_tags || selectedStudent?.personalities || selectedStudent?.personality_tags || []) as string[];
     const updatedTags = currentTags.filter(t => t !== tagToRemove);
-    setEditForm({ ...editForm, personalities: updatedTags, personality_tags: updatedTags });
+    setEditForm(prev => ({ ...prev, personalities: updatedTags, personality_tags: updatedTags }));
   };
 
   // 対応履歴の登録
@@ -8147,18 +8149,29 @@ export default function TeacherDashboard({
                         {/* Detail Form Fields */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className={styles.formGroup}>
-                          <label>学校名</label>
+                          <label htmlFor="student-school-name">学校名</label>
                           <input 
+                            id="student-school-name"
+                            data-testid="student-school-name-input"
                             type="text" 
-                            value={editForm.school_name || schools.find(s => s.id === editForm.school_id)?.name || ''} 
+                            value={editForm.school_name !== undefined ? editForm.school_name : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent?.school_name || '')} 
                             onChange={e => {
                               const typedName = e.target.value;
                               const matched = schools.find(s => s.name === typedName);
-                              setEditForm({ 
-                                ...editForm, 
+                              setEditForm(prev => ({ 
+                                ...prev, 
                                 school_name: typedName,
-                                school_id: matched ? matched.id : editForm.school_id 
-                              });
+                                school_id: matched ? matched.id : prev.school_id 
+                              }));
+                            }}
+                            onBlur={e => {
+                              const typedName = e.target.value;
+                              const matched = schools.find(s => s.name === typedName);
+                              setEditForm(prev => ({
+                                ...prev,
+                                school_name: typedName,
+                                school_id: matched ? matched.id : prev.school_id
+                              }));
                             }}
                             className={styles.input}
                             placeholder="学校名"
