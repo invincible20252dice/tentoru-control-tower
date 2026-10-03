@@ -956,11 +956,28 @@ export default function TeacherDashboard({
     const scoresMap: Record<string, string> = {};
     const passStatusMap: Record<string, string> = {};
     allMiniResults.forEach(r => {
-      scoresMap[r.id] = r.score !== null ? r.score.toString() : '';
-      passStatusMap[r.id] = r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted';
+      scoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
+      passStatusMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
     });
     setTempScores(scoresMap);
     setTempPassedStatuses(passStatusMap);
+
+    // 非同期で最新データを Supabase から取得してリアルタイム更新
+    db.fetchMiniTestResults().then(remoteResults => {
+      if (remoteResults && remoteResults.length > 0) {
+        setMiniTestResultsList(remoteResults);
+        const remoteScoresMap: Record<string, string> = {};
+        const remotePassStatusMap: Record<string, string> = {};
+        remoteResults.forEach(r => {
+          remoteScoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
+          remotePassStatusMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
+        });
+        setTempScores(prev => ({ ...prev, ...remoteScoresMap }));
+        setTempPassedStatuses(prev => ({ ...prev, ...remotePassStatusMap }));
+      }
+    }).catch(err => {
+      console.warn('fetchMiniTestResults in loadData error:', err);
+    });
 
     // Load all homework results
     const allHwResults = db.getHomeworkResults();
@@ -976,6 +993,24 @@ export default function TeacherDashboard({
   useEffect(() => {
     loadData();
   }, [selectedSchoolId, selectedSubject, selectedStudent?.id, scheduleDate]);
+
+  useEffect(() => {
+    if (activeTab === 'mini-tests') {
+      db.fetchMiniTestResults().then(results => {
+        if (results && results.length > 0) {
+          setMiniTestResultsList(results);
+          const rScoresMap: Record<string, string> = {};
+          const rPassMap: Record<string, string> = {};
+          results.forEach(r => {
+            rScoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
+            rPassMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
+          });
+          setTempScores(prev => ({ ...prev, ...rScoresMap }));
+          setTempPassedStatuses(prev => ({ ...prev, ...rPassMap }));
+        }
+      }).catch(e => console.warn('fetchMiniTestResults on tab switch error:', e));
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (selectedStudent) {
@@ -2035,7 +2070,9 @@ export default function TeacherDashboard({
     const updated: MiniTestResult = {
       ...result,
       score: scoreVal,
-      passed: passedVal
+      passed: passedVal,
+      status: passedVal === true ? 'passed' : passedVal === false ? 'failed' : 'unstarted',
+      completed_at: scoreVal !== null ? (result.completed_at || new Date().toISOString()) : null
     };
     await db.saveMiniTestResult(updated);
     setMiniTestResultsList(prev => prev.map(r => r.id === result.id ? updated : r));
@@ -5880,15 +5917,17 @@ export default function TeacherDashboard({
                   
                   {miniTestResultsList
                     .filter(r => {
-                      const student = students.find(s => s.id === r.student_id);
+                      const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
+                      const studentName = r.students?.name || student?.name || '';
+                      const studentGrade = student?.grade || r.students?.grade || '';
 
                       // 学年フィルター
                       if (miniTestGradeFilter !== 'all') {
-                        if (!student) return false;
-                        if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
-                        if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                        if (miniTestGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
-                        if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
+                        if (!studentGrade) return false;
+                        if (miniTestGradeFilter === '小学生' && !(studentGrade.startsWith('小') || studentGrade === '園児')) return false;
+                        if (miniTestGradeFilter === '中学生' && !studentGrade.startsWith('中')) return false;
+                        if (miniTestGradeFilter === '高校生' && !(studentGrade.startsWith('高') || studentGrade === '既卒')) return false;
+                        if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && studentGrade !== miniTestGradeFilter) return false;
                       }
 
                       // 教科フィルター
@@ -5905,7 +5944,7 @@ export default function TeacherDashboard({
                         (r.test_content && r.test_content.toLowerCase().includes(query)) ||
                         (r.subject && r.subject.toLowerCase().includes(query)) ||
                         (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
-                        (student && student.name.toLowerCase().includes(query))
+                        studentName.toLowerCase().includes(query)
                       );
                     }).length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
@@ -5928,15 +5967,17 @@ export default function TeacherDashboard({
                         <tbody>
                           {miniTestResultsList
                             .filter(r => {
-                              const student = students.find(s => s.id === r.student_id);
+                              const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
+                              const studentName = r.students?.name || student?.name || '';
+                              const studentGrade = student?.grade || r.students?.grade || '';
 
                               // 学年フィルター
                               if (miniTestGradeFilter !== 'all') {
-                                if (!student) return false;
-                                if (miniTestGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
-                                if (miniTestGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                                if (miniTestGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
-                                if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && student.grade !== miniTestGradeFilter) return false;
+                                if (!studentGrade) return false;
+                                if (miniTestGradeFilter === '小学生' && !(studentGrade.startsWith('小') || studentGrade === '園児')) return false;
+                                if (miniTestGradeFilter === '中学生' && !studentGrade.startsWith('中')) return false;
+                                if (miniTestGradeFilter === '高校生' && !(studentGrade.startsWith('高') || studentGrade === '既卒')) return false;
+                                if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && studentGrade !== miniTestGradeFilter) return false;
                               }
 
                               // 教科フィルター
@@ -5953,19 +5994,19 @@ export default function TeacherDashboard({
                                 (r.test_content && r.test_content.toLowerCase().includes(query)) ||
                                 (r.subject && r.subject.toLowerCase().includes(query)) ||
                                 (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
-                                (student && student.name.toLowerCase().includes(query))
+                                studentName.toLowerCase().includes(query)
                               );
                             })
                             .sort((a, b) => {
-                              const studentA = students.find(s => s.id === a.student_id);
-                              const studentB = students.find(s => s.id === b.student_id);
+                              const studentA = students.find(s => s.id === a.student_id || s.student_id === a.student_id);
+                              const studentB = students.find(s => s.id === b.student_id || s.student_id === b.student_id);
 
                               if (miniTestSortOrder === 'date_asc') {
                                 return new Date(a.date).getTime() - new Date(b.date).getTime();
                               }
                               if (miniTestSortOrder === 'name_asc') {
-                                const nameA = studentA?.name_kana || studentA?.name || '';
-                                const nameB = studentB?.name_kana || studentB?.name || '';
+                                const nameA = a.students?.name || studentA?.name_kana || studentA?.name || '';
+                                const nameB = b.students?.name || studentB?.name_kana || studentB?.name || '';
                                 return nameA.localeCompare(nameB, 'ja');
                               }
                               if (miniTestSortOrder === 'unsubmitted_first') {
@@ -5976,8 +6017,8 @@ export default function TeacherDashboard({
                                 if (!scoreAUnset && scoreBUnset) return 1;
                               }
                               if (miniTestSortOrder === 'passed_first') {
-                                const statusA = tempPassedStatuses[a.id] || (a.score !== null && a.score >= 70 ? 'passed' : 'failed');
-                                const statusB = tempPassedStatuses[b.id] || (b.score !== null && b.score >= 70 ? 'passed' : 'failed');
+                                const statusA = tempPassedStatuses[a.id] || (a.status === 'passed' || a.passed === true || (a.score !== null && a.score >= 70) ? 'passed' : 'failed');
+                                const statusB = tempPassedStatuses[b.id] || (b.status === 'passed' || b.passed === true || (b.score !== null && b.score >= 70) ? 'passed' : 'failed');
                                 if (statusA === 'passed' && statusB !== 'passed') return -1;
                                 if (statusA !== 'passed' && statusB === 'passed') return 1;
                               }
@@ -5985,7 +6026,8 @@ export default function TeacherDashboard({
                               return new Date(b.date).getTime() - new Date(a.date).getTime();
                             })
                             .map(r => {
-                              const student = students.find(s => s.id === r.student_id);
+                              const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
+                              const studentDisplayName = r.students?.name || student?.name || '不明な生徒';
                               const stLevel = student?.level || 'A';
                               const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
                               const displayPassingLine = r.passing_line ? (r.passing_line.includes('レベル') ? r.passing_line : `レベル${stLevel} (${passScore}点)`) : `レベル${stLevel} (${passScore}点)`;
@@ -5993,7 +6035,7 @@ export default function TeacherDashboard({
                               return (
                                  <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                   <td style={{ padding: '10px', textAlign: 'left' }}>{r.date}</td>
-                                  <td style={{ padding: '10px', fontWeight: 600, textAlign: 'left' }}>{student ? student.name : '不明な生徒'}</td>
+                                  <td style={{ padding: '10px', fontWeight: 600, textAlign: 'left' }} data-testid={`minitest-student-name-${r.id}`}>{studentDisplayName}</td>
                                   <td style={{ padding: '10px', textAlign: 'left' }}>{r.test_content}</td>
                                   <td style={{ padding: '10px', textAlign: 'left' }}>{displayPassingLine}</td>
                                   <td style={{ padding: '10px', textAlign: 'right' }}>
@@ -6047,7 +6089,7 @@ export default function TeacherDashboard({
                                   </td>
                                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                                     {(() => {
-                                      const currentStatus = tempPassedStatuses[r.id] || (r.passed === true ? 'passed' : r.passed === false ? 'failed' : 'unstarted');
+                                      const currentStatus = tempPassedStatuses[r.id] || (r.status === 'passed' || r.status === '合格' || r.passed === true ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted'));
                                       const statusStyle = currentStatus === 'passed'
                                         ? { backgroundColor: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }
                                         : currentStatus === 'failed'
@@ -6056,6 +6098,7 @@ export default function TeacherDashboard({
 
                                       return (
                                         <select
+                                          data-testid={`minitest-status-select-${r.id}`}
                                           value={currentStatus}
                                           onChange={e => {
                                             const newPassedStr = e.target.value;

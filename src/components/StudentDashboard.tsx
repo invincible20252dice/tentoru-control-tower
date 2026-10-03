@@ -535,18 +535,53 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 生徒による小テスト結果の送信
   const handleSaveStudentScore = async (testId: string, scoreInput: string) => {
-    const test = miniTestResults.find(r => r.id === testId)!;
+    const test = miniTestResults.find(r => r.id === testId);
+    if (!test) return;
 
-    const scoreVal = scoreInput === '' ? null : parseInt(scoreInput);
+    const scoreVal = scoreInput === '' ? null : parseInt(scoreInput, 10);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
       alert('0〜100の点数を入力してください。');
       return;
     }
 
-    const updated = {
+    const stLevel = student.level || 'A';
+    let passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+    if (test.passing_line) {
+      const matchNum = test.passing_line.match(/\d+/);
+      if (matchNum) {
+        const limit = parseInt(matchNum[0], 10);
+        if (test.passing_line.includes('%') || test.passing_line.includes('割')) {
+          passScore = test.passing_line.includes('割') ? limit * 10 : limit;
+        } else {
+          passScore = limit;
+        }
+      }
+    }
+
+    const isPassed = scoreVal !== null ? scoreVal >= passScore : null;
+    const status = scoreVal !== null ? (isPassed ? 'passed' : 'failed') : 'unstarted';
+    const completedAt = scoreVal !== null ? new Date().toISOString() : null;
+
+    const updated: MiniTestResult = {
       ...test,
-      score: scoreVal
+      student_id: test.student_id || student.id,
+      score: scoreVal,
+      passed: isPassed,
+      status: status,
+      completed_at: completedAt,
+      students: {
+        id: student.id,
+        name: student.name,
+        grade: student.grade
+      }
     };
+
+    setMiniTestResults(prev => prev.map(t => t.id === testId ? updated : t));
+    setStudentScores(prev => ({
+      ...prev,
+      [testId]: scoreVal !== null ? String(scoreVal) : ''
+    }));
+
     await db.saveMiniTestResult(updated);
     if (typeof window !== 'undefined') {
       window.alert('小テスト点数を送信しました！');
@@ -1195,13 +1230,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
                   const currentScore = test.score;
                   let statusBadge = null;
-                  if (currentScore !== null && currentScore !== undefined) {
-                    const isPassed = currentScore >= passScore;
-                    statusBadge = isPassed ? (
+                  const isPassed = test.status === 'passed' || test.passed === true || (currentScore !== null && currentScore !== undefined && currentScore >= passScore);
+                  const isFailed = test.status === 'failed' || test.passed === false || (currentScore !== null && currentScore !== undefined && currentScore < passScore);
+
+                  if (isPassed) {
+                    statusBadge = (
                       <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '6px 12px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, border: '1.5px solid #86efac' }}>
                         合格 ✨
                       </span>
-                    ) : (
+                    );
+                  } else if (isFailed) {
+                    statusBadge = (
                       <span style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '6px 12px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, border: '1.5px solid #fca5a5' }}>
                         不合格 (再挑戦) ⚠️
                       </span>

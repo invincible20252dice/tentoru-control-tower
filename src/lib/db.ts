@@ -421,9 +421,16 @@ export interface MiniTestResult {
   unit_name?: string; // 関連単元名
   score: number | null; // 結果点数
   passed?: boolean | null; // 合格したかどうか
+  status?: string | null; // 'passed' | 'failed' | 'unstarted' | '合格' | '不合格'
+  completed_at?: string | null; // 報告日時
   passing_line?: string | null; // 合格ライン
   target_scope?: string; // 対象 (例: 'individual', 'grade', 'school', 'level')
   created_at: string;
+  students?: {
+    id: string;
+    name: string;
+    grade?: string;
+  } | null;
 }
 
 export interface HomeworkResult {
@@ -609,6 +616,10 @@ export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<st
   const unit_name = test.unit_name ? String(test.unit_name).trim() : undefined;
   const created_at = test.created_at ? String(test.created_at) : new Date().toISOString();
 
+  const status = test.status ? String(test.status).trim() : (passed === true ? 'passed' : passed === false ? 'failed' : null);
+  const completed_at = test.completed_at ? String(test.completed_at).trim() : (score !== null ? created_at : null);
+  const students = test.students && typeof test.students === 'object' ? test.students : null;
+
   return {
     id,
     student_id,
@@ -618,6 +629,9 @@ export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<st
     passed,
     passing_line,
     target_scope,
+    ...(status ? { status } : {}),
+    ...(completed_at ? { completed_at } : {}),
+    ...(students ? { students } : {}),
     ...(subject ? { subject } : {}),
     ...(test_type ? { test_type } : {}),
     ...(unit_name ? { unit_name } : {}),
@@ -2793,20 +2807,73 @@ class DatabaseService {
       { id: 'mt-4-1', student_id: 'std-4', date: '2026-06-17', subject: '数学', test_content: '式の計算 単元確認テスト', score: 92, passed: true, passing_line: '80点以上', target_scope: 'individual', created_at: '2026-06-17T18:00:00Z' }
     ];
     const list = this.getMockData('mini_test_results', seed);
+    const allStudents = this.getStudents();
+    const enriched = list.map(t => {
+      if (!t.students) {
+        const st = allStudents.find(s => s.id === t.student_id || s.student_id === t.student_id);
+        if (st) {
+          return {
+            ...t,
+            students: { id: st.id, name: st.name, grade: st.grade }
+          };
+        }
+      }
+      return t;
+    });
     if (studentId) {
-      return list.filter(t => t.student_id === studentId);
+      return enriched.filter(t => t.student_id === studentId);
     }
-    return list;
+    return enriched;
   }
 
   public async fetchMiniTestResults(studentId?: string, date?: string): Promise<MiniTestResult[]> {
     if (!this.isMockMode && this.supabase) {
-      let query = this.supabase.from('mini_test_results').select('*');
-      if (studentId) query = query.eq('student_id', studentId);
-      if (date) query = query.eq('date', date);
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data || []) as MiniTestResult[];
+      try {
+        let query = this.supabase.from('mini_test_results').select(`
+          *,
+          students (
+            id,
+            name,
+            grade
+          )
+        `);
+        if (studentId) query = query.eq('student_id', studentId);
+        if (date) query = query.eq('date', date);
+        const { data, error } = await query;
+        if (!error && data) {
+          const allSt = this.getStudents();
+          const enriched: MiniTestResult[] = (data as any[]).map(t => {
+            const st = allSt.find(s => s.id === t.student_id || s.student_id === t.student_id);
+            return {
+              ...t,
+              students: t.students || (st ? { id: st.id, name: st.name, grade: st.grade } : null)
+            };
+          });
+          this.saveMockData('mini_test_results', enriched);
+          return enriched;
+        }
+        if (error) {
+          console.warn('fetchMiniTestResults relation query failed, falling back to select *:', error);
+          let fbQuery = this.supabase.from('mini_test_results').select('*');
+          if (studentId) fbQuery = fbQuery.eq('student_id', studentId);
+          if (date) fbQuery = fbQuery.eq('date', date);
+          const { data: fbData, error: fbError } = await fbQuery;
+          if (fbError) throw fbError;
+          const allSt = this.getStudents();
+          const enriched: MiniTestResult[] = (fbData as any[] || []).map((t: any) => {
+            const st = allSt.find(s => s.id === t.student_id || s.student_id === t.student_id);
+            return {
+              ...t,
+              students: st ? { id: st.id, name: st.name, grade: st.grade } : null
+            };
+          });
+          this.saveMockData('mini_test_results', enriched);
+          return enriched;
+        }
+      } catch (err) {
+        console.warn('fetchMiniTestResults Supabase exception:', err);
+        throw err;
+      }
     }
     const all = this.getMiniTestResults();
     return all.filter(t => {
@@ -2818,6 +2885,13 @@ class DatabaseService {
 
   public async saveMiniTestResult(result: MiniTestResult): Promise<MiniTestResult> {
     const sanitized = sanitizeMiniTestResult(result);
+    if (!sanitized.students && sanitized.student_id) {
+      const allStudents = this.getStudents();
+      const st = allStudents.find(s => s.id === sanitized.student_id || s.student_id === sanitized.student_id);
+      if (st) {
+        sanitized.students = { id: st.id, name: st.name, grade: st.grade };
+      }
+    }
     const list = this.getMiniTestResults();
     const idx = list.findIndex(r => r.id === sanitized.id);
     if (idx >= 0) list[idx] = sanitized;
@@ -2825,7 +2899,7 @@ class DatabaseService {
     this.saveMockData('mini_test_results', list);
 
     if (!this.isMockMode && this.supabase) {
-      const dbPayload = {
+      const dbPayload: any = {
         id: sanitized.id,
         student_id: sanitized.student_id,
         date: sanitized.date,
@@ -2833,13 +2907,67 @@ class DatabaseService {
         test_content: sanitized.test_content,
         score: sanitized.score,
         passed: sanitized.passed ?? null,
+        status: sanitized.status ?? (sanitized.passed === true ? 'passed' : sanitized.passed === false ? 'failed' : null),
+        completed_at: sanitized.completed_at ?? (sanitized.score !== null ? new Date().toISOString() : null),
         passing_line: sanitized.passing_line ?? null,
         target_scope: sanitized.target_scope ?? 'individual',
         created_at: sanitized.created_at
       };
-      const { data, error } = await this.supabase.from('mini_test_results').upsert(dbPayload).select().single();
-      if (error) throw error;
-      return (data || sanitized) as MiniTestResult;
+
+      let currentPayload = { ...dbPayload };
+      let lastError: any = null;
+      let savedData: any = null;
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { data, error } = await this.supabase
+          .from('mini_test_results')
+          .upsert(currentPayload)
+          .select(`
+            *,
+            students (
+              id,
+              name,
+              grade
+            )
+          `)
+          .single();
+
+        if (!error && data) {
+          savedData = data;
+          break;
+        }
+
+        lastError = error;
+        if (error) {
+          const missingColMatch = error.message?.match(/Could not find the '([^']+)' column/i) ||
+                                  error.details?.match(/Could not find the '([^']+)' column/i);
+          if (missingColMatch && missingColMatch[1]) {
+            const missingCol = missingColMatch[1];
+            delete currentPayload[missingCol];
+            continue;
+          }
+
+          const { data: simpleData, error: simpleErr } = await this.supabase
+            .from('mini_test_results')
+            .upsert(currentPayload)
+            .select()
+            .single();
+          if (!simpleErr && simpleData) {
+            savedData = simpleData;
+            break;
+          }
+          break;
+        }
+      }
+
+      if (savedData) {
+        return {
+          ...sanitized,
+          ...savedData,
+          students: savedData.students || sanitized.students
+        } as MiniTestResult;
+      }
+      if (lastError) throw lastError;
     }
     return sanitized;
   }
