@@ -2223,18 +2223,6 @@ export default function TeacherDashboard({
     }
   };
 
-  // 宿題提出状況の保存
-  const handleSaveHomeworkStatus = async (result: HomeworkResult) => {
-    const statusVal = tempHomeworkStatuses[result.id] || 'incomplete';
-    const updated = {
-      ...result,
-      status: statusVal
-    };
-    await db.saveHomeworkResult(updated);
-    alert('宿題提出状況を保存しました！');
-    alert('宿題提出状況を保存しました！');
-    loadData();
-  };
 
   // 教科に対応する全授業リスト（マスタまたはカリキュラム単元）の取得
   const getLessonsForSubject = (subj: string) => {
@@ -3612,15 +3600,6 @@ export default function TeacherDashboard({
       const updated = db.getCurriculumMasters();
       setCurriculumMastersList(updated);
       alert('単元テストを削除しました。');
-    }
-  };
-
-  const handleTabClick = (tab: DashboardTabType) => {
-    setActiveTab(tab);
-    if (!selectedStudent && students.length > 0 && tab !== 'student-list' && tab !== 'branches' && tab !== 'curriculum-import' && tab !== 'create-student') {
-      const st = students[0];
-      setSelectedStudent(st);
-      loadData(st);
     }
   };
 
@@ -7859,6 +7838,52 @@ export default function TeacherDashboard({
                                         </span>
                                       )}
 
+                                      {((unit as any).item_type === 'unit_test' || unit.name.includes('テスト')) && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            data-testid="timeline-edit-unittest-btn"
+                                            onClick={() => handleOpenEditUnitTestModal(unit as any)}
+                                            style={{
+                                              padding: '3px 8px',
+                                              borderRadius: '4px',
+                                              border: '1px solid #cbd5e1',
+                                              backgroundColor: '#ffffff',
+                                              color: '#2563eb',
+                                              fontSize: '0.75rem',
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px'
+                                            }}
+                                            title="単元テストを編集"
+                                          >
+                                            ✏️ 編集
+                                          </button>
+                                          <button
+                                            type="button"
+                                            data-testid="timeline-delete-unittest-btn"
+                                            onClick={() => handleDeleteUnitTestMaster(unit.id)}
+                                            style={{
+                                              padding: '3px 8px',
+                                              borderRadius: '4px',
+                                              border: '1px solid #cbd5e1',
+                                              backgroundColor: '#ffffff',
+                                              color: '#dc2626',
+                                              fontSize: '0.75rem',
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px'
+                                            }}
+                                            title="単元テストをマスタから削除"
+                                          >
+                                            🗑️ テスト削除
+                                          </button>
+                                        </>
+                                      )}
                                       <button
                                         type="button"
                                         data-testid="timeline-exclude-btn"
