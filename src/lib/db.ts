@@ -1862,17 +1862,21 @@ class DatabaseService {
       : (student.grade.startsWith('小') || student.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
 
     const schoolsList = this.getSchools();
-    const derivedSchoolName = student.school_name || (student.school_id ? schoolsList.find(s => s.id === student.school_id)?.name : '') || '';
+    const derivedSchoolName = student.school_name || (student as any).school || (student.school_id ? schoolsList.find(s => s.id === student.school_id)?.name : '') || '';
+    const personalityList = student.personalities || student.personality_tags || [];
 
     const toSave: Student = {
       ...student,
       school_name: derivedSchoolName,
+      personalities: personalityList,
+      personality_tags: personalityList,
       assigned_teachers: assignedTeachers,
       teacher_in_charge: assignedTeachers[0] || student.teacher_in_charge || '',
       selected_subjects: selectedSubjects,
       registered_year: student.registered_year ?? getSchoolYear(student.created_at || new Date().toISOString()),
       registered_grade: student.registered_grade ?? student.grade
     };
+    (toSave as any).school = derivedSchoolName;
     
     // 学年が手動変更されたかどうかのチェック
     const expectedGrade = calculateCurrentGrade(
@@ -1894,8 +1898,11 @@ class DatabaseService {
 
     if (!this.isMockMode && this.supabase) {
       // Strip transient/calculated properties that do not exist as columns in Supabase students table
-      const { school, units, tasks, ...rawPayload } = toSave as any;
+      const { units, tasks, ...rawPayload } = toSave as any;
       const payloadToSave: any = { ...rawPayload };
+      payloadToSave.school_name = derivedSchoolName;
+      payloadToSave.personalities = personalityList;
+      payloadToSave.personality_tags = personalityList;
 
       // Sanitize UUID fields so non-UUID mock values (like 'unit-102-1' or 'sch-1') never cause Postgres 22P02 syntax errors
       if (payloadToSave.school_id && !isValidUUID(payloadToSave.school_id)) {
@@ -2068,14 +2075,20 @@ class DatabaseService {
       ...toSave,
       ...(savedData || {}),
       school_name: toSave.school_name,
+      personalities: toSave.personalities,
+      personality_tags: toSave.personality_tags,
       assigned_teachers: toSave.assigned_teachers,
       selected_subjects: toSave.selected_subjects,
       grade: calculateCurrentGrade((savedData?.registered_grade || toSave.registered_grade!), (savedData?.registered_year || toSave.registered_year!), curYear)
     };
+    (finalStudent as any).school = toSave.school_name;
 
     // Always update local cache so synchronous getStudents() immediately reflects the updated student!
     const rawList = this.getMockData<Student>('students', []);
-    const idx = rawList.findIndex(s => s.id === finalStudent.id);
+    let idx = rawList.findIndex(s => s.id === finalStudent.id || s.id === student.id);
+    if (idx === -1 && savedData?.id && student.student_id) {
+      idx = rawList.findIndex(s => s.student_id === student.student_id);
+    }
     if (idx >= 0) rawList[idx] = finalStudent;
     else rawList.push(finalStudent);
     this.saveMockData('students', rawList);
@@ -2355,10 +2368,19 @@ class DatabaseService {
           let list: Student[] = data.map((s: any) => {
             const regYear = s.registered_year ?? getSchoolYear(s.created_at);
             const regGrade = s.registered_grade ?? s.grade;
-            const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+            const resolvedSchoolName = s.school_name || s.school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+            let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
+            if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
+              try { pers = JSON.parse(s.personalities); } catch (e) {}
+            } else if (typeof s.personality_tags === 'string' && s.personality_tags.startsWith('[')) {
+              try { pers = JSON.parse(s.personality_tags); } catch (e) {}
+            }
             return {
               ...s,
               school_name: resolvedSchoolName,
+              school: resolvedSchoolName,
+              personalities: pers,
+              personality_tags: pers,
               assigned_teachers: s.assigned_teachers && Array.isArray(s.assigned_teachers) ? s.assigned_teachers : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']),
               teacher_in_charge: (s.assigned_teachers && s.assigned_teachers[0]) || s.teacher_in_charge || '福田 尚弘',
               selected_subjects: s.selected_subjects && Array.isArray(s.selected_subjects) ? s.selected_subjects : (s.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),
@@ -2379,10 +2401,19 @@ class DatabaseService {
               list = refetch.data.map((s: any) => {
                 const regYear = s.registered_year ?? getSchoolYear(s.created_at);
                 const regGrade = s.registered_grade ?? s.grade;
-                const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+                const resolvedSchoolName = s.school_name || s.school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+                let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
+                if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
+                  try { pers = JSON.parse(s.personalities); } catch (e) {}
+                } else if (typeof s.personality_tags === 'string' && s.personality_tags.startsWith('[')) {
+                  try { pers = JSON.parse(s.personality_tags); } catch (e) {}
+                }
                 return {
                   ...s,
                   school_name: resolvedSchoolName,
+                  school: resolvedSchoolName,
+                  personalities: pers,
+                  personality_tags: pers,
                   assigned_teachers: s.assigned_teachers && Array.isArray(s.assigned_teachers) ? s.assigned_teachers : (s.teacher_in_charge ? [s.teacher_in_charge] : ['福田 尚弘']),
                   teacher_in_charge: (s.assigned_teachers && s.assigned_teachers[0]) || s.teacher_in_charge || '福田 尚弘',
                   selected_subjects: s.selected_subjects && Array.isArray(s.selected_subjects) ? s.selected_subjects : (s.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),

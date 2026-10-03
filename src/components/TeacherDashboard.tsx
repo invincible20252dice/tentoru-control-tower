@@ -1338,6 +1338,7 @@ export default function TeacherDashboard({
         personalities: personalityList,
         personality_tags: personalityList,
         school_name: finalizedSchoolName,
+        school: finalizedSchoolName,
         school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
         teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
@@ -1360,6 +1361,7 @@ export default function TeacherDashboard({
         personalities: saved.personalities || saved.personality_tags || personalityList,
         personality_tags: saved.personalities || saved.personality_tags || personalityList,
         school_name: saved.school_name || finalizedSchoolName,
+        school: saved.school_name || finalizedSchoolName,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
         selected_subjects: saved.selected_subjects || currentSelectedSubjects,
@@ -1397,7 +1399,7 @@ export default function TeacherDashboard({
       // 生徒リスト自体もリロードして更新を反映
       const listSt = db.getStudents();
       setStudents(listSt);
-      loadData();
+      loadData(saved);
       alert('生徒情報を保存しました。');
     } catch (err: any) {
       console.error('handleSaveStudentDetail Supabase error:', err);
@@ -1480,19 +1482,27 @@ export default function TeacherDashboard({
       return;
     }
 
-    try {
-      if (newPersonalityInput.trim()) {
+    const isFromCustomInput = Boolean(newPersonalityInput.trim());
+
+    // 1. まずUIとフォーム状態へ即座に反映（バッジを即時描画）
+    const updatedTags = [...currentTags, tagToAdd];
+    setEditForm(prev => ({
+      ...prev,
+      personalities: updatedTags,
+      personality_tags: updatedTags
+    }));
+    setNewPersonalityInput('');
+    setSelectedPersonalityFromMaster('');
+
+    // 2. 自由入力の場合はマスタへの非同期登録をバックグラウンド実行（エラーでもUI反映は維持）
+    if (isFromCustomInput) {
+      try {
         await db.addPersonalityOption(tagToAdd);
         const listPersonalities = await db.fetchPersonalityOptions();
         setPersonalityOptions(listPersonalities);
+      } catch (err) {
+        console.warn('addPersonalityOption background master sync warning:', err);
       }
-      
-      const updatedTags = [...currentTags, tagToAdd];
-      setEditForm(prev => ({ ...prev, personalities: updatedTags, personality_tags: updatedTags }));
-      setNewPersonalityInput('');
-      setSelectedPersonalityFromMaster('');
-    } catch (err) {
-      console.error(err);
     }
   };
 
@@ -2900,9 +2910,12 @@ export default function TeacherDashboard({
       const allMasters = ensureMathEnglishUnitTests(rawMasters);
       Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
         if (!sel || !sel.subject || !sel.startLessonName) return;
-        const isTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト');
+        const isTest = sel.startLessonName.includes('単元確認テスト') || 
+                       sel.startLessonName.includes('単元テスト') || 
+                       sel.startLessonName.includes('確認テスト') ||
+                       (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト')));
         if (isTest) {
-          const testContent = sel.lessonRange || sel.startLessonName;
+          const testContent = (sel.endLessonName && (sel.endLessonName.includes('テスト') || sel.endLessonName.includes('確認')) ? sel.endLessonName : sel.startLessonName) || sel.lessonRange;
           const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
           
           // 完了済み(合格済み)テストの除外判定
@@ -4408,7 +4421,7 @@ export default function TeacherDashboard({
                       gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
                     }
 
-                    const schoolName = st.school_name || schools.find(s => s.id === st.school_id)?.name || '未所属';
+                    const schoolName = st.school_name || (st as any).school || schools.find(s => s.id === st.school_id)?.name || '未所属';
 
                     return (
                       <div
@@ -7056,18 +7069,74 @@ export default function TeacherDashboard({
                     miniTestResults: miniTestResultsList
                   });
 
+                  // 単元テスト判定ヘルパー
+                  const isUnitTestStep = (u: any) => {
+                    const uName = u.name || '';
+                    const uLessonName = u.lesson_name || '';
+                    return (
+                      u.item_type === 'unit_test' ||
+                      uName.includes('単元確認テスト') ||
+                      uName.includes('単元テスト') ||
+                      uName.includes('確認テスト') ||
+                      uLessonName.includes('単元確認テスト') ||
+                      uLessonName.includes('単元テスト') ||
+                      uLessonName.includes('確認テスト')
+                    );
+                  };
+
+                  // 単元テスト合格判定ヘルパー
+                  const isUnitTestStepPassed = (u: any) => {
+                    const uid = String(u.id);
+                    const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+                    const uName = u.name || '';
+                    const uLessonName = u.lesson_name || '';
+                    const uUnitName = u.unit_name || '';
+
+                    // 1. completedUnitTestKeys で合格確認
+                    if (
+                      latestUnitTestStatus.completedUnitTestKeys.has(uid) ||
+                      (uSort && latestUnitTestStatus.completedUnitTestKeys.has(uSort)) ||
+                      latestUnitTestStatus.completedUnitTestKeys.has(uName) ||
+                      (uLessonName && latestUnitTestStatus.completedUnitTestKeys.has(uLessonName)) ||
+                      (uUnitName && latestUnitTestStatus.completedUnitTestKeys.has(uUnitName))
+                    ) {
+                      return true;
+                    }
+
+                    // 2. miniTestResultsList から直接合格判定
+                    const cleanName = uName.replace(/^[^-]+-\s*/, '').trim();
+                    const foundPassed = (miniTestResultsList || []).some(r => {
+                      if (r.student_id !== selectedStudent.id) return false;
+                      const isPass = r.passed === true || r.status === 'passed' || (r.score !== null && r.score !== undefined && r.score >= (parseFloat(r.passing_line || '80') || 80));
+                      if (!isPass) return false;
+                      return (
+                        r.test_content === uName ||
+                        r.test_content === cleanName ||
+                        r.unit_name === uUnitName ||
+                        (r.test_content && uName.includes(r.test_content)) ||
+                        (r.unit_name && uName.includes(r.unit_name))
+                      );
+                    });
+                    if (foundPassed) return true;
+
+                    return false;
+                  };
+
                   // 各単元が実際に完了しているかどうかの判定
                   const isUnitCompleted = (u: any, idx: number) => {
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
 
-                    // もし該当テストが不合格の単元テストである場合は未完了
-                    if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
-                      const failedTest = latestUnitTestStatus.failedUnitTest;
-                      const testKey = failedTest.unit_name || failedTest.test_content;
-                      if (u.name.includes(testKey) || (failedTest.unit_name && u.name.includes(failedTest.unit_name))) {
-                        return false;
+                    // 単元テスト自身の場合: 不合格記録があれば未完了、合格・完了記録があれば完了
+                    if (isUnitTestStep(u)) {
+                      if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
+                        const failedTest = latestUnitTestStatus.failedUnitTest;
+                        const testKey = failedTest.unit_name || failedTest.test_content;
+                        if (u.name.includes(testKey) || (failedTest.unit_name && u.name.includes(failedTest.unit_name))) {
+                          return false;
+                        }
                       }
+                      return isUnitTestStepPassed(u);
                     }
 
                     // 現在コマ割りで取り組み中のレッスンは完了としない
@@ -7086,9 +7155,26 @@ export default function TeacherDashboard({
                     return false;
                   };
 
+                  // 最初の未完了ステップのインデックス
+                  const firstIncompleteIdx = timelineUnits.findIndex((u: any, idx) => !isUnitCompleted(u, idx));
+
+                  // カリキュラム順で最初の「未合格・未完了」単元テストのインデックスを特定（合否ゲート）
+                  let gateUnitTestIdx = -1;
+                  for (let i = 0; i < timelineUnits.length; i++) {
+                    const u = timelineUnits[i];
+                    if (isUnitTestStep(u) && !isUnitCompleted(u, i)) {
+                      gateUnitTestIdx = i;
+                      break;
+                    }
+                  }
+
                   // 現在地（取り組み中）ステップの判定
                   const currentStepIndices = new Set<number>();
                   timelineUnits.forEach((u: any, idx) => {
+                    // 合否ゲート: 未合格単元テストより後の授業を「現在地（取り組み中）」に設定することを厳格に禁止！
+                    if (gateUnitTestIdx >= 0 && idx > gateUnitTestIdx) {
+                      return;
+                    }
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
                     if (currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
@@ -7096,11 +7182,23 @@ export default function TeacherDashboard({
                     }
                   });
 
-                  // コマ割りに現在地タスクがない場合は、最初の未完了ステップを現在地とする
+                  // コマ割りに現在地タスクがない場合、または未合格テストで停止している場合は、最初の未完了ステップを現在地とする
                   if (currentStepIndices.size === 0) {
-                    const firstIncompleteIdx = timelineUnits.findIndex((u: any, idx) => !isUnitCompleted(u, idx));
                     if (firstIncompleteIdx >= 0) {
-                      currentStepIndices.add(firstIncompleteIdx);
+                      if (gateUnitTestIdx >= 0 && firstIncompleteIdx > gateUnitTestIdx) {
+                        currentStepIndices.add(gateUnitTestIdx);
+                      } else {
+                        currentStepIndices.add(firstIncompleteIdx);
+                      }
+                    }
+                  } else if (gateUnitTestIdx >= 0) {
+                    // もし現在地インデックスの中に未合格テストより後のものが含まれていた場合は完全除外
+                    const invalidIndices = Array.from(currentStepIndices).filter(idx => idx > gateUnitTestIdx);
+                    if (invalidIndices.length > 0) {
+                      invalidIndices.forEach(idx => currentStepIndices.delete(idx));
+                      if (currentStepIndices.size === 0) {
+                        currentStepIndices.add(gateUnitTestIdx);
+                      }
                     }
                   }
 
