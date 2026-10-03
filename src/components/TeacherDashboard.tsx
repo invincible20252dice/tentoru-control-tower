@@ -312,6 +312,7 @@ export default function TeacherDashboard({
   const [newTeacherInput, setNewTeacherInput] = useState('');
   const [selectedTeacherFromMaster, setSelectedTeacherFromMaster] = useState('');
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
+  const [schoolName, setSchoolName] = useState<string>('');
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [studentDetailSubTab, setStudentDetailSubTab] = useState<'basic' | 'conditions' | 'start-and-personality'>('basic');
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
@@ -599,10 +600,18 @@ export default function TeacherDashboard({
         setStudents(fetchedSt);
         if (targetStudent) {
           const updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
-          if (updatedTarget) setSelectedStudent(updatedTarget);
+          if (updatedTarget) {
+            setSelectedStudent(updatedTarget);
+            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || '';
+            if (fetchedSchool) setSchoolName(fetchedSchool);
+          }
         } else if (selectedStudent) {
           const updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
-          if (updatedCurrent) setSelectedStudent(updatedCurrent);
+          if (updatedCurrent) {
+            setSelectedStudent(updatedCurrent);
+            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || '';
+            if (fetchedSchool) setSchoolName(fetchedSchool);
+          }
         }
       }
     }).catch(err => console.warn('fetchStudents in loadData error:', err));
@@ -695,6 +704,9 @@ export default function TeacherDashboard({
         });
         setSelectedStartGrades(initStartGrades);
 
+        const initialSchoolName = freshSt.school_name || (freshSt as any).school || listSch.find(s => s.id === freshSt.school_id)?.name || '';
+        setSchoolName(initialSchoolName);
+
         setEditForm({
           name: freshSt.name,
           name_kana: freshSt.name_kana || '',
@@ -703,7 +715,7 @@ export default function TeacherDashboard({
           withdrawal_date: freshSt.withdrawal_date || null,
           grade: freshSt.grade,
           school_id: freshSt.school_id,
-          school_name: freshSt.school_name || listSch.find(s => s.id === freshSt.school_id)?.name || '',
+          school_name: initialSchoolName,
           club_activities: freshSt.club_activities || '',
           hobbies: freshSt.hobbies || '',
           parent_name: freshSt.parent_name || '',
@@ -1307,9 +1319,11 @@ export default function TeacherDashboard({
         ? (editForm as any).selected_subjects
         : (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0 ? selectedStudent.selected_subjects : defaultSubjs);
 
-      const finalizedSchoolName = editForm.school_name !== undefined 
-        ? editForm.school_name.trim() 
-        : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || '').trim();
+      const finalizedSchoolName = (schoolName !== undefined && schoolName !== null 
+        ? schoolName 
+        : (editForm.school_name !== undefined 
+            ? editForm.school_name 
+            : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || ''))).trim();
 
       let targetSchoolId = editForm.school_id || selectedStudent.school_id;
       const matchedSchool = schools.find(s => s.name === finalizedSchoolName);
@@ -1353,6 +1367,8 @@ export default function TeacherDashboard({
       } as Student;
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
+      const resolvedSavedSchool = saved.school_name || finalizedSchoolName;
+      setSchoolName(resolvedSavedSchool);
       setPeriodCount(saved.default_slots || saved.period_count || newSlots);
       setEditForm({
         ...saved,
@@ -1360,8 +1376,8 @@ export default function TeacherDashboard({
         withdrawal_date: saved.withdrawal_date || null,
         personalities: saved.personalities || saved.personality_tags || personalityList,
         personality_tags: saved.personalities || saved.personality_tags || personalityList,
-        school_name: saved.school_name || finalizedSchoolName,
-        school: saved.school_name || finalizedSchoolName,
+        school_name: resolvedSavedSchool,
+        school: resolvedSavedSchool,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
         selected_subjects: saved.selected_subjects || currentSelectedSubjects,
@@ -1400,6 +1416,7 @@ export default function TeacherDashboard({
       const listSt = db.getStudents();
       setStudents(listSt);
       loadData(saved);
+      setSchoolName(resolvedSavedSchool);
       alert('生徒情報を保存しました。');
     } catch (err: any) {
       console.error('handleSaveStudentDetail Supabase error:', err);
@@ -8320,9 +8337,20 @@ export default function TeacherDashboard({
                             id="student-school-name"
                             data-testid="student-school-name-input"
                             type="text" 
-                            value={editForm.school_name !== undefined ? editForm.school_name : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent?.school_name || '')} 
+                            value={schoolName ?? ''} 
                             onChange={e => {
                               const typedName = e.target.value;
+                              setSchoolName(typedName);
+                              const matched = schools.find(s => s.name === typedName);
+                              setEditForm(prev => ({ 
+                                ...prev, 
+                                school_name: typedName,
+                                school_id: matched ? matched.id : prev.school_id 
+                              }));
+                            }}
+                            onInput={(e: any) => {
+                              const typedName = e.target.value;
+                              setSchoolName(typedName);
                               const matched = schools.find(s => s.name === typedName);
                               setEditForm(prev => ({ 
                                 ...prev, 
@@ -8332,6 +8360,7 @@ export default function TeacherDashboard({
                             }}
                             onBlur={e => {
                               const typedName = e.target.value;
+                              setSchoolName(typedName);
                               const matched = schools.find(s => s.name === typedName);
                               setEditForm(prev => ({
                                 ...prev,

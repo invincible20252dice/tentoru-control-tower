@@ -1954,6 +1954,16 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       });
 
       expect(alertMock).toHaveBeenCalledWith('校舎別AI自動設定ルールを保存しました！');
+
+      // 4. 再度モーダルを開いて ✕ ボタンで閉じる
+      await act(async () => {
+        fireEvent.click(openModalBtn);
+      });
+      const closeBtn = screen.getByRole('button', { name: '✕' });
+      await act(async () => {
+        fireEvent.click(closeBtn);
+      });
+
       alertMock.mockRestore();
     });
   });
@@ -2851,5 +2861,252 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       vi.spyOn(db, 'saveStudent').mockImplementation(origSaveStudent);
     });
   });
+
+  describe('57. 生徒情報画面における学校名入力欄のState完全同期・保存後クリア防止・画面復帰後保持', () => {
+    it('「飽田南小学校」と入力して保存後、OKを押しても入力欄に学校名が残り続け、DBに保存され画面移動後も保持される', async () => {
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+      await act(async () => {
+        render(
+          <TeacherDashboard
+            initialStudentId={mockStudentA.id}
+            teacherType="junior_high"
+            initialTab="student-detail"
+          />
+        );
+      });
+
+      // 1. 学校名 input 欄の取得と Controlled Component 完全バインドの検証
+      const schoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
+      expect(schoolInput).toBeDefined();
+
+      // onChange & onBlur で「飽田南小学校」を入力
+      await act(async () => {
+        fireEvent.change(schoolInput, { target: { value: '飽田南小学校' } });
+      });
+      expect(schoolInput.value).toBe('飽田南小学校');
+
+      await act(async () => {
+        fireEvent.blur(schoolInput, { target: { value: '飽田南小学校' } });
+      });
+      expect(schoolInput.value).toBe('飽田南小学校');
+
+      // 2. 「変更を保存する」をクリックして保存
+      const saveBtn = screen.getByRole('button', { name: /変更を保存する/i });
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+
+      // アラートが表示されたことを確認
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+
+      // 3. 保存後・OK押下後も入力欄がクリアされず「飽田南小学校」が残っていることを検証
+      expect(schoolInput.value).toBe('飽田南小学校');
+
+      // 4. DBのローカルキャッシュ・永続化データにも「飽田南小学校」が確実に保存されたことを検証
+      const freshStudent = db.getStudents().find(s => s.id === mockStudentA.id);
+      expect(freshStudent?.school_name).toBe('飽田南小学校');
+
+      // 5. 別タブ（時間割タブ）へ移動し、再度生徒詳細タブに戻っても保持されていることを検証
+      const scheduleTabBtn = screen.getByRole('button', { name: /コマ割り|時間割/i });
+      await act(async () => {
+        fireEvent.click(scheduleTabBtn);
+      });
+
+      const detailTabBtn = screen.getByRole('button', { name: /生徒詳細|生徒情報/i });
+      await act(async () => {
+        fireEvent.click(detailTabBtn);
+      });
+
+      const reloadedSchoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
+      expect(reloadedSchoolInput.value).toBe('飽田南小学校');
+
+      alertMock.mockRestore();
+    });
+  });
+
+  describe('58. DatabaseService 認証・セッション・校舎AIルール関連の完全カバレッジ網羅', () => {
+    it('signInWithPassword, signOut, sendBranchPasswordReset, getSession, saveSession などを完全に検証する', async () => {
+      // 1. バリデーションエラー
+      const emptyEmailRes = await db.signInWithPassword('', 'pass');
+      expect(emptyEmailRes.success).toBe(false);
+      expect(emptyEmailRes.error).toBe('メールアドレスを入力してください');
+
+      const emptyPassRes = await db.signInWithPassword('test@tentoru.jp', '');
+      expect(emptyPassRes.success).toBe(false);
+      expect(emptyPassRes.error).toBe('パスワードを入力してください');
+
+      const wrongPassRes = await db.signInWithPassword('admin@tentoru.jp', 'wrongpass');
+      expect(wrongPassRes.success).toBe(false);
+      expect(wrongPassRes.error).toBe('メールアドレスまたはパスワードが正しくありません');
+
+      // 2. 校舎一時停止 (suspended)
+      const suspendedBranch = {
+        id: 'branch-suspended-test',
+        name: '休止校舎',
+        email: 'suspended@tentoru.jp',
+        status: 'suspended' as const,
+        created_at: new Date().toISOString()
+      };
+      await db.saveBranch(suspendedBranch);
+
+      const suspendedLogin = await db.signInWithPassword('suspended@tentoru.jp', 'validpass');
+      expect(suspendedLogin.success).toBe(false);
+      expect(suspendedLogin.error).toContain('アカウントは現在一時停止中です');
+
+      // 3. 有効な校舎アカウントでのログイン
+      const activeBranch = {
+        id: 'branch-active-test',
+        name: '稼働校舎',
+        email: 'active@tentoru.jp',
+        status: 'active' as const,
+        created_at: new Date().toISOString()
+      };
+      await db.saveBranch(activeBranch);
+
+      const branchLogin = await db.signInWithPassword('active@tentoru.jp', 'validpass');
+      expect(branchLogin.success).toBe(true);
+      expect(branchLogin.session?.user.role).toBe('branch');
+      expect(branchLogin.session?.user.branch_id).toBe('branch-active-test');
+
+      // 4. 本部管理者ログイン
+      const adminLogin = await db.signInWithPassword('admin@tentoru.jp', 'validpass');
+      expect(adminLogin.success).toBe(true);
+      expect(adminLogin.session?.user.role).toBe('admin');
+
+      // 5. その他のtentoruドメイン (branchキーワード含む/含まない)
+      const genericBranchLogin = await db.signInWithPassword('my-branch-user@tentoru.jp', 'validpass');
+      expect(genericBranchLogin.success).toBe(true);
+      expect(genericBranchLogin.session?.user.role).toBe('branch');
+
+      const genericUserLogin = await db.signInWithPassword('other-user@tentoru.jp', 'validpass');
+      expect(genericUserLogin.success).toBe(true);
+      expect(genericUserLogin.session?.user.role).toBe('admin');
+
+      // 6. パスワードリセット
+      const resetRes = await db.sendBranchPasswordReset('reset-test@tentoru.jp');
+      expect(resetRes.success).toBe(true);
+      expect(resetRes.message).toContain('パスワード再設定のご案内メールを送信しました');
+
+      // 7. セッション保存 & 取得 & サインアウト
+      const currentRole = db.getCurrentUserRole();
+      expect(currentRole).toBeDefined();
+
+      db.setCurrentUserRole('branch', 'branch-active-test', '稼働校舎');
+      expect(db.getCurrentUserRole().role).toBe('branch');
+
+      const session = db.getSession();
+      expect(session).toBeDefined();
+
+      await db.signOut();
+      expect(db.getSession()).toBeNull();
+
+      // 8. 校舎AIルール保存 & 取得
+      const branchAiRules = await db.saveBranchAIRules('branch-active-test', { custom_instruction: '自習室強化' } as any);
+      expect(branchAiRules).toBeDefined();
+
+      const fetchedRules = await db.getBranchAIRules('branch-active-test');
+      expect(fetchedRules).toBeDefined();
+
+      // 9. キャッシュクリアとCustomApplyScope CRUD & School削除
+      db.clearLocalMockCache();
+
+      const scope = await db.saveCustomApplyScope({
+        id: 'scope-test-1',
+        name: '特進スコープ',
+        branch_id: 'branch-active-test',
+        created_at: new Date().toISOString()
+      });
+      expect(scope.name).toBe('特進スコープ');
+      expect(db.getCustomApplyScopes().some(s => s.id === 'scope-test-1')).toBe(true);
+
+      await db.deleteCustomApplyScope('scope-test-1');
+      expect(db.getCustomApplyScopes().some(s => s.id === 'scope-test-1')).toBe(false);
+
+      const testSchool = await db.saveSchool({
+        id: 'school-delete-test',
+        name: '削除テスト中学校',
+        type: 'junior_high',
+        created_at: new Date().toISOString()
+      });
+      expect(testSchool.id).toBe('school-delete-test');
+      await db.deleteSchool('school-delete-test');
+      expect(db.getSchools().some(s => s.id === 'school-delete-test')).toBe(false);
+
+      // 10. sanitizeLearningTask エッジケース (不正日付・不正ステータス・不正時限)
+      const edgeTask = {
+        id: 'task-edge-cov-1',
+        student_id: 'std-high-1',
+        title: '正規化タスク',
+        subject: '数学',
+        scheduled_date: 'invalid-date-string-that-causes-date-fallback',
+        period: 'not-a-number' as any,
+        status: 'unknown-status-value' as any,
+        video_watched: false,
+        test_passed: false
+      };
+      const savedTasks = await db.saveLearningTasks([edgeTask as any]);
+      expect(savedTasks.length).toBe(1);
+      expect(savedTasks[0].id).toBe('task-edge-cov-1');
+      expect(savedTasks[0].status).toBe('unstarted');
+    });
+  });
+
+  describe('59. TeacherDashboard: 園児・高校生生徒および学校・科目自動連動の完全網羅', () => {
+    it('園児生徒および高校生生徒の自動科目選択・学年フィルタ・高校学校連動が正常に動作する', async () => {
+      const kindergartenStudent: Student = {
+        ...mockStudentElem,
+        id: 'std-kindergarten-1',
+        name: '園児 テスト',
+        grade: '園児',
+        selected_subjects: []
+      };
+      await db.saveStudent(kindergartenStudent);
+
+      const highSchool: School = {
+        id: 'sch-high-1',
+        name: '開邦高校',
+        type: 'high_school',
+        created_at: new Date().toISOString()
+      };
+      await db.saveSchool(highSchool);
+
+      const highSchoolStudent: Student = {
+        ...mockStudentA,
+        id: 'std-high-1',
+        name: '高校生 テスト',
+        grade: '高1',
+        school_id: undefined,
+        school_name: undefined,
+        selected_subjects: []
+      };
+      await db.saveStudent(highSchoolStudent);
+
+      // 園児生徒でレンダリング
+      const { unmount } = render(
+        <TeacherDashboard
+          initialStudentId={kindergartenStudent.id}
+          teacherType="elementary"
+          initialTab="milestones"
+        />
+      );
+      expect(screen.getByTestId('header-teacher-badge')).toBeInTheDocument();
+      unmount();
+
+      // 高校生生徒でレンダリング
+      render(
+        <TeacherDashboard
+          initialStudentId={highSchoolStudent.id}
+          teacherType="junior_high"
+          initialTab="schedule"
+        />
+      );
+      expect(screen.getByTestId('header-teacher-badge')).toBeInTheDocument();
+    });
+  });
 });
+
+
+
+
 

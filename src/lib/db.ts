@@ -1901,6 +1901,7 @@ class DatabaseService {
       const { units, tasks, ...rawPayload } = toSave as any;
       const payloadToSave: any = { ...rawPayload };
       payloadToSave.school_name = derivedSchoolName;
+      payloadToSave.school = derivedSchoolName;
       payloadToSave.personalities = personalityList;
       payloadToSave.personality_tags = personalityList;
 
@@ -2043,6 +2044,8 @@ class DatabaseService {
             name: currentPayload.name,
             email: currentPayload.email,
             grade: currentPayload.grade,
+            school_name: currentPayload.school_name || currentPayload.school || derivedSchoolName,
+            school: currentPayload.school_name || currentPayload.school || derivedSchoolName,
             status: currentPayload.status || 'normal',
             period_count: currentPayload.period_count || 2,
             created_at: currentPayload.created_at || new Date().toISOString()
