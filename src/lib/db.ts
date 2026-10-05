@@ -2863,42 +2863,45 @@ class DatabaseService {
   public async fetchMiniTestResults(studentId?: string, date?: string): Promise<MiniTestResult[]> {
     if (!this.isMockMode && this.supabase) {
       try {
-        let query = this.supabase.from('mini_test_results').select(`
-          *,
-          students (
-            id,
-            name,
-            grade
-          )
-        `);
+        let query = this.supabase.from('mini_test_results').select('*');
         if (studentId) query = query.eq('student_id', studentId);
         if (date) query = query.eq('date', date);
         const { data, error } = await query;
-        if (!error && data) {
-          const allSt = this.getStudents();
-          const enriched: MiniTestResult[] = (data as any[]).map(t => {
-            const st = allSt.find(s => s.id === t.student_id || s.student_id === t.student_id);
-            return {
-              ...t,
-              students: t.students || (st ? { id: st.id, name: st.name, grade: st.grade } : null)
-            };
-          });
-          this.saveMockData('mini_test_results', enriched);
-          return enriched;
-        }
         if (error) {
-          console.warn('fetchMiniTestResults relation query failed, falling back to select *:', error);
-          let fbQuery = this.supabase.from('mini_test_results').select('*');
-          if (studentId) fbQuery = fbQuery.eq('student_id', studentId);
-          if (date) fbQuery = fbQuery.eq('date', date);
-          const { data: fbData, error: fbError } = await fbQuery;
-          if (fbError) throw fbError;
-          const allSt = this.getStudents();
-          const enriched: MiniTestResult[] = (fbData as any[] || []).map((t: any) => {
-            const st = allSt.find(s => s.id === t.student_id || s.student_id === t.student_id);
+          console.warn('fetchMiniTestResults Supabase query error:', error);
+          throw error;
+        }
+        if (data) {
+          // 方法A: 外部キー制約に依存せず、取得した student_id リストをもとに students テーブルから安全に取得してマッピング
+          const rawList = data as any[];
+          const studentIds = Array.from(new Set(
+            rawList
+              .map(t => t.student_id)
+              .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+          ));
+
+          let fetchedStudents: { id: string; name: string; grade: string; student_id?: string }[] = [];
+          if (studentIds.length > 0) {
+            try {
+              const { data: stData, error: stError } = await this.supabase
+                .from('students')
+                .select('id, name, grade, student_id')
+                .in('id', studentIds);
+              if (!stError && stData) {
+                fetchedStudents = stData;
+              }
+            } catch (stErr) {
+              console.warn('fetchMiniTestResults students mapping fetch warning:', stErr);
+            }
+          }
+
+          const localStudents = this.getStudents();
+          const enriched: MiniTestResult[] = rawList.map(t => {
+            const matchedSt = fetchedStudents.find(s => s.id === t.student_id || (s.student_id && s.student_id === t.student_id))
+              || localStudents.find(s => s.id === t.student_id || s.student_id === t.student_id);
             return {
               ...t,
-              students: st ? { id: st.id, name: st.name, grade: st.grade } : null
+              students: matchedSt ? { id: matchedSt.id, name: matchedSt.name, grade: matchedSt.grade } : (t.students || null)
             };
           });
           this.saveMockData('mini_test_results', enriched);
@@ -2956,14 +2959,7 @@ class DatabaseService {
         const { data, error } = await this.supabase
           .from('mini_test_results')
           .upsert(currentPayload)
-          .select(`
-            *,
-            students (
-              id,
-              name,
-              grade
-            )
-          `)
+          .select('*')
           .single();
 
         if (!error && data) {
@@ -2995,10 +2991,17 @@ class DatabaseService {
       }
 
       if (savedData) {
+        let studentInfo = sanitized.students || null;
+        if (!studentInfo && sanitized.student_id) {
+          const st = this.getStudents().find(s => s.id === sanitized.student_id || s.student_id === sanitized.student_id);
+          if (st) {
+            studentInfo = { id: st.id, name: st.name, grade: st.grade };
+          }
+        }
         return {
           ...sanitized,
           ...savedData,
-          students: savedData.students || sanitized.students
+          students: studentInfo
         } as MiniTestResult;
       }
       if (lastError) throw lastError;

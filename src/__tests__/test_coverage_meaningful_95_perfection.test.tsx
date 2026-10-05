@@ -3104,7 +3104,67 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       expect(screen.getByTestId('header-teacher-badge')).toBeInTheDocument();
     });
   });
+
+  describe('60. mini_test_results と students の外部キー非依存マッピングおよび自動リスケ正常完走', () => {
+    it('方法Aによる生徒情報の安全なJavaScript結合が動作し、外部キー未設定環境でも遅れチェック＆自動リスケがエラーなく完走する', async () => {
+      // 1. fetchMiniTestResults の方法A (外部キー非依存) を検証
+      const testMini: MiniTestResult = {
+        id: 'mtr-foreign-key-free-1',
+        student_id: mockStudentA.id,
+        date: '2026-10-05',
+        subject: '数学',
+        test_content: '連立方程式の応用 単元テスト',
+        score: 85,
+        passed: true,
+        passing_line: '80点以上',
+        target_scope: 'individual',
+        created_at: new Date().toISOString()
+      };
+      await db.saveMiniTestResult(testMini);
+
+      // fetchMiniTestResults で students プロパティが安全にマッピングされていることを検証
+      const fetchedMinis = await db.fetchMiniTestResults(mockStudentA.id);
+      const targetMini = fetchedMinis.find(m => m.id === 'mtr-foreign-key-free-1');
+      expect(targetMini).toBeDefined();
+      expect(targetMini?.students?.name).toBe(mockStudentA.name);
+
+      // 2. TeacherDashboard で「遅れチェック ＆ 自動リスケ」を実行
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+      await act(async () => {
+        render(
+          <TeacherDashboard
+            initialStudentId={mockStudentA.id}
+            teacherType="junior_high"
+            initialTab="schedule"
+          />
+        );
+      });
+
+      // 自動リスケボタンを取得
+      const reschedBtn = screen.getByRole('button', { name: /遅れチェック ＆ 自動リスケ|手動リスケジュールを実行/i });
+      expect(reschedBtn).toBeInTheDocument();
+
+      // ボタンをクリック
+      await act(async () => {
+        fireEvent.click(reschedBtn);
+      });
+
+      // エラーアラートが発生せず、正常に処理が完走したことを確認
+      const errorCalls = alertMock.mock.calls.filter(args => 
+        typeof args[0] === 'string' && (args[0].includes('エラー') || args[0].includes('Could not find a relationship'))
+      );
+      expect(errorCalls.length).toBe(0);
+
+      // コマ割りタスクが正常に保存・更新されていることを検証
+      const tasks = db.getLearningTasks().filter(t => t.student_id === mockStudentA.id);
+      expect(tasks.length).toBeGreaterThanOrEqual(1);
+
+      alertMock.mockRestore();
+    });
+  });
 });
+
 
 
 

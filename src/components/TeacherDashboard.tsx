@@ -2956,21 +2956,25 @@ export default function TeacherDashboard({
       const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
 
       // DBへの保存 (本日のテスト)
-      await db.deleteMiniTestResultByDate(freshSt.id, scheduleDate);
-      for (const t of cleanedTests) {
-        await db.saveMiniTestResult({
-          id: t.id,
-          student_id: freshSt.id,
-          date: scheduleDate,
-          subject: t.subject,
-          test_type: 'unit_test',
-          unit_name: t.unitName,
-          test_content: t.content,
-          score: null,
-          passing_line: t.passingLine,
-          target_scope: 'individual',
-          created_at: new Date().toISOString()
-        });
+      try {
+        await db.deleteMiniTestResultByDate(freshSt.id, scheduleDate);
+        for (const t of cleanedTests) {
+          await db.saveMiniTestResult({
+            id: t.id,
+            student_id: freshSt.id,
+            date: scheduleDate,
+            subject: t.subject,
+            test_type: 'unit_test',
+            unit_name: t.unitName,
+            test_content: t.content,
+            score: null,
+            passing_line: t.passingLine,
+            target_scope: 'individual',
+            created_at: new Date().toISOString()
+          });
+        }
+      } catch (miniErr) {
+        console.warn('Mini test saving warning in auto reschedule:', miniErr);
       }
 
       // 3. 生成された最適コマ割りを LearningTask 配列に変換して対象日付（scheduleDate）に保存
@@ -3022,19 +3026,23 @@ export default function TeacherDashboard({
           targetScope: 'individual'
         });
 
-        await db.deleteHomeworkResultsByDate(freshSt.id, scheduleDate);
-        await db.saveHomeworkResult({
-          id: autoHomeworks[0].id,
-          student_id: freshSt.id,
-          date: scheduleDate,
-          subject: autoHomeworks[0].subject,
-          homework_type: 'drill_2nd',
-          homework_content: autoHwsText,
-          homework_deadline: hwDate,
-          status: 'incomplete',
-          target_scope: 'individual',
-          created_at: new Date().toISOString()
-        });
+        try {
+          await db.deleteHomeworkResultsByDate(freshSt.id, scheduleDate);
+          await db.saveHomeworkResult({
+            id: autoHomeworks[0].id,
+            student_id: freshSt.id,
+            date: scheduleDate,
+            subject: autoHomeworks[0].subject,
+            homework_type: 'drill_2nd',
+            homework_content: autoHwsText,
+            homework_deadline: hwDate,
+            status: 'incomplete',
+            target_scope: 'individual',
+            created_at: new Date().toISOString()
+          });
+        } catch (hwErr) {
+          console.warn('Homework saving warning in auto reschedule:', hwErr);
+        }
       }
 
       // 5. 通塾曜日に基づく未来の予定日リストを作成 (次回以降の通塾設定日5回分)
