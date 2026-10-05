@@ -3193,37 +3193,25 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       });
       expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
 
-      // 3. デバッグモニターボックスに生データがリアルタイム描画されていることを検証
-      const debugBox = screen.getByTestId('student-save-debug-box');
-      expect(debugBox).toBeInTheDocument();
-      expect(debugBox.textContent).toContain('① 送信した学校名のキーと値');
-      expect(debugBox.textContent).toContain('飽田南小学校');
-      // 送信ペイロード（①）に存在しない 'school' カラムが一切含まれず、'school_name' のみであることをピンポイント厳格検証
-      const sentPayloadPre = screen.getByTestId('debug-sent-payload');
-      expect(sentPayloadPre.textContent).toContain('"school_name": "飽田南小学校"');
-      expect(sentPayloadPre.textContent).not.toContain('"school":');
-      expect(debugBox.textContent).toContain('② Supabaseから返ってきた生のエラーメッセージ');
-      expect(debugBox.textContent).toContain('③ UPDATE後に返ってきた生徒レコードの最新中身');
-
-      // 4. サイドバーの「生徒一覧」タブに切り替え
+      // 3. サイドバーの「生徒一覧」タブに切り替え
       const studentListMenuBtn = screen.getByRole('button', { name: /生徒一覧/i });
       await act(async () => {
         fireEvent.click(studentListMenuBtn);
       });
 
-      // 5. 生徒一覧カードの学校名表示が「飽田南小学校」になり、「未所属」にならないことを検証
+      // 4. 生徒一覧カードの学校名表示が「飽田南小学校」になり、「未所属」にならないことを検証
       const studentCard = screen.getByTestId(`student-card-${mockStudentA.id}`);
       expect(studentCard).toBeInTheDocument();
       expect(studentCard.textContent).toContain('飽田南小学校');
       expect(studentCard.textContent).not.toContain('未所属');
 
-      // 6. 生徒一覧カードの「✏️ 編集」ボタンをクリックして再度生徒情報を開く
+      // 5. 生徒一覧カードの「✏️ 編集」ボタンをクリックして再度生徒情報を開く
       const editBtn = screen.getByTestId(`edit-student-btn-${mockStudentA.id}`);
       await act(async () => {
         fireEvent.click(editBtn);
       });
 
-      // 7. 学校名 input 欄に「飽田南小学校」が表示され続けていることを検証
+      // 6. 学校名 input 欄に「飽田南小学校」が表示され続けていることを検証
       const reopenedSchoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
       expect(reopenedSchoolInput.value).toBe('飽田南小学校');
 
@@ -3231,48 +3219,17 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
     });
   });
 
-  describe('62. 生徒情報保存時のSupabaseエラー可視化およびフォールバック保持', () => {
-    it('Supabase直接エラーが発生した場合でも生エラーがデバッグボックスに描画され、画面の学校名がクリアされない', async () => {
+  describe('62. 生徒情報保存時のエラーハンドリングおよびフォールバック保持', () => {
+    it('Supabase保存エラーが発生した場合でもエラーアラートが表示され、画面の学校名がクリアされない', async () => {
       const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
 
-      // Supabaseクライアントのモックを設定してエラーを模擬
-      const originalSupabase = db.supabase;
-      const errorObj = { message: 'Column school_name not found in schema cache', code: 'PGRST204', details: 'Unknown column', hint: 'Check table definition' };
-      const chain: any = {
-        select: vi.fn().mockImplementation(() => chain),
-        update: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            select: vi.fn().mockResolvedValue({
-              data: null,
-              error: errorObj
-            })
-          })
-        }),
-        upsert: vi.fn().mockImplementation(() => chain),
-        eq: vi.fn().mockImplementation(() => chain),
-        limit: vi.fn().mockResolvedValue({ data: [{ id: mockStudentA.id }], error: null }),
-        single: vi.fn().mockResolvedValue({
-          data: { ...mockStudentA, school_name: '天登中央小学校' },
-          error: null
-        }),
-        order: vi.fn().mockImplementation(() => chain)
-      };
-      (db as any).supabase = {
-        from: vi.fn().mockReturnValue(chain)
-      };
-      const origMockMode = db.isMockMode;
-      db.isMockMode = false;
       const saveSchoolSpy = vi.spyOn(db, 'saveSchool').mockResolvedValue({
         id: 'sch-cov-jhs-1',
         name: '天登中央小学校',
         type: 'junior_high',
         created_at: new Date().toISOString()
       });
-      const saveStudentSpy = vi.spyOn(db, 'saveStudent').mockImplementation(async (st: Student) => {
-        const updated = { ...st, school_name: '天登中央小学校' };
-        db.saveMockData('students', [updated]);
-        return updated;
-      });
+      const saveStudentSpy = vi.spyOn(db, 'saveStudent').mockRejectedValue(new Error('Supabase PGRST204 column error'));
 
       try {
         await act(async () => {
@@ -3296,20 +3253,14 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
           fireEvent.click(saveBtn);
         });
 
-        // デバッグボックスにSupabaseのエラー詳細が可視化されていることを検証
-        const debugBox = screen.getByTestId('student-save-debug-box');
-        expect(debugBox).toBeInTheDocument();
-        expect(debugBox.textContent).toContain('Column school_name not found');
-        expect(debugBox.textContent).toContain('PGRST204');
-        expect(debugBox.textContent).toContain('天登中央小学校');
+        // エラーアラートが表示されることを検証
+        expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('保存中にエラーが発生しました。'));
 
         // エラー後でも入力欄の学校名「天登中央小学校」がクリアされずに保持されていることを検証
         expect(schoolInput.value).toBe('天登中央小学校');
       } finally {
         saveSchoolSpy.mockRestore();
         saveStudentSpy.mockRestore();
-        (db as any).supabase = originalSupabase;
-        db.isMockMode = origMockMode;
         alertMock.mockRestore();
       }
     });

@@ -348,4 +348,7 @@ VALUES
   ('student105', '高橋 蓮', 'student105@tentoru-student.com', '高1', 'normal', 2, 'A', NOW())
 ON CONFLICT (student_id) DO NOTHING;
 
+-- 32. 生徒テーブルに学校名カラム追加（安全確保）
+ALTER TABLE students ADD COLUMN IF NOT EXISTS school_name TEXT;
+
 
