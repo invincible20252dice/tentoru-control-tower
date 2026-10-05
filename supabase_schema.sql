@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS students (
     email TEXT NOT NULL UNIQUE, -- 例: student12345@tentoru-student.com
     grade TEXT NOT NULL, -- 例: '小5', '中3'
     school_id UUID REFERENCES schools(id) ON DELETE SET NULL,
+    school_name TEXT, -- 学校名（例: 飽田南小学校）
+    school TEXT, -- 学校名互換
     status TEXT NOT NULL DEFAULT 'normal' CHECK (status IN ('normal', 'fast', 'warning')), -- 状態（爆速、遅れ/パンクアラートなど）
     start_unit_id UUID, -- 学習スタート位置の単元ID
     period_count INTEGER NOT NULL DEFAULT 2 CHECK (period_count BETWEEN 2 AND 10),
@@ -204,6 +206,8 @@ ALTER TABLE students ADD COLUMN IF NOT EXISTS classroom TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS teacher_in_charge TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_year INTEGER;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_grade TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS school_name TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS school TEXT;
 
 -- 14. 生徒対応ログ履歴
 CREATE TABLE IF NOT EXISTS student_interactions (

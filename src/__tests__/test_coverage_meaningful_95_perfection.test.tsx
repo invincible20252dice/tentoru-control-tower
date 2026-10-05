@@ -3163,7 +3163,63 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       alertMock.mockRestore();
     });
   });
+
+  describe('61. 生徒情報画面での学校名保存と生徒一覧カード表示連動・再アクセス時の完全復元', () => {
+    it('学校名「飽田南小学校」を入力して保存後、生徒一覧カードに「飽田南小学校」が表示され、再編集時も学校名が保持される', async () => {
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+      await act(async () => {
+        render(
+          <TeacherDashboard
+            initialStudentId={mockStudentA.id}
+            teacherType="junior_high"
+            initialTab="student-detail"
+          />
+        );
+      });
+
+      // 1. 学校名に「飽田南小学校」を入力
+      const schoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
+      expect(schoolInput).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.change(schoolInput, { target: { value: '飽田南小学校' } });
+      });
+      expect(schoolInput.value).toBe('飽田南小学校');
+
+      // 2. 「変更を保存する」ボタンをクリックして保存
+      const saveBtn = screen.getByRole('button', { name: /変更を保存する/i });
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+
+      // 3. サイドバーの「生徒一覧」タブに切り替え
+      const studentListMenuBtn = screen.getByRole('button', { name: /生徒一覧/i });
+      await act(async () => {
+        fireEvent.click(studentListMenuBtn);
+      });
+
+      // 4. 生徒一覧カードの学校名表示が「飽田南小学校」になり、「未所属」にならないことを検証
+      const studentCard = screen.getByTestId(`student-card-${mockStudentA.id}`);
+      expect(studentCard).toBeInTheDocument();
+      expect(studentCard.textContent).toContain('飽田南小学校');
+      expect(studentCard.textContent).not.toContain('未所属');
+
+      // 5. 生徒一覧カードの「✏️ 編集」ボタンをクリックして再度生徒情報を開く
+      const editBtn = screen.getByTestId(`edit-student-btn-${mockStudentA.id}`);
+      await act(async () => {
+        fireEvent.click(editBtn);
+      });
+
+      // 6. 学校名 input 欄に「飽田南小学校」が表示され続けていることを検証
+      const reopenedSchoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
+      expect(reopenedSchoolInput.value).toBe('飽田南小学校');
+
+      alertMock.mockRestore();
+    });
+  });
 });
+
 
 
 

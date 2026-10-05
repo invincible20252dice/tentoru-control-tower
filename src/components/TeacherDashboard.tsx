@@ -602,15 +602,15 @@ export default function TeacherDashboard({
           const updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
           if (updatedTarget) {
             setSelectedStudent(updatedTarget);
-            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || '';
-            if (fetchedSchool) setSchoolName(fetchedSchool);
+            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || schools.find(s => s.id === updatedTarget.school_id)?.name || '';
+            setSchoolName(fetchedSchool);
           }
         } else if (selectedStudent) {
           const updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
           if (updatedCurrent) {
             setSelectedStudent(updatedCurrent);
-            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || '';
-            if (fetchedSchool) setSchoolName(fetchedSchool);
+            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || schools.find(s => s.id === updatedCurrent.school_id)?.name || '';
+            setSchoolName(fetchedSchool);
           }
         }
       }
@@ -1330,15 +1330,17 @@ export default function TeacherDashboard({
       if (matchedSchool) {
         targetSchoolId = matchedSchool.id;
       } else if (finalizedSchoolName) {
-        const newSchId = `sch-${Date.now()}`;
+        const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID 
+          ? crypto.randomUUID() 
+          : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
         const newSch = {
-          id: newSchId,
+          id: validUUID,
           name: finalizedSchoolName,
           type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
           created_at: new Date().toISOString()
         };
         await db.saveSchool(newSch);
-        targetSchoolId = newSchId;
+        targetSchoolId = validUUID;
         setSchools(db.getSchools());
       }
 
@@ -4425,7 +4427,11 @@ export default function TeacherDashboard({
                       gapBadge = <span style={{ fontSize: '0.75rem', backgroundColor: '#f8fafc', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>順調</span>;
                     }
 
-                    const schoolName = st.school_name || (st as any).school || schools.find(s => s.id === st.school_id)?.name || '未所属';
+                    const schoolName = (st.school_name && st.school_name.trim() !== '')
+                      ? st.school_name
+                      : ((st as any).school && (st as any).school.trim() !== '')
+                        ? (st as any).school
+                        : (schools.find(s => s.id === st.school_id)?.name || '未所属');
 
                     return (
                       <div

@@ -1420,10 +1420,11 @@ class DatabaseService {
       const selectedSubjects = s.selected_subjects && Array.isArray(s.selected_subjects) && s.selected_subjects.length > 0
         ? s.selected_subjects
         : (s.grade.startsWith('小') || s.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
-      const resolvedSchoolName = s.school_name || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+      const resolvedSchoolName = s.school_name || (s as any).school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
       return {
         ...s,
         school_name: resolvedSchoolName,
+        school: resolvedSchoolName,
         assigned_teachers: assignedTeachers,
         teacher_in_charge: assignedTeachers[0] || s.teacher_in_charge || '',
         selected_subjects: selectedSubjects,
@@ -1912,6 +1913,12 @@ class DatabaseService {
       if (payloadToSave.start_unit_id && !isValidUUID(payloadToSave.start_unit_id)) {
         payloadToSave.start_unit_id = null;
       }
+      if (!payloadToSave.school_id && derivedSchoolName) {
+        const matched = this.getSchools().find(s => s.name === derivedSchoolName);
+        if (matched && isValidUUID(matched.id)) {
+          payloadToSave.school_id = matched.id;
+        }
+      }
 
       // 1. Check if student already exists in Supabase by student_id or email to guarantee correct ID matching
       if (payloadToSave.student_id || payloadToSave.email) {
@@ -2167,6 +2174,8 @@ class DatabaseService {
             name: seed.name,
             email: seed.email,
             grade: seed.grade,
+            school_name: seed.school_name || (seed as any).school || null,
+            school: seed.school_name || (seed as any).school || null,
             status: seed.status || 'normal',
             period_count: seed.period_count || 2,
             created_at: seed.created_at || new Date().toISOString()
