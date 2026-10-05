@@ -672,8 +672,8 @@ export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<stri
 // Hybrid DB Access Class
 // -------------------------------------------------------------
 class DatabaseService {
-  private supabase: any = null;
-  private isMockMode: boolean = true;
+  public supabase: any = null;
+  public isMockMode: boolean = true;
 
   constructor() {
     let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
@@ -1420,7 +1420,7 @@ class DatabaseService {
       const selectedSubjects = s.selected_subjects && Array.isArray(s.selected_subjects) && s.selected_subjects.length > 0
         ? s.selected_subjects
         : (s.grade.startsWith('小') || s.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
-      const resolvedSchoolName = s.school_name || (s as any).school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+      const resolvedSchoolName = s.school_name || (s as any).school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
       return {
         ...s,
         school_name: resolvedSchoolName,
@@ -2380,7 +2380,7 @@ class DatabaseService {
           let list: Student[] = data.map((s: any) => {
             const regYear = s.registered_year ?? getSchoolYear(s.created_at);
             const regGrade = s.registered_grade ?? s.grade;
-            const resolvedSchoolName = s.school_name || s.school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+            const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
             let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
             if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
               try { pers = JSON.parse(s.personalities); } catch (e) {}
@@ -2413,7 +2413,7 @@ class DatabaseService {
               list = refetch.data.map((s: any) => {
                 const regYear = s.registered_year ?? getSchoolYear(s.created_at);
                 const regGrade = s.registered_grade ?? s.grade;
-                const resolvedSchoolName = s.school_name || s.school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+                const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
                 let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
                 if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
                   try { pers = JSON.parse(s.personalities); } catch (e) {}
@@ -2459,10 +2459,11 @@ class DatabaseService {
           const schoolsList = this.getSchools();
           const regYear = data.registered_year ?? getSchoolYear(data.created_at);
           const regGrade = data.registered_grade ?? data.grade;
-          const resolvedSchoolName = data.school_name || (data.school_id ? schoolsList.find(sc => sc.id === data.school_id)?.name : '') || '';
+          const resolvedSchoolName = data.school_name || data.school || (data as any).elementary_school || (data.school_id ? schoolsList.find(sc => sc.id === data.school_id)?.name : '') || '';
           const st: Student = {
             ...data,
             school_name: resolvedSchoolName,
+            school: resolvedSchoolName,
             assigned_teachers: data.assigned_teachers && Array.isArray(data.assigned_teachers) ? data.assigned_teachers : (data.teacher_in_charge ? [data.teacher_in_charge] : ['福田 尚弘']),
             teacher_in_charge: (data.assigned_teachers && data.assigned_teachers[0]) || data.teacher_in_charge || '福田 尚弘',
             selected_subjects: data.selected_subjects && Array.isArray(data.selected_subjects) ? data.selected_subjects : (data.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),

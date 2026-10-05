@@ -208,6 +208,7 @@ ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_year INTEGER;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_grade TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS school_name TEXT;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS school TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS elementary_school TEXT;
 
 -- 14. 生徒対応ログ履歴
 CREATE TABLE IF NOT EXISTS student_interactions (

@@ -88,6 +88,11 @@ interface TeacherDashboardProps {
   initialDate?: string;
 }
 
+const isValidUUID = (str?: string | null): boolean => {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+};
+
 function normalizeGrade(g?: string): string {
   if (!g) return '';
   const trimmed = g.trim();
@@ -313,6 +318,12 @@ export default function TeacherDashboard({
   const [selectedTeacherFromMaster, setSelectedTeacherFromMaster] = useState('');
   const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
   const [schoolName, setSchoolName] = useState<string>('');
+  const [debugLog, setDebugLog] = useState<{
+    sentPayload: any;
+    responseError: { message?: string; details?: string; hint?: string; code?: string } | null;
+    returnedData: any;
+    timestamp: string;
+  } | null>(null);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [studentDetailSubTab, setStudentDetailSubTab] = useState<'basic' | 'conditions' | 'start-and-personality'>('basic');
   const [allCurriculumUnits, setAllCurriculumUnits] = useState<CurriculumUnit[]>([]);
@@ -602,15 +613,19 @@ export default function TeacherDashboard({
           const updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
           if (updatedTarget) {
             setSelectedStudent(updatedTarget);
-            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || schools.find(s => s.id === updatedTarget.school_id)?.name || '';
-            setSchoolName(fetchedSchool);
+            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || (updatedTarget as any).elementary_school || schools.find(s => s.id === updatedTarget.school_id)?.name || '';
+            if (fetchedSchool && fetchedSchool.trim() !== '') {
+              setSchoolName(fetchedSchool);
+            }
           }
         } else if (selectedStudent) {
           const updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
           if (updatedCurrent) {
             setSelectedStudent(updatedCurrent);
-            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || schools.find(s => s.id === updatedCurrent.school_id)?.name || '';
-            setSchoolName(fetchedSchool);
+            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || (updatedCurrent as any).elementary_school || schools.find(s => s.id === updatedCurrent.school_id)?.name || '';
+            if (fetchedSchool && fetchedSchool.trim() !== '') {
+              setSchoolName(fetchedSchool);
+            }
           }
         }
       }
@@ -1346,6 +1361,45 @@ export default function TeacherDashboard({
 
       const personalityList = editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || [];
 
+      // 1. 送信ペイロードの準備 & 生のSupabase UPDATE実行（画面デバッグ用）
+      const updatePayload: any = {
+        school_name: finalizedSchoolName,
+        school: finalizedSchoolName
+      };
+      if (targetSchoolId && isValidUUID(targetSchoolId)) {
+        updatePayload.school_id = targetSchoolId;
+      }
+      console.log('【送信ペイロード】:', updatePayload);
+
+      let directError: any = null;
+      let directReturnedData: any = null;
+
+      if (!db.isMockMode && db.supabase) {
+        try {
+          const res = await db.supabase
+            .from('students')
+            .update(updatePayload)
+            .eq('id', selectedStudent.id)
+            .select();
+          if (res.error) {
+            directError = {
+              message: res.error.message,
+              details: res.error.details,
+              hint: res.error.hint,
+              code: res.error.code
+            };
+          }
+          directReturnedData = res.data;
+        } catch (rawErr: any) {
+          directError = {
+            message: rawErr?.message || String(rawErr),
+            details: rawErr?.details || null,
+            hint: rawErr?.hint || null,
+            code: rawErr?.code || 'EXCEPTION'
+          };
+        }
+      }
+
       const updated = {
         ...selectedStudent,
         ...editForm,
@@ -1369,8 +1423,20 @@ export default function TeacherDashboard({
       } as Student;
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
-      const resolvedSavedSchool = saved.school_name || finalizedSchoolName;
-      setSchoolName(resolvedSavedSchool);
+
+      // 画面上に描画するデバッグ用ステートにセット
+      setDebugLog({
+        sentPayload: updatePayload,
+        responseError: directError,
+        returnedData: directReturnedData || [saved],
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
+      // DBから取得した学校名（キー名の揺れをすべて吸収し、空文字での上書きを防止）
+      const resolvedSavedSchool = saved.school_name || (saved as any).school || (saved as any).elementary_school || finalizedSchoolName;
+      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
+        setSchoolName(resolvedSavedSchool);
+      }
       setPeriodCount(saved.default_slots || saved.period_count || newSlots);
       setEditForm({
         ...saved,
@@ -1418,11 +1484,19 @@ export default function TeacherDashboard({
       const listSt = db.getStudents();
       setStudents(listSt);
       loadData(saved);
-      setSchoolName(resolvedSavedSchool);
+      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
+        setSchoolName(resolvedSavedSchool);
+      }
       alert('生徒情報を保存しました。');
     } catch (err: any) {
       console.error('handleSaveStudentDetail Supabase error:', err);
       const errMsg = err?.message || err?.details || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      setDebugLog(prev => ({
+        sentPayload: prev?.sentPayload || { school_name: schoolName, school: schoolName },
+        responseError: { message: errMsg, code: err?.code || 'CATCH_ERROR' },
+        returnedData: null,
+        timestamp: new Date().toLocaleTimeString(),
+      }));
       alert(`保存中にエラーが発生しました。\nエラー詳細: ${errMsg}`);
     }
   };
@@ -9437,6 +9511,72 @@ export default function TeacherDashboard({
                         <button type="submit" className={styles.btn} style={{ background: '#10b981', fontWeight: 700, padding: '10px 24px', width: 'auto', minWidth: '180px' }}>
                           変更を保存する
                         </button>
+                      </div>
+
+                      {/* 保存処理実行時の送受信ログ＆エラーの画面デバッグ表示（赤枠・黒背景） */}
+                      <div 
+                        data-testid="student-save-debug-box"
+                        style={{
+                          marginTop: '16px',
+                          padding: '16px',
+                          backgroundColor: '#0f172a',
+                          border: '2px solid #ef4444',
+                          borderRadius: '8px',
+                          color: '#f8fafc',
+                          fontFamily: 'monospace',
+                          fontSize: '0.82rem',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -2px rgba(0, 0, 0, 0.2)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '8px', marginBottom: '12px' }}>
+                          <span style={{ color: '#f87171', fontWeight: 'bold', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            🔍 【生徒情報保存】送受信ログ＆Supabaseエラー可視化モニター
+                          </span>
+                          <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+                            {debugLog ? `記録時刻: ${debugLog.timestamp}` : '待機中（未送信）'}
+                          </span>
+                        </div>
+
+                        {!debugLog ? (
+                          <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '8px 0' }}>
+                            ℹ️ 上記の保存ボタンを押すと、Supabaseへの送信ペイロード（学校名キー・値）、生のエラーメッセージ、およびUPDATE後の最新レコードがここにリアルタイム表示されます。
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ color: '#38bdf8', fontWeight: 'bold', marginBottom: '4px' }}>
+                                ① 送信した学校名のキーと値 (Sent Payload):
+                              </div>
+                              <pre style={{ margin: 0, padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', overflowX: 'auto', color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                {JSON.stringify(debugLog.sentPayload, null, 2)}
+                              </pre>
+                            </div>
+
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ color: debugLog.responseError ? '#f87171' : '#4ade80', fontWeight: 'bold', marginBottom: '4px' }}>
+                                ② Supabaseから返ってきた生のエラーメッセージ (Response Error):
+                              </div>
+                              {debugLog.responseError ? (
+                                <pre style={{ margin: 0, padding: '8px', backgroundColor: '#450a0a', border: '1px solid #ef4444', borderRadius: '4px', overflowX: 'auto', color: '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                  {JSON.stringify(debugLog.responseError, null, 2)}
+                                </pre>
+                              ) : (
+                                <div style={{ padding: '6px 8px', backgroundColor: '#064e3b', border: '1px solid #10b981', borderRadius: '4px', color: '#86efac' }}>
+                                  ✅ エラーなし (HTTP 200 OK / 正常完了)
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div style={{ color: '#a78bfa', fontWeight: 'bold', marginBottom: '4px' }}>
+                                ③ UPDATE後に返ってきた生徒レコードの最新中身 (Returned Data):
+                              </div>
+                              <pre style={{ margin: 0, padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', maxHeight: '200px', overflowY: 'auto', color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                {JSON.stringify(debugLog.returnedData, null, 2)}
+                              </pre>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </form>
                   </div>
