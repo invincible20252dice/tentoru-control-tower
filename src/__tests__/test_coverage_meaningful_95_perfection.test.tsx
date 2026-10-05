@@ -3198,6 +3198,10 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       expect(debugBox).toBeInTheDocument();
       expect(debugBox.textContent).toContain('① 送信した学校名のキーと値');
       expect(debugBox.textContent).toContain('飽田南小学校');
+      // 送信ペイロード（①）に存在しない 'school' カラムが一切含まれず、'school_name' のみであることをピンポイント厳格検証
+      const sentPayloadPre = screen.getByTestId('debug-sent-payload');
+      expect(sentPayloadPre.textContent).toContain('"school_name": "飽田南小学校"');
+      expect(sentPayloadPre.textContent).not.toContain('"school":');
       expect(debugBox.textContent).toContain('② Supabaseから返ってきた生のエラーメッセージ');
       expect(debugBox.textContent).toContain('③ UPDATE後に返ってきた生徒レコードの最新中身');
 
@@ -3265,7 +3269,7 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
         created_at: new Date().toISOString()
       });
       const saveStudentSpy = vi.spyOn(db, 'saveStudent').mockImplementation(async (st: Student) => {
-        const updated = { ...st, school_name: '天登中央小学校', school: '天登中央小学校' };
+        const updated = { ...st, school_name: '天登中央小学校' };
         db.saveMockData('students', [updated]);
         return updated;
       });

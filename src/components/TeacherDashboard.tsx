@@ -1362,9 +1362,9 @@ export default function TeacherDashboard({
       const personalityList = editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || [];
 
       // 1. 送信ペイロードの準備 & 生のSupabase UPDATE実行（画面デバッグ用）
+      // ※存在しない 'school' カラムは完全に除外して PGRST204 エラーを根絶
       const updatePayload: any = {
-        school_name: finalizedSchoolName,
-        school: finalizedSchoolName
+        school_name: finalizedSchoolName
       };
       if (targetSchoolId && isValidUUID(targetSchoolId)) {
         updatePayload.school_id = targetSchoolId;
@@ -1408,7 +1408,6 @@ export default function TeacherDashboard({
         personalities: personalityList,
         personality_tags: personalityList,
         school_name: finalizedSchoolName,
-        school: finalizedSchoolName,
         school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
         teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
@@ -1445,7 +1444,6 @@ export default function TeacherDashboard({
         personalities: saved.personalities || saved.personality_tags || personalityList,
         personality_tags: saved.personalities || saved.personality_tags || personalityList,
         school_name: resolvedSavedSchool,
-        school: resolvedSavedSchool,
         assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
         teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
         selected_subjects: saved.selected_subjects || currentSelectedSubjects,
@@ -1492,7 +1490,7 @@ export default function TeacherDashboard({
       console.error('handleSaveStudentDetail Supabase error:', err);
       const errMsg = err?.message || err?.details || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       setDebugLog(prev => ({
-        sentPayload: prev?.sentPayload || { school_name: schoolName, school: schoolName },
+        sentPayload: prev?.sentPayload || { school_name: schoolName },
         responseError: { message: errMsg, code: err?.code || 'CATCH_ERROR' },
         returnedData: null,
         timestamp: new Date().toLocaleTimeString(),
@@ -9547,7 +9545,10 @@ export default function TeacherDashboard({
                               <div style={{ color: '#38bdf8', fontWeight: 'bold', marginBottom: '4px' }}>
                                 ① 送信した学校名のキーと値 (Sent Payload):
                               </div>
-                              <pre style={{ margin: 0, padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', overflowX: 'auto', color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                              <pre 
+                                data-testid="debug-sent-payload"
+                                style={{ margin: 0, padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', overflowX: 'auto', color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                              >
                                 {JSON.stringify(debugLog.sentPayload, null, 2)}
                               </pre>
                             </div>

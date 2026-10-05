@@ -1899,10 +1899,11 @@ class DatabaseService {
 
     if (!this.isMockMode && this.supabase) {
       // Strip transient/calculated properties that do not exist as columns in Supabase students table
-      const { units, tasks, ...rawPayload } = toSave as any;
+      const { units, tasks, school, elementary_school, ...rawPayload } = toSave as any;
       const payloadToSave: any = { ...rawPayload };
       payloadToSave.school_name = derivedSchoolName;
-      payloadToSave.school = derivedSchoolName;
+      delete payloadToSave.school;
+      delete payloadToSave.elementary_school;
       payloadToSave.personalities = personalityList;
       payloadToSave.personality_tags = personalityList;
 
@@ -2052,7 +2053,6 @@ class DatabaseService {
             email: currentPayload.email,
             grade: currentPayload.grade,
             school_name: currentPayload.school_name || currentPayload.school || derivedSchoolName,
-            school: currentPayload.school_name || currentPayload.school || derivedSchoolName,
             status: currentPayload.status || 'normal',
             period_count: currentPayload.period_count || 2,
             created_at: currentPayload.created_at || new Date().toISOString()
@@ -2175,7 +2175,6 @@ class DatabaseService {
             email: seed.email,
             grade: seed.grade,
             school_name: seed.school_name || (seed as any).school || null,
-            school: seed.school_name || (seed as any).school || null,
             status: seed.status || 'normal',
             period_count: seed.period_count || 2,
             created_at: seed.created_at || new Date().toISOString()
