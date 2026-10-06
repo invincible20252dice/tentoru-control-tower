@@ -3186,10 +3186,10 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       });
       expect(schoolInput.value).toBe('飽田南小学校');
 
-      // 2. 「変更を保存する」ボタンをクリックして保存
-      const saveBtn = screen.getByRole('button', { name: /変更を保存する/i });
+      // 2. 「💾 変更を保存」ボタンをクリックして保存
+      const quickSaveBtn = screen.getByRole('button', { name: /💾 変更を保存/i });
       await act(async () => {
-        fireEvent.click(saveBtn);
+        fireEvent.click(quickSaveBtn);
       });
       expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
 
@@ -3261,6 +3261,220 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       } finally {
         saveSchoolSpy.mockRestore();
         saveStudentSpy.mockRestore();
+        alertMock.mockRestore();
+      }
+    });
+  });
+
+  describe('63. DatabaseService: 学校名自動解決・キャッシュ保存・Supabase同期の完全検証', () => {
+    it('saveSchoolおよびsaveStudentで学校名からschool_idが自動導出され、fetchStudentsでローカル学校名が保護される', async () => {
+      // 1. saveSchool の正常動作とローカルキャッシュ更新
+      const testSch = {
+        id: '00000000-0000-4000-8000-000000000099',
+        name: '熊本城南小学校',
+        type: 'elementary' as const,
+        created_at: new Date().toISOString()
+      };
+      const savedSch = await db.saveSchool(testSch);
+      expect(savedSch.name).toBe('熊本城南小学校');
+      const schList = db.getSchools();
+      expect(schList.some(s => s.name === '熊本城南小学校')).toBe(true);
+
+      // 2. saveStudent で school_id が空でも school_name から自動リンク・学校自動作成
+      const newSt: Student = {
+        id: '00000000-0000-4000-8000-000000000100',
+        student_id: 'student999',
+        name: 'テスト生徒999',
+        email: 'std999@test.com',
+        grade: '小3',
+        school_name: '熊本城南小学校',
+        status: 'normal',
+        created_at: new Date().toISOString()
+      };
+      const savedSt = await db.saveStudent(newSt);
+      expect(savedSt.school_name).toBe('熊本城南小学校');
+      expect(savedSt.school_id).toBe(testSch.id);
+
+      // 3. 未知の学校名「新設小学校」を指定した場合の自動学校生成
+      const newSt2: Student = {
+        id: '00000000-0000-4000-8000-000000000101',
+        student_id: 'student998',
+        name: 'テスト生徒998',
+        email: 'std998@test.com',
+        grade: '小4',
+        school_name: '新設小学校',
+        status: 'normal',
+        created_at: new Date().toISOString()
+      };
+      const savedSt2 = await db.saveStudent(newSt2);
+      expect(savedSt2.school_name).toBe('新設小学校');
+      expect(savedSt2.school_id).toBeDefined();
+
+      // 4. fetchStudents でローカル学校名が保護される
+      const fetchedList = await db.fetchStudents();
+      const found = fetchedList.find(s => s.id === newSt.id);
+      expect(found).toBeDefined();
+      expect(found?.school_name).toBe('熊本城南小学校');
+
+      // 5. TeacherDashboard で未登録学校「天登東中学校」を入力して保存し、生徒一覧カードに即時反映されることを検証
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      try {
+        await act(async () => {
+          render(
+            <TeacherDashboard
+              initialStudentId={mockStudentA.id}
+              teacherType="junior_high"
+              initialTab="student-detail"
+            />
+          );
+        });
+
+        const schoolInput = screen.getByTestId('student-school-name-input') as HTMLInputElement;
+        await act(async () => {
+          fireEvent.change(schoolInput, { target: { value: '天登東中学校' } });
+        });
+        expect(schoolInput.value).toBe('天登東中学校');
+
+        const bottomSaveBtn = screen.getByRole('button', { name: /変更を保存する/i });
+        await act(async () => {
+          fireEvent.click(bottomSaveBtn);
+        });
+        expect(alertMock).toHaveBeenCalledWith('生徒情報を保存しました。');
+
+        const studentListBtn = screen.getByRole('button', { name: /生徒一覧/i });
+        await act(async () => {
+          fireEvent.click(studentListBtn);
+        });
+
+        const card = screen.getByTestId(`student-card-${mockStudentA.id}`);
+        expect(card.textContent).toContain('天登東中学校');
+      } finally {
+        alertMock.mockRestore();
+      }
+    });
+  });
+
+  describe('64. TeacherDashboard: 指導連絡履歴（StudentInteraction）のインライン編集・カテゴリー更新・保存・キャンセル', () => {
+    it('対応履歴編集ボタンをクリックし、カテゴリーやメモを変更して保存およびキャンセルできる', async () => {
+      const interaction: StudentInteraction = {
+        id: 'si-cov-edit-1',
+        student_id: mockStudentA.id,
+        category: '勉強相談',
+        memo: '初期の学習相談内容',
+        staff_name: '初期担当',
+        date: '2026-10-06',
+        created_at: new Date().toISOString()
+      };
+      await db.saveStudentInteraction(interaction);
+
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      try {
+        await act(async () => {
+          render(
+            <TeacherDashboard
+              initialStudentId={mockStudentA.id}
+              teacherType="junior_high"
+              initialTab="student-detail"
+            />
+          );
+        });
+
+        // 編集ボタンをクリック
+        const editBtn = screen.getByTestId(`edit-interaction-${interaction.id}`);
+        await act(async () => {
+          fireEvent.click(editBtn);
+        });
+
+        // カテゴリーセレクトとテキストエリアを変更
+        const categorySelect = screen.getByTestId('edit-interaction-category-select') as HTMLSelectElement;
+        await act(async () => {
+          fireEvent.change(categorySelect, { target: { value: '学校相談' } });
+        });
+        expect(categorySelect.value).toBe('学校相談');
+
+        const memoTextarea = screen.getByTestId('edit-interaction-memo-textarea') as HTMLTextAreaElement;
+        await act(async () => {
+          fireEvent.change(memoTextarea, { target: { value: '更新後の面談記録メモ' } });
+        });
+
+        const staffInput = screen.getByTestId('edit-interaction-staff-input') as HTMLInputElement;
+        await act(async () => {
+          fireEvent.change(staffInput, { target: { value: '更新担当者' } });
+        });
+
+        // 保存ボタンをクリック
+        const saveBtn = screen.getByTestId('save-edited-interaction-btn');
+        await act(async () => {
+          fireEvent.click(saveBtn);
+        });
+
+        expect(alertMock).toHaveBeenCalledWith('✅ 対応履歴を更新しました');
+
+        // 再度編集を開いてキャンセルをクリック
+        const reEditBtn = screen.getByTestId(`edit-interaction-${interaction.id}`);
+        await act(async () => {
+          fireEvent.click(reEditBtn);
+        });
+
+        const cancelBtn = screen.getByTestId('cancel-edited-interaction-btn');
+        await act(async () => {
+          fireEvent.click(cancelBtn);
+        });
+        // 編集フォームが閉じていること
+        expect(screen.queryByTestId('cancel-edited-interaction-btn')).not.toBeInTheDocument();
+      } finally {
+        alertMock.mockRestore();
+      }
+    });
+  });
+
+  describe('65. TeacherDashboard: 単元テスト作成モーダルでの対象単元選択・自動テスト名補完・保存', () => {
+    it('タイムラインから単元テスト追加モーダルを開き、対象単元選択でテスト名が自動補完され保存できる', async () => {
+      const master: CurriculumMaster = {
+        id: 'cm-cov-test-1',
+        grade: '小5',
+        subject: '算数',
+        unit_name: '分数のかけ算',
+        lesson_name: '分数×分数',
+        sort_order: 10,
+        lesson_type: 'normal'
+      };
+      await db.saveCurriculumMasters([master]);
+
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      try {
+        await act(async () => {
+          render(
+            <TeacherDashboard
+              initialStudentId={mockStudentElem.id}
+              teacherType="elementary"
+              initialTab="milestones"
+            />
+          );
+        });
+
+        const addTestBtn = screen.getByTestId('timeline-add-unittest-btn');
+        await act(async () => {
+          fireEvent.click(addTestBtn);
+        });
+
+        expect(screen.getByText(/単元テスト マスタ新規追加/i)).toBeInTheDocument();
+
+        const unitSelect = screen.getByDisplayValue('-- 対象単元を選択（または手動入力） --') as HTMLSelectElement;
+        await act(async () => {
+          fireEvent.change(unitSelect, { target: { value: '分数のかけ算' } });
+        });
+
+        const testNameInput = screen.getByDisplayValue('分数のかけ算 単元確認テスト') as HTMLInputElement;
+        expect(testNameInput).toBeInTheDocument();
+
+        const saveModalBtn = screen.getByTestId('save-unittest-master-btn');
+        await act(async () => {
+          fireEvent.click(saveModalBtn);
+        });
+
+        expect(alertMock).toHaveBeenCalledWith('✅ 単元テストを追加しました');
+      } finally {
         alertMock.mockRestore();
       }
     });

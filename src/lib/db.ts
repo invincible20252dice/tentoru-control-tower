@@ -1764,16 +1764,24 @@ class DatabaseService {
 
   // 1. Schools CRUD
   public async saveSchool(school: School): Promise<School> {
+    const list = this.getSchools();
+    const idx = list.findIndex(s => s.id === school.id || s.name === school.name);
+    if (idx >= 0) list[idx] = { ...list[idx], ...school };
+    else list.push(school);
+    this.saveMockData('schools', list);
+
     if (!this.isMockMode && this.supabase) {
       const { data, error } = await this.supabase.from('schools').upsert(school).select().single();
       if (error) throw error;
-      return data;
+      if (data) {
+        const uIdx = list.findIndex(s => s.id === data.id || s.name === data.name);
+        if (uIdx >= 0) list[uIdx] = data;
+        else list.push(data);
+        this.saveMockData('schools', list);
+        return data;
+      }
+      return school;
     } else {
-      const list = this.getSchools();
-      const idx = list.findIndex(s => s.id === school.id);
-      if (idx >= 0) list[idx] = school;
-      else list.push(school);
-      this.saveMockData('schools', list);
       return school;
     }
   }
@@ -1864,10 +1872,32 @@ class DatabaseService {
 
     const schoolsList = this.getSchools();
     const derivedSchoolName = student.school_name || (student as any).school || (student.school_id ? schoolsList.find(s => s.id === student.school_id)?.name : '') || '';
+    let derivedSchoolId = student.school_id;
+    if (!derivedSchoolId && derivedSchoolName) {
+      const matched = schoolsList.find(s => s.name === derivedSchoolName);
+      if (matched) {
+        derivedSchoolId = matched.id;
+      } else {
+        const newSchId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sch-${Date.now()}`;
+        const newSch: School = {
+          id: newSchId,
+          name: derivedSchoolName,
+          type: derivedSchoolName.includes('小') ? 'elementary' : derivedSchoolName.includes('高') ? 'high_school' : 'junior_high',
+          created_at: new Date().toISOString()
+        };
+        try {
+          await this.saveSchool(newSch);
+        } catch (sErr) {
+          console.warn('saveStudent pre-saveSchool warning:', sErr);
+        }
+        derivedSchoolId = newSchId;
+      }
+    }
     const personalityList = student.personalities || student.personality_tags || [];
 
     const toSave: Student = {
       ...student,
+      school_id: derivedSchoolId,
       school_name: derivedSchoolName,
       personalities: personalityList,
       personality_tags: personalityList,
@@ -1915,9 +1945,41 @@ class DatabaseService {
         payloadToSave.start_unit_id = null;
       }
       if (!payloadToSave.school_id && derivedSchoolName) {
-        const matched = this.getSchools().find(s => s.name === derivedSchoolName);
+        let matched = this.getSchools().find(s => s.name === derivedSchoolName);
         if (matched && isValidUUID(matched.id)) {
           payloadToSave.school_id = matched.id;
+        } else {
+          try {
+            const { data: dbSchools } = await this.supabase
+              .from('schools')
+              .select('id, name')
+              .eq('name', derivedSchoolName)
+              .limit(1);
+            if (dbSchools && dbSchools.length > 0 && isValidUUID(dbSchools[0].id)) {
+              payloadToSave.school_id = dbSchools[0].id;
+              await this.saveSchool({
+                id: dbSchools[0].id,
+                name: derivedSchoolName,
+                type: derivedSchoolName.includes('小') ? 'elementary' : derivedSchoolName.includes('高') ? 'high_school' : 'junior_high',
+                created_at: new Date().toISOString()
+              });
+            } else {
+              const newSchoolUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
+              if (newSchoolUUID) {
+                const createdSch = await this.saveSchool({
+                  id: newSchoolUUID,
+                  name: derivedSchoolName,
+                  type: derivedSchoolName.includes('小') ? 'elementary' : derivedSchoolName.includes('高') ? 'high_school' : 'junior_high',
+                  created_at: new Date().toISOString()
+                });
+                if (createdSch && isValidUUID(createdSch.id)) {
+                  payloadToSave.school_id = createdSch.id;
+                }
+              }
+            }
+          } catch (autoSchErr) {
+            console.warn('saveStudent auto school resolution warning:', autoSchErr);
+          }
         }
       }
 
@@ -2376,10 +2438,13 @@ class DatabaseService {
         if (data) {
           const curYear = getSchoolYear();
           const schoolsList = this.getSchools();
+          const currentLocalStudents = this.getStudents();
           let list: Student[] = data.map((s: any) => {
             const regYear = s.registered_year ?? getSchoolYear(s.created_at);
             const regGrade = s.registered_grade ?? s.grade;
-            const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+            const existingLocal = currentLocalStudents.find((ls: Student) => ls.id === s.id || ls.student_id === s.student_id);
+            const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || existingLocal?.school_name || (existingLocal as any)?.school || '';
+            const resolvedSchoolId = s.school_id || (resolvedSchoolName ? schoolsList.find(sc => sc.name === resolvedSchoolName)?.id : undefined) || existingLocal?.school_id;
             let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
             if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
               try { pers = JSON.parse(s.personalities); } catch (e) {}
@@ -2388,6 +2453,7 @@ class DatabaseService {
             }
             return {
               ...s,
+              school_id: resolvedSchoolId,
               school_name: resolvedSchoolName,
               school: resolvedSchoolName,
               personalities: pers,
@@ -2412,7 +2478,9 @@ class DatabaseService {
               list = refetch.data.map((s: any) => {
                 const regYear = s.registered_year ?? getSchoolYear(s.created_at);
                 const regGrade = s.registered_grade ?? s.grade;
-                const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || '';
+                const existingLocal = currentLocalStudents.find((ls: Student) => ls.id === s.id || ls.student_id === s.student_id);
+                const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || existingLocal?.school_name || (existingLocal as any)?.school || '';
+                const resolvedSchoolId = s.school_id || (resolvedSchoolName ? schoolsList.find(sc => sc.name === resolvedSchoolName)?.id : undefined) || existingLocal?.school_id;
                 let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
                 if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
                   try { pers = JSON.parse(s.personalities); } catch (e) {}
@@ -2421,6 +2489,7 @@ class DatabaseService {
                 }
                 return {
                   ...s,
+                  school_id: resolvedSchoolId,
                   school_name: resolvedSchoolName,
                   school: resolvedSchoolName,
                   personalities: pers,

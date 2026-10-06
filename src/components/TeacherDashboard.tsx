@@ -604,22 +604,24 @@ export default function TeacherDashboard({
       if (fetchedSt && fetchedSt.length > 0) {
         setStudents(fetchedSt);
         if (targetStudent) {
-          const updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
+          let updatedTarget = fetchedSt.find(s => s.id === targetStudent.id);
           if (updatedTarget) {
-            setSelectedStudent(updatedTarget);
-            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || (updatedTarget as any).elementary_school || schools.find(s => s.id === updatedTarget.school_id)?.name || '';
+            const fetchedSchool = updatedTarget.school_name || (updatedTarget as any).school || (updatedTarget as any).elementary_school || schools.find(s => s.id === updatedTarget?.school_id)?.name || targetStudent.school_name || (targetStudent as any).school || schoolName || '';
             if (fetchedSchool && fetchedSchool.trim() !== '') {
               setSchoolName(fetchedSchool);
+              updatedTarget = { ...updatedTarget, school_name: fetchedSchool };
             }
+            setSelectedStudent(updatedTarget);
           }
         } else if (selectedStudent) {
-          const updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
+          let updatedCurrent = fetchedSt.find(s => s.id === selectedStudent.id);
           if (updatedCurrent) {
-            setSelectedStudent(updatedCurrent);
-            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || (updatedCurrent as any).elementary_school || schools.find(s => s.id === updatedCurrent.school_id)?.name || '';
+            const fetchedSchool = updatedCurrent.school_name || (updatedCurrent as any).school || (updatedCurrent as any).elementary_school || schools.find(s => s.id === updatedCurrent?.school_id)?.name || selectedStudent.school_name || (selectedStudent as any).school || schoolName || '';
             if (fetchedSchool && fetchedSchool.trim() !== '') {
               setSchoolName(fetchedSchool);
+              updatedCurrent = { ...updatedCurrent, school_name: fetchedSchool };
             }
+            setSelectedStudent(updatedCurrent);
           }
         }
       }
@@ -713,8 +715,10 @@ export default function TeacherDashboard({
         });
         setSelectedStartGrades(initStartGrades);
 
-        const initialSchoolName = freshSt.school_name || (freshSt as any).school || listSch.find(s => s.id === freshSt.school_id)?.name || '';
-        setSchoolName(initialSchoolName);
+        const initialSchoolName = freshSt.school_name || (freshSt as any).school || listSch.find(s => s.id === freshSt.school_id)?.name || (targetStudent?.id === freshSt.id ? targetStudent.school_name : '') || schoolName || '';
+        if (initialSchoolName && initialSchoolName.trim() !== '') {
+          setSchoolName(initialSchoolName);
+        }
 
         setEditForm({
           name: freshSt.name,
@@ -724,7 +728,7 @@ export default function TeacherDashboard({
           withdrawal_date: freshSt.withdrawal_date || null,
           grade: freshSt.grade,
           school_id: freshSt.school_id,
-          school_name: initialSchoolName,
+          school_name: initialSchoolName || schoolName || '',
           club_activities: freshSt.club_activities || '',
           hobbies: freshSt.hobbies || '',
           parent_name: freshSt.parent_name || '',
@@ -1335,7 +1339,7 @@ export default function TeacherDashboard({
             : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || ''))).trim();
 
       let targetSchoolId = editForm.school_id || selectedStudent.school_id;
-      const matchedSchool = schools.find(s => s.name === finalizedSchoolName);
+      const matchedSchool = schools.find(s => s.name === finalizedSchoolName) || db.getSchools().find(s => s.name === finalizedSchoolName);
       if (matchedSchool) {
         targetSchoolId = matchedSchool.id;
       } else if (finalizedSchoolName) {
@@ -1348,8 +1352,8 @@ export default function TeacherDashboard({
           type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
           created_at: new Date().toISOString()
         };
-        await db.saveSchool(newSch);
-        targetSchoolId = validUUID;
+        const savedSch = await db.saveSchool(newSch);
+        targetSchoolId = (savedSch && isValidUUID(savedSch.id)) ? savedSch.id : validUUID;
         setSchools(db.getSchools());
       }
 
@@ -1425,10 +1429,36 @@ export default function TeacherDashboard({
         console.warn('Auto task recalculation warning:', taskErr);
       }
 
-      // 生徒リスト自体もリロードして更新を反映
-      const listSt = db.getStudents();
-      setStudents(listSt);
-      loadData(saved);
+      // 生徒リスト自体も即座に対象生徒を更新してカードへ即時反映（Optimistic & Immediate Sync）
+      const updatedStudentForList: Student = {
+        ...saved,
+        school_name: resolvedSavedSchool,
+        school_id: targetSchoolId
+      };
+      (updatedStudentForList as any).school = resolvedSavedSchool;
+
+      setStudents(prev => {
+        const idx = prev.findIndex(s => s.id === saved.id || s.student_id === saved.student_id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = updatedStudentForList;
+          return next;
+        }
+        return [...prev, updatedStudentForList];
+      });
+
+      setSelectedStudent(updatedStudentForList);
+      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
+        setSchoolName(resolvedSavedSchool);
+      }
+      setEditForm(prev => ({
+        ...prev,
+        ...updatedStudentForList,
+        school_name: resolvedSavedSchool,
+        school_id: targetSchoolId
+      }));
+
+      loadData(updatedStudentForList);
       if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
         setSchoolName(resolvedSavedSchool);
       }
@@ -8363,12 +8393,13 @@ export default function TeacherDashboard({
                           <input 
                             id="student-school-name"
                             data-testid="student-school-name-input"
+                            list="registered-schools-list"
                             type="text" 
                             value={schoolName ?? ''} 
                             onChange={e => {
                               const typedName = e.target.value;
                               setSchoolName(typedName);
-                              const matched = schools.find(s => s.name === typedName);
+                              const matched = schools.find(s => s.name === typedName) || db.getSchools().find(s => s.name === typedName);
                               setEditForm(prev => ({ 
                                 ...prev, 
                                 school_name: typedName,
@@ -8378,7 +8409,7 @@ export default function TeacherDashboard({
                             onInput={(e: any) => {
                               const typedName = e.target.value;
                               setSchoolName(typedName);
-                              const matched = schools.find(s => s.name === typedName);
+                              const matched = schools.find(s => s.name === typedName) || db.getSchools().find(s => s.name === typedName);
                               setEditForm(prev => ({ 
                                 ...prev, 
                                 school_name: typedName,
@@ -8388,7 +8419,7 @@ export default function TeacherDashboard({
                             onBlur={e => {
                               const typedName = e.target.value;
                               setSchoolName(typedName);
-                              const matched = schools.find(s => s.name === typedName);
+                              const matched = schools.find(s => s.name === typedName) || db.getSchools().find(s => s.name === typedName);
                               setEditForm(prev => ({
                                 ...prev,
                                 school_name: typedName,
@@ -8398,6 +8429,11 @@ export default function TeacherDashboard({
                             className={styles.input}
                             placeholder="学校名"
                           />
+                          <datalist id="registered-schools-list">
+                            {schools.map(s => (
+                              <option key={s.id} value={s.name}>{s.name} ({s.type === 'elementary' ? '小' : s.type === 'high_school' ? '高' : '中'})</option>
+                            ))}
+                          </datalist>
                         </div>
                         <div className={styles.formGroup}>
                           <label htmlFor="student-grade">学年（登録時の学年を反映）</label>
@@ -9612,6 +9648,7 @@ export default function TeacherDashboard({
                                   <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     <div style={{ display: 'flex', gap: '8px' }}>
                                       <select
+                                        data-testid="edit-interaction-category-select"
                                         value={editingCategory}
                                         onChange={e => setEditingCategory(e.target.value as any)}
                                         className={styles.select}
@@ -9624,6 +9661,7 @@ export default function TeacherDashboard({
                                         <option value="その他">その他</option>
                                       </select>
                                       <input
+                                        data-testid="edit-interaction-staff-input"
                                         type="text"
                                         value={editingStaffName}
                                         onChange={e => setEditingStaffName(e.target.value)}
@@ -9633,6 +9671,7 @@ export default function TeacherDashboard({
                                       />
                                     </div>
                                     <textarea
+                                      data-testid="edit-interaction-memo-textarea"
                                       value={editingMemoText}
                                       onChange={e => setEditingMemoText(e.target.value)}
                                       className={styles.textarea}
@@ -9642,6 +9681,7 @@ export default function TeacherDashboard({
                                     <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                                       <button
                                         type="button"
+                                        data-testid="cancel-edited-interaction-btn"
                                         onClick={() => setEditingInteractionId(null)}
                                         style={{ padding: '3px 10px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
                                       >
@@ -9649,6 +9689,7 @@ export default function TeacherDashboard({
                                       </button>
                                       <button
                                         type="button"
+                                        data-testid="save-edited-interaction-btn"
                                         onClick={() => handleSaveEditedInteraction(item)}
                                         style={{ padding: '3px 10px', fontSize: '0.75rem', borderRadius: '4px', border: 'none', background: '#22c55e', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}
                                       >
@@ -10008,7 +10049,7 @@ export default function TeacherDashboard({
                         onChange={e => {
                           const val = e.target.value;
                           setUnitTestFormUnitName(val);
-                          if (val && !unitTestFormTestName) {
+                          if (val && (!unitTestFormTestName || unitTestFormTestName === '単元確認テスト')) {
                             setUnitTestFormTestName(`${val} 単元確認テスト`);
                           }
                         }}
