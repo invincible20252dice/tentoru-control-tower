@@ -245,8 +245,34 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       candidateMasters.length > 0 ? ensureMathEnglishUnitTests(candidateMasters) : null
     ].filter(Boolean) as typeof curriculumMasters[];
 
+    // レンジ文字列のスマート分割（レッスン名内の「〜」と区切り記号「 〜 」を明確に区別）
+    let parsedFromStr: string | null = task.start_lesson_name || null;
+    let parsedToStr: string | null = task.end_lesson_name || null;
+
+    const rangeText = task.lesson_range || task.custom_unit_name;
+    if ((!parsedFromStr || !parsedToStr) && rangeText) {
+      if (/\s+[〜~～]\s+/.test(rangeText)) {
+        const parts = rangeText.split(/\s+[〜~～]\s+/);
+        if (parts.length >= 2) {
+          if (!parsedFromStr) parsedFromStr = parts[0].trim();
+          if (!parsedToStr) parsedToStr = parts[1].trim();
+        }
+      } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
+        const parts = rangeText.split(/〜|~|～/);
+        if (parts.length >= 2) {
+          if (!parsedFromStr) parsedFromStr = parts[0].trim();
+          if (!parsedToStr) parsedToStr = parts[1].trim();
+        }
+      }
+    }
+
+    const isPureUnitTestTask = Boolean(
+      (task.start_lesson_name && task.start_lesson_name.includes('単元確認テスト')) ||
+      (task.lesson_range && task.lesson_range.includes('単元確認テスト') && !task.lesson_range.includes('〜'))
+    );
+
     const findIndexInList = (
-      list: Array<{ id: string; sort_order?: number; name: string; fullTitle: string }>, 
+      list: Array<{ id: string; sort_order?: number; name: string; fullTitle: string; isUnitTest?: boolean }>, 
       targetId?: string | null, 
       targetName?: string | null
     ): number => {
@@ -263,23 +289,44 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         const norm = cleanStr(raw);
         if (!norm) return -1;
 
-        // 1. 完全一致 (fullTitle または name)
+        const isTargetTest = raw.includes('テスト');
+
+        // 1. 完全一致
         const exact = list.findIndex(m => m.name === raw || m.fullTitle === raw);
         if (exact >= 0) return exact;
 
-        // 2. 正規化完全一致 (fullTitle または name)
+        // 2. 正規化完全一致
         const normExact = list.findIndex(m => cleanStr(m.fullTitle) === norm || cleanStr(m.name) === norm);
         if (normExact >= 0) return normExact;
 
-        // 3. fullTitle での部分一致（汎用名だけの誤マッチを防ぐため fullTitle 優先）
+        // 3. fullTitle での部分一致（targetNameがテストでなければ通常授業を優先）
+        if (!isTargetTest) {
+          const fullTitleMatchLesson = list.findIndex(m => {
+            if (m.isUnitTest) return false;
+            const fNorm = cleanStr(m.fullTitle);
+            return fNorm.includes(norm) || norm.includes(fNorm);
+          });
+          if (fullTitleMatchLesson >= 0) return fullTitleMatchLesson;
+        }
+
         const fullTitleMatch = list.findIndex(m => {
           const fNorm = cleanStr(m.fullTitle);
           return fNorm.includes(norm) || norm.includes(fNorm);
         });
         if (fullTitleMatch >= 0) return fullTitleMatch;
 
-        // 4. name での部分一致（"テスト" や "単元確認テスト" などの汎用名を除外）
+        // 4. name での部分一致
         const genericNames = ['テスト', '単元確認テスト', '単元テスト', '確認テスト'];
+        if (!isTargetTest) {
+          const nameMatchLesson = list.findIndex(m => {
+            if (m.isUnitTest) return false;
+            const mNorm = cleanStr(m.name);
+            if (genericNames.includes(mNorm)) return false;
+            return mNorm.length >= 3 && (mNorm.includes(norm) || norm.includes(mNorm));
+          });
+          if (nameMatchLesson >= 0) return nameMatchLesson;
+        }
+
         const nameMatch = list.findIndex(m => {
           const mNorm = cleanStr(m.name);
           if (genericNames.includes(mNorm)) return false;
@@ -305,24 +352,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             sort_order: m.sort_order,
             name: displayLessonName || m.unit_name || '',
             fullTitle: m.unit_name ? `${m.unit_name} - ${displayLessonName}` : (displayLessonName || ''),
-            unit_name: m.unit_name
+            unit_name: m.unit_name,
+            isUnitTest
           };
         });
 
       if (masterLessons.length > 0) {
-        let startIdx = findIndexInList(masterLessons, task.start_lesson_id, task.start_lesson_name);
-        let endIdx = findIndexInList(masterLessons, task.end_lesson_id, task.end_lesson_name);
-
-        const rangeText = task.lesson_range || task.custom_unit_name;
-        if ((startIdx < 0 || endIdx < 0) && rangeText && (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～'))) {
-          const parts = rangeText.split(/〜|~|～/);
-          if (parts.length >= 2) {
-            const fromStr = parts[0].trim();
-            const toStr = parts[1].trim();
-            if (startIdx < 0 && fromStr) startIdx = findIndexInList(masterLessons, undefined, fromStr);
-            if (endIdx < 0 && toStr) endIdx = findIndexInList(masterLessons, undefined, toStr);
-          }
-        }
+        let startIdx = findIndexInList(masterLessons, task.start_lesson_id, parsedFromStr);
+        let endIdx = findIndexInList(masterLessons, task.end_lesson_id, parsedToStr);
 
         // startIdx と endIdx の両方が特定できた場合
         if (startIdx >= 0 && endIdx >= 0) {
@@ -337,13 +374,23 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             if (sIdx >= 0 && eIdx >= 0) {
               const minI = Math.min(sIdx, eIdx);
               const maxI = Math.max(sIdx, eIdx);
-              return sameUnitLessons.slice(minI, maxI + 1);
+              const sliced = sameUnitLessons.slice(minI, maxI + 1);
+              if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+                const lessonItemsOnly = sameUnitLessons.filter(item => !item.isUnitTest);
+                if (lessonItemsOnly.length > 0) return lessonItemsOnly;
+              }
+              return sliced;
             }
           }
 
           const minI = Math.min(startIdx, endIdx);
           const maxI = Math.max(startIdx, endIdx);
-          return masterLessons.slice(minI, maxI + 1);
+          const sliced = masterLessons.slice(minI, maxI + 1);
+          if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+            const lessonItemsOnly = masterLessons.filter(item => !item.isUnitTest);
+            if (lessonItemsOnly.length > 0) return lessonItemsOnly;
+          }
+          return sliced;
         }
 
         // sort_order 基準での範囲特定 (From〜To)
@@ -364,13 +411,27 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           const minOrder = Math.min(startOrder, endOrder);
           const maxOrder = Math.max(startOrder, endOrder);
           const rangeItems = masterLessons.filter(m => m.sort_order !== undefined && m.sort_order >= minOrder && m.sort_order <= maxOrder);
-          if (rangeItems.length > 0) return rangeItems;
+          if (rangeItems.length > 0) {
+            if (!isPureUnitTestTask && rangeItems.every(item => item.isUnitTest)) {
+              const lessonItemsOnly = masterLessons.filter(item => !item.isUnitTest);
+              if (lessonItemsOnly.length > 0) return lessonItemsOnly;
+            }
+            return rangeItems;
+          }
         }
 
         if (startIdx >= 0 || endIdx >= 0) {
           const minI = startIdx >= 0 && endIdx >= 0 ? Math.min(startIdx, endIdx) : (startIdx >= 0 ? startIdx : endIdx);
           const maxI = startIdx >= 0 && endIdx >= 0 ? Math.max(startIdx, endIdx) : (endIdx >= 0 ? endIdx : startIdx);
-          return masterLessons.slice(minI, maxI + 1);
+          const sliced = masterLessons.slice(minI, maxI + 1);
+          if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+            const validItem = masterLessons[startIdx >= 0 ? startIdx : endIdx];
+            if (validItem.unit_name) {
+              const sameUnitLessons = masterLessons.filter(m => m.unit_name === validItem.unit_name && !m.isUnitTest);
+              if (sameUnitLessons.length > 0) return sameUnitLessons;
+            }
+          }
+          return sliced;
         }
       }
     }
