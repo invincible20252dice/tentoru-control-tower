@@ -342,10 +342,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         .slice()
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
         .map(m => {
-          const isUnitTest = m.item_type === 'unit_test' || m.lesson_name.includes('テスト');
+          const isReviewOrCheck = m.lesson_name.includes('まとめテスト') || m.lesson_name.toLowerCase().includes('check test');
+          const isUnitTest = !isReviewOrCheck && (
+            m.item_type === 'unit_test' || 
+            m.lesson_name.includes('単元確認テスト') || 
+            m.lesson_name.includes('単元テスト') || 
+            m.lesson_name.includes('確認テスト')
+          );
           const cleanLessonName = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
           const displayLessonName = isUnitTest 
-            ? (cleanLessonName.includes('単元確認テスト') || cleanLessonName.includes('テスト') ? cleanLessonName : `${cleanLessonName} (単元テスト)`)
+            ? (cleanLessonName.includes('単元確認テスト') || cleanLessonName.includes('単元テスト') ? cleanLessonName : `${cleanLessonName} (単元テスト)`)
             : cleanLessonName;
           return {
             id: m.id,

@@ -2960,10 +2960,14 @@ export default function TeacherDashboard({
       const allMasters = ensureMathEnglishUnitTests(rawMasters);
       Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
         if (!sel || !sel.subject || !sel.startLessonName) return;
-        const isTest = sel.startLessonName.includes('単元確認テスト') || 
+        const isReviewOrCheck = sel.startLessonName.includes('まとめテスト') || 
+                                sel.startLessonName.toLowerCase().includes('check test') || 
+                                (sel.endLessonName && (sel.endLessonName.includes('まとめテスト') || sel.endLessonName.toLowerCase().includes('check test')));
+        const isTest = !isReviewOrCheck && (
+                       sel.startLessonName.includes('単元確認テスト') || 
                        sel.startLessonName.includes('単元テスト') || 
                        sel.startLessonName.includes('確認テスト') ||
-                       (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト')));
+                       (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト'))));
         if (isTest) {
           const testContent = (sel.endLessonName && (sel.endLessonName.includes('テスト') || sel.endLessonName.includes('確認')) ? sel.endLessonName : sel.startLessonName) || sel.lessonRange;
           const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
@@ -2979,7 +2983,7 @@ export default function TeacherDashboard({
                 m.lesson_name === cleanContent ||
                 m.lesson_name === testContent ||
                 `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent ||
-                ((m.item_type === 'unit_test' || m.lesson_name.includes('テスト')) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
+                ((m.item_type === 'unit_test' || (m.lesson_name.includes('テスト') && !m.lesson_name.includes('まとめテスト'))) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
               );
               const passingLine = matchedMaster?.passing_line || '80%以上';
 
@@ -5212,6 +5216,7 @@ export default function TeacherDashboard({
                               const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
                               const allMasters = ensureMathEnglishUnitTests(curriculumMastersList);
                               const unitTestMasters = allMasters.filter(m => 
+                                !m.lesson_name?.includes('まとめテスト') &&
                                 (m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('テスト')) || Boolean(m.lesson_name?.includes('確認'))) &&
                                 (m.subject === testSub || (testSub === '算数' && m.subject === '数学') || (testSub === '数学' && m.subject === '算数'))
                               );
@@ -7008,12 +7013,17 @@ export default function TeacherDashboard({
                   const rawTimelineUnits = ensuredMasters.length > 0
                     ? ensuredMasters.map((m, idx) => {
                         const lessonName = m.lesson_name || '';
-                        const isUnitTest = m.item_type === 'unit_test' || lessonName.includes('テスト');
+                        const isReviewOrCheck = lessonName.includes('まとめテスト') || lessonName.toLowerCase().includes('check test');
+                        const isUnitTest = !isReviewOrCheck && (m.item_type === 'unit_test' || lessonName.includes('単元確認テスト') || lessonName.includes('単元テスト'));
                         let formattedName = lessonName;
                         if (isUnitTest) {
                           formattedName = lessonName.includes(' - ') ? lessonName : `${m.unit_name} - ${lessonName.replace(/^[^-]+-\s*/, '')}`;
                         } else {
-                          formattedName = `${m.unit_name} - ${lessonName}`;
+                          if (lessonName.startsWith(`${m.unit_name} - `)) {
+                            formattedName = lessonName;
+                          } else {
+                            formattedName = `${m.unit_name} - ${lessonName}`;
+                          }
                         }
                         return {
                           id: m.id,
@@ -7126,6 +7136,14 @@ export default function TeacherDashboard({
                   const isUnitTestStep = (u: any) => {
                     const uName = u.name || '';
                     const uLessonName = u.lesson_name || '';
+                    if (
+                      uName.includes('まとめテスト') || 
+                      uLessonName.includes('まとめテスト') || 
+                      uName.toLowerCase().includes('check test') || 
+                      uLessonName.toLowerCase().includes('check test')
+                    ) {
+                      return false;
+                    }
                     return (
                       u.item_type === 'unit_test' ||
                       uName.includes('単元確認テスト') ||
@@ -7797,6 +7815,11 @@ export default function TeacherDashboard({
                                 const isCurrent = currentStepIndices.has(idx);
                                 const isCompleted = !isCurrent && isUnitCompleted(unit, idx);
                                 const isEven = idx % 2 === 1;
+                                const isUnitTestBadge = (unit as any).item_type === 'unit_test' || (
+                                  (unit.name.includes('単元テスト') || unit.name.includes('単元確認テスト') || (unit.name.includes('テスト') && !unit.name.includes('まとめ'))) &&
+                                  !unit.name.includes('まとめテスト') &&
+                                  !unit.name.toLowerCase().includes('check test')
+                                );
 
                                 return (
                                   <div
@@ -7826,12 +7849,12 @@ export default function TeacherDashboard({
                                         fontWeight: 800,
                                         padding: '3px 8px',
                                         borderRadius: '12px',
-                                        backgroundColor: (unit as any).item_type === 'unit_test' || unit.name.includes('テスト') ? '#8b5cf6' : (isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1')),
+                                        backgroundColor: isUnitTestBadge ? '#8b5cf6' : (isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1')),
                                         color: '#ffffff'
                                       }}>
                                         STEP {stepNum}
                                       </span>
-                                      {((unit as any).item_type === 'unit_test' || unit.name.includes('テスト')) && (
+                                      {isUnitTestBadge && (
                                         <span style={{
                                           fontSize: '0.72rem',
                                           fontWeight: 800,
@@ -7912,7 +7935,7 @@ export default function TeacherDashboard({
                                         </span>
                                       )}
 
-                                      {((unit as any).item_type === 'unit_test' || unit.name.includes('テスト')) && (
+                                      {isUnitTestBadge && (
                                         <>
                                           <button
                                             type="button"

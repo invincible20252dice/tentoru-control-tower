@@ -65,15 +65,15 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
       />
     );
 
-    // 0 / 3 完了と表示されること (単元テストが挿入されるため3ステップ)
+    // 0 / 6 完了と表示されること (まとめテスト3件＋単元テストが挿入されるため6ステップ)
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 3 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 6 完了');
     });
 
-    // STEP 1, STEP 2, STEP 3 が描画されること
-    expect(screen.getByTestId('step-card-1-0')).toBeInTheDocument();
-    expect(screen.getByTestId('step-card-1-1')).toBeInTheDocument();
-    expect(screen.getByTestId('step-card-1-2')).toBeInTheDocument();
+    // STEP 1〜6 が描画されること
+    for (let i = 0; i < 6; i++) {
+      expect(screen.getByTestId(`step-card-1-${i}`)).toBeInTheDocument();
+    }
   });
 
   test('すごろくマップで From 〜 To 範囲の全マスが 🟠 オレンジ(stepToday)としてハイライトされる', async () => {
@@ -145,7 +145,7 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-2')).toHaveTextContent('0 / 3 完了');
+      expect(screen.getByTestId('step-progress-count-2')).toHaveTextContent('0 / 4 完了');
     });
 
     // 英語のコマ枠内(period-row-2)に英語のステップのみが表示され、算数の単元(「ひきざん」など)は一切表示されないこと
@@ -153,6 +153,7 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
     expect(within(period2Row).getByTestId('step-card-2-0')).toBeInTheDocument();
     expect(within(period2Row).getByTestId('step-card-2-1')).toBeInTheDocument();
     expect(within(period2Row).getByTestId('step-card-2-2')).toBeInTheDocument();
+    expect(within(period2Row).getByTestId('step-card-2-3')).toBeInTheDocument();
     expect(within(period2Row).getAllByText(/A〜Gの発音/)[0]).toBeInTheDocument();
     expect(within(period2Row).getAllByText(/身の回りのもの/)[0]).toBeInTheDocument();
     expect(within(period2Row).queryByText(/ひきざん/)).not.toBeInTheDocument();
@@ -337,9 +338,9 @@ describe('Slot Range (From-To) Dynamic Step Expansion & Sugoroku Highlight Integ
       curriculumMasters: masters
     });
 
-    // 算数は cm-p1-m1 が完了しているが、単元末尾の単元確認テストが未完了のため「たしざん(1) - 単元確認テスト」からスタートし、最優先教科として1コマ目に配置
+    // 算数は cm-p1-m1 が完了しているため「たしざん(1) - まとめテスト（１）」からスタートし、最優先教科として1コマ目に配置
     expect(slots[1].subject).toBe('算数');
-    expect(slots[1].startLessonName).toContain('単元確認テスト');
+    expect(slots[1].startLessonName).toContain('まとめテスト（１）');
 
     // 英語は第2優先教科として2コマ目に配置
     expect(slots[2].subject).toBe('英語');

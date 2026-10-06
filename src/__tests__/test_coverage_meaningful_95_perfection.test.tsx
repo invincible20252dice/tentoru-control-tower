@@ -1213,7 +1213,7 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       });
 
       // タイムライン上に該当単元またはテストが表示されていること
-      expect(screen.getByText(/分数のかけ算/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/分数のかけ算/i).length).toBeGreaterThan(0);
     });
   });
 

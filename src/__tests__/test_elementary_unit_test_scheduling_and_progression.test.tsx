@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import StudentDashboard from '../components/StudentDashboard';
 import TeacherDashboard from '../components/TeacherDashboard';
 import { db, Student, CurriculumMaster, LearningTask } from '../lib/db';
-import { calculateLessonRangeForSlot, findNextUncompletedLessonForSubject } from '../lib/scheduler';
+import { calculateLessonRangeForSlot, findNextUncompletedLessonForSubject, ensureMathEnglishUnitTests } from '../lib/scheduler';
 
 describe('Elementary Unit Test Scheduling & Progression Integration Suite', () => {
   beforeEach(() => {
@@ -40,22 +40,34 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       completed_lesson_ids: ['cm-nb-1', 'cm-nb-2', 'cm-nb-3'] // なんばんめ(1)〜(3)まで完了
     };
 
-    // 1. なんばんめ(4)からペース2でコマ割り計算した場合
+    // 1. なんばんめ(4)からペース5でコマ割り計算した場合（4 + まとめテスト1〜3 + 単元確認テスト）
     // ensureMathEnglishUnitTests により「なんばんめ - 単元確認テスト」が生成されているため、
-    // なんばんめ(4)の次は「なんばんめ - 単元確認テスト」となり、新単元「いろいろな かたち」にはまたがない！
+    // なんばんめの全レッスン消化後は「なんばんめ - 単元確認テスト」となり、新単元「いろいろな かたち」にはまたがない！
     const slotRange = calculateLessonRangeForSlot({
       subject: '算数',
       student,
       curriculumMasters: mathMasters,
-      lessonsPerSlot: 2
+      lessonsPerSlot: 5
     });
 
     expect(slotRange.start_lesson_name).toContain('なんばんめ(4)');
     expect(slotRange.end_lesson_name).toContain('単元確認テスト');
     expect(slotRange.end_lesson_name).not.toContain('いろいろな かたち');
 
-    // 2. 「なんばんめ - 単元確認テスト」が完了していない間は、次未完了レッスンが「なんばんめ - 単元確認テスト」
+    const allMasters = ensureMathEnglishUnitTests(mathMasters);
+    const reviewTests = allMasters.filter(m => m.unit_name === 'なんばんめ' && m.lesson_name.includes('まとめテスト'));
+
+    // 2. 「なんばんめ - まとめテスト（１）」が完了していない間は、次未完了レッスンがまとめテスト
     student.completed_lesson_ids = ['cm-nb-1', 'cm-nb-2', 'cm-nb-3', 'cm-nb-4'];
+    const nextBeforeReview = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      curriculumMasters: mathMasters
+    });
+    expect(nextBeforeReview.lessonName).toContain('まとめテスト（１）');
+
+    // まとめテスト完了後、「なんばんめ - 単元確認テスト」が完了していない間は、次未完了レッスンが「なんばんめ - 単元確認テスト」
+    student.completed_lesson_ids = ['cm-nb-1', 'cm-nb-2', 'cm-nb-3', 'cm-nb-4', ...reviewTests.map(r => r.id)];
     const nextBeforeUnitTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -64,7 +76,7 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
     expect(nextBeforeUnitTest.lessonName).toContain('単元確認テスト');
 
     // 3. 単元テストが完了したら、次の単元の一番最初の授業（From: 新単元 STEP 1）になる
-    student.completed_lesson_ids = ['cm-nb-1', 'cm-nb-2', 'cm-nb-3', 'cm-nb-4', nextBeforeUnitTest.lessonId!];
+    student.completed_lesson_ids = ['cm-nb-1', 'cm-nb-2', 'cm-nb-3', 'cm-nb-4', ...reviewTests.map(r => r.id), nextBeforeUnitTest.lessonId!];
     const nextAfterUnitTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -74,6 +86,18 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
   });
 
   it('renders unit tests properly in StudentDashboard task step cards and handles completion', async () => {
+    const mathMasters: CurriculumMaster[] = [
+      { id: 'cm-nb-1', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(1)', sort_order: 1 },
+      { id: 'cm-nb-2', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(2)', sort_order: 2 },
+      { id: 'cm-nb-3', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(3)', sort_order: 3 },
+      { id: 'cm-nb-4', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(4)', sort_order: 4 },
+      { id: 'cm-katachi-1', grade: '1年生', subject: '算数', unit_name: 'いろいろな かたち', lesson_name: 'いろいろな かたち', sort_order: 5 }
+    ];
+    await db.saveCurriculumMasters(mathMasters);
+
+    const allMasters = ensureMathEnglishUnitTests(mathMasters);
+    const reviewTests = allMasters.filter(m => m.unit_name === 'なんばんめ' && m.lesson_name.includes('まとめテスト'));
+
     const student: Student = {
       id: 'std-elem-dash-ut',
       student_id: 'S_ELEM_02',
@@ -84,18 +108,9 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       registered_year: 2026,
       registered_grade: '小1',
       selected_subjects: ['算数'],
-      completed_lesson_ids: ['cm-nb-1', 'cm-nb-2', 'cm-nb-3']
+      completed_lesson_ids: ['cm-nb-1', 'cm-nb-2', 'cm-nb-3', 'cm-nb-4', reviewTests[0].id, reviewTests[1].id]
     };
     await db.saveStudent(student);
-
-    const mathMasters: CurriculumMaster[] = [
-      { id: 'cm-nb-1', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(1)', sort_order: 1 },
-      { id: 'cm-nb-2', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(2)', sort_order: 2 },
-      { id: 'cm-nb-3', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(3)', sort_order: 3 },
-      { id: 'cm-nb-4', grade: '1年生', subject: '算数', unit_name: 'なんばんめ', lesson_name: 'なんばんめ(4)', sort_order: 4 },
-      { id: 'cm-katachi-1', grade: '1年生', subject: '算数', unit_name: 'いろいろな かたち', lesson_name: 'いろいろな かたち', sort_order: 5 }
-    ];
-    await db.saveCurriculumMasters(mathMasters);
 
     const slotRange = calculateLessonRangeForSlot({
       subject: '算数',
@@ -112,7 +127,7 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       period: 1,
       status: 'unstarted',
       subject: '算数',
-      custom_unit_name: slotRange.lesson_range || 'なんばんめ(4) 〜 なんばんめ - 単元確認テスト',
+      custom_unit_name: slotRange.lesson_range || 'なんばんめ - まとめテスト（３） 〜 なんばんめ - 単元確認テスト',
       start_lesson_id: slotRange.start_lesson_id || undefined,
       end_lesson_id: slotRange.end_lesson_id || undefined,
       start_lesson_name: slotRange.start_lesson_name || undefined,
@@ -131,12 +146,12 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       expect(screen.getByText(/さんの学習画面/)).toBeInTheDocument();
     });
 
-    // Verify STEP 1: なんばんめ(4) and STEP 2: 単元確認テスト are both present in step cards
+    // Verify STEP 1: まとめテスト（３） and STEP 2: 単元確認テスト are both present in step cards
     await waitFor(() => {
       const step1Card = screen.getByTestId('step-card-1-0');
       const step2Card = screen.getByTestId('step-card-1-1');
       expect(step1Card).toHaveTextContent('STEP 1:');
-      expect(step1Card).toHaveTextContent('なんばんめ(4)');
+      expect(step1Card).toHaveTextContent('まとめテスト（３）');
       expect(step2Card).toHaveTextContent('STEP 2:');
       expect(step2Card).toHaveTextContent('単元確認テスト');
 

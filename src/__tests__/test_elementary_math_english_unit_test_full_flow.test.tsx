@@ -26,14 +26,18 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
       { id: 'cm-m-9', grade: '小1', subject: '算数', unit_name: 'いろいろな かたち', lesson_name: 'いろいろな かたち(2)', sort_order: 9 },
     ];
 
-    // ensureMathEnglishUnitTests により単元テストが自動補完される
+    // ensureMathEnglishUnitTests により単元テストおよびまとめテスト（１）〜（３）が自動補完される
     const processedMasters = ensureMathEnglishUnitTests(mathMasters);
-    expect(processedMasters.length).toBe(8);
+    // なんばんめ(4+3+1=8) + いろいろな かたち(2+3+1=6) = 14件
+    expect(processedMasters.length).toBe(14);
 
     // なんばんめの末尾に単元確認テストが配置される
     const nanbanmeTest = processedMasters.find(m => m.unit_name === 'なんばんめ' && (m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト')));
     expect(nanbanmeTest).toBeDefined();
     expect(nanbanmeTest?.lesson_name).toContain('なんばんめ - 単元確認テスト');
+
+    const reviewTests = processedMasters.filter(m => m.unit_name === 'なんばんめ' && m.lesson_name.includes('まとめテスト'));
+    expect(reviewTests.length).toBe(3);
 
     // 1コマで複数ステップ進む場合でも、単元テストでストップし新単元「いろいろな かたち」にはまたがない
     const student: Student = {
@@ -47,22 +51,35 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
       completed_lesson_ids: ['cm-m-3', 'cm-m-4'] // STEP 3, 4 完了済み
     };
 
-    // 残りSTEP 5からペース4コマで進める場合、STEP 5〜STEP 6〜単元テストで終了する（STEP 8には進まない）
+    // 残りSTEP 5からペース6コマ（STEP5, 6, まとめテスト1, 2, 3, 単元テスト）で進める場合、単元テストで終了する（新単元には進まない）
     const rangeResult = calculateLessonRangeForSlot({
       student,
       subject: '算数',
       curriculumMasters: processedMasters,
-      lessonsPerSlot: 4
+      lessonsPerSlot: 6
     });
 
     expect(rangeResult.start_lesson_name).toContain('なんばんめ(3)');
     expect(rangeResult.end_lesson_name).toContain('単元確認テスト');
     expect(rangeResult.end_lesson_name).not.toContain('いろいろな かたち');
 
-    // STEP 3〜6が完了している状態のとき、次の授業は「なんばんめ - 単元確認テスト」
-    const studentReadyForTest: Student = {
+    // STEP 3〜6が完了している状態のとき、次の授業は「まとめテスト（１）」
+    const studentReadyForReview: Student = {
       ...student,
       completed_lesson_ids: ['cm-m-3', 'cm-m-4', 'cm-m-5', 'cm-m-6']
+    };
+
+    const nextReview = findNextUncompletedLessonForSubject({
+      student: studentReadyForReview,
+      subject: '算数',
+      curriculumMasters: processedMasters
+    });
+    expect(nextReview.lessonName).toContain('まとめテスト（１）');
+
+    // まとめテスト（１）〜（３）完了後は「なんばんめ - 単元確認テスト」
+    const studentReadyForTest: Student = {
+      ...student,
+      completed_lesson_ids: ['cm-m-3', 'cm-m-4', 'cm-m-5', 'cm-m-6', ...reviewTests.map(r => r.id)]
     };
 
     const nextUncompleted = findNextUncompletedLessonForSubject({
@@ -114,7 +131,7 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
     // 合格時は完了IDまたは完了タスクに単元テストが反映される
     const studentPassed: Student = {
       ...studentReadyForTest,
-      completed_lesson_ids: ['cm-m-3', 'cm-m-4', 'cm-m-5', 'cm-m-6', nanbanmeTest!.id]
+      completed_lesson_ids: ['cm-m-3', 'cm-m-4', 'cm-m-5', 'cm-m-6', ...reviewTests.map(r => r.id), nanbanmeTest!.id]
     };
 
     const nextUncompletedPassed = findNextUncompletedLessonForSubject({
@@ -144,6 +161,10 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
     expect(iamTest).toBeDefined();
     expect(iamTest?.lesson_name).toContain('I am ~. - 単元確認テスト');
 
+    const checkTest = processedEnglish.find(m => m.unit_name === 'I am ~.' && m.lesson_name.includes('Check Test'));
+    expect(checkTest).toBeDefined();
+    expect(checkTest?.item_type).toBe('lesson');
+
     const student: Student = {
       id: 'std-elem-eng-1',
       student_id: 'std-elem-eng-1',
@@ -155,17 +176,29 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
       completed_lesson_ids: ['cm-e-1', 'cm-e-2', 'cm-e-3', 'cm-e-4', 'cm-e-5']
     };
 
-    // STEP 1〜5完了後は STEP 6 単元テストが選ばれる
+    // STEP 1〜5完了後は Check Test が選ばれる
     const nextEng = findNextUncompletedLessonForSubject({
       student,
       subject: '英語',
       curriculumMasters: processedEnglish
     });
-    expect(nextEng.lessonName).toContain('I am ~. - 単元確認テスト');
+    expect(nextEng.lessonName).toContain('Check Test');
+
+    // Check Test 完了後は 単元確認テスト が選ばれる
+    const studentReadyForUnitTest: Student = {
+      ...student,
+      completed_lesson_ids: [...student.completed_lesson_ids!, checkTest!.id]
+    };
+    const nextEngTest = findNextUncompletedLessonForSubject({
+      student: studentReadyForUnitTest,
+      subject: '英語',
+      curriculumMasters: processedEnglish
+    });
+    expect(nextEngTest.lessonName).toContain('I am ~. - 単元確認テスト');
 
     // 単元テスト単体のコマ割り計算では、開始・終了ともに単元テストとなり次単元に跨がない
     const slotRange = calculateLessonRangeForSlot({
-      student,
+      student: studentReadyForUnitTest,
       subject: '英語',
       startLessonId: iamTest?.id,
       curriculumMasters: processedEnglish,
@@ -178,7 +211,7 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
     // 合格後は STEP 7「You are ~.(1)」に進む
     const studentPassed: Student = {
       ...student,
-      completed_lesson_ids: [...student.completed_lesson_ids!, iamTest!.id]
+      completed_lesson_ids: [...student.completed_lesson_ids!, checkTest!.id, iamTest!.id]
     };
     const nextEngPassed = findNextUncompletedLessonForSubject({
       student: studentPassed,

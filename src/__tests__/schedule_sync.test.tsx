@@ -506,47 +506,32 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       />
     );
 
-    // Should display 0 / 5 完了 (4 lessons + 1 auto unit test)
+    // Should display 0 / 8 完了 (4 lessons + 3 summary tests + 1 auto unit test)
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 5 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 8 完了');
     });
 
-    // Check that all 5 step complete buttons exist
-    expect(screen.getByTestId('step-complete-btn-1-0')).toBeInTheDocument();
-    expect(screen.getByTestId('step-complete-btn-1-1')).toBeInTheDocument();
-    expect(screen.getByTestId('step-complete-btn-1-2')).toBeInTheDocument();
-    expect(screen.getByTestId('step-complete-btn-1-3')).toBeInTheDocument();
-    expect(screen.getByTestId('step-complete-btn-1-4')).toBeInTheDocument();
+    // Check that all 8 step complete buttons exist
+    for (let i = 0; i < 8; i++) {
+      expect(screen.getByTestId(`step-complete-btn-1-${i}`)).toBeInTheDocument();
+    }
 
     // Click step 1
     fireEvent.click(screen.getByTestId('step-complete-btn-1-0'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 5 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 8 完了');
       expect(screen.getByTestId('step-done-badge-1-0')).toBeInTheDocument();
     });
 
     // Click remaining steps
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-1'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('2 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-2'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('3 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-3'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('4 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-4'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('5 / 5 完了');
-      expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
-    });
+    for (let i = 1; i < 8; i++) {
+      fireEvent.click(screen.getByTestId(`step-complete-btn-1-${i}`));
+      await waitFor(() => {
+        expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent(`${i + 1} / 8 完了`);
+      });
+    }
+    expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
 
     const updatedStudent = db.getStudents().find(s => s.id === student.id);
     expect(updatedStudent?.completed_lesson_ids).toContain('cm-elem-1');
@@ -573,7 +558,24 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     db.saveStudent(student);
 
     const masters = db.getCurriculumMasters('算数');
-    // 1. 1章の授業完了後は「1章 かずとすうじ - 単元確認テスト」が次未完了レッスン
+    // 1. 1章の授業完了後は「まとめテスト（１）」、まとめテスト完了後は「単元確認テスト」が次未完了レッスン
+    const nextSummary1 = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      tasks: [],
+      curriculumMasters: masters,
+      curriculumUnits: []
+    });
+    expect(nextSummary1.lessonName).toContain('まとめテスト（１）');
+
+    // まとめテスト（１〜３）完了後に単元確認テストへ進む
+    student.completed_lesson_ids = [
+      'cm-p1-m1',
+      'cm-p1-m2',
+      'cm-auto-sum1-算数-小1-1章 かずとすうじ',
+      'cm-auto-sum2-算数-小1-1章 かずとすうじ',
+      'cm-auto-sum3-算数-小1-1章 かずとすうじ'
+    ];
     const nextBeforeTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -584,7 +586,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     expect(nextBeforeTest.lessonName).toContain('単元確認テスト');
 
     // 2. 単元確認テストも完了すれば、次の単元「2章 たしざんとひきざん」の最初の授業（cm-p1-m3: あわせていくつ）に進む
-    student.completed_lesson_ids = ['cm-p1-m1', 'cm-p1-m2', nextBeforeTest.lessonId!];
+    student.completed_lesson_ids = [...student.completed_lesson_ids, nextBeforeTest.lessonId!];
     const nextAfterTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -596,7 +598,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     expect(nextAfterTest.lessonName).toContain('あわせていくつ');
 
     // 3. cm-p1-m3 も完了していれば cm-p1-m4 (のこりはいくつ) に進む
-    student.completed_lesson_ids = ['cm-p1-m1', 'cm-p1-m2', nextBeforeTest.lessonId!, 'cm-p1-m3'];
+    student.completed_lesson_ids = [...student.completed_lesson_ids, 'cm-p1-m3'];
     const nextLesson = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -663,39 +665,21 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     };
     await db.saveLearningTasks([task]);
 
-    // 1. Render StudentDashboard and verify 5 steps (STEP 7, 8, unit test, 9, 10) are expanded
+    // 1. Render StudentDashboard and verify 8 steps (STEP 7, 8, まとめ1〜3, 単元テスト, STEP 9, 10) are expanded
     const { unmount } = render(<StudentDashboard student={student} onBackToPortal={() => {}} initialDate={targetDate} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 5 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 8 完了');
     });
 
     // Complete steps one by one
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-0'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-1'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('2 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-2'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('3 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-3'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('4 / 5 完了');
-    });
-
-    fireEvent.click(screen.getByTestId('step-complete-btn-1-4'));
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('5 / 5 完了');
-      expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
-    });
+    for (let i = 0; i < 8; i++) {
+      fireEvent.click(screen.getByTestId(`step-complete-btn-1-${i}`));
+      await waitFor(() => {
+        expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent(`${i + 1} / 8 完了`);
+      });
+    }
+    expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
 
     // 2. Verify all completed IDs (STEP 1..10) are recorded
     const refreshedStudent = db.getStudents().find(s => s.id === student.id)!;
@@ -706,18 +690,23 @@ describe('Schedule and Timetable Synchronization Tests', () => {
 
     unmount();
 
-    // 3. Verify next uncompleted lesson auto-detection points to 1章 わり算の基礎 - 単元確認テスト
+    // 3. Verify next uncompleted lesson auto-detection points to 1章 わり算の基礎 - まとめテスト（１）
     const masters = db.getCurriculumMasters('算数');
-    const nextBeforeTest = findNextUncompletedLessonForSubject({
+    const nextSummary = findNextUncompletedLessonForSubject({
       student: refreshedStudent,
       subject: '算数',
       tasks: db.getLearningTasks(),
       curriculumMasters: masters
     });
-    expect(nextBeforeTest.lessonName).toContain('単元確認テスト');
+    expect(nextSummary.lessonName).toContain('まとめテスト（１）');
 
-    // 単元テスト完了後は STEP 11 (cm-p3-m3) に進む
-    refreshedStudent.completed_lesson_ids!.push(nextBeforeTest.lessonId!);
+    // まとめテスト（１〜３）および単元確認テスト完了後は STEP 11 (cm-p3-m3) に進む
+    refreshedStudent.completed_lesson_ids!.push(
+      'cm-auto-sum1-算数-小3-1章 わり算の基礎',
+      'cm-auto-sum2-算数-小3-1章 わり算の基礎',
+      'cm-auto-sum3-算数-小3-1章 わり算の基礎',
+      'cm-auto-ut-算数-小3-1章 わり算の基礎'
+    );
     await db.saveStudent(refreshedStudent);
 
     const nextLesson = findNextUncompletedLessonForSubject({

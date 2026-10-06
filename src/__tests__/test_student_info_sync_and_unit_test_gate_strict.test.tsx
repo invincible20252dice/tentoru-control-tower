@@ -224,16 +224,16 @@ describe('生徒情報（学校名・個性タグ）完全同期 ＆ 単元テ�
         completed_lesson_ids: []
       };
 
-      // STEP 17 からスタート（4レッスン進むと STEP 20 まで進んでしまう設定）
+      // まとめテスト(2)からスタート（4レッスン進むと次単元 STEP 20 まで進みうる設定）
       const range = calculateLessonRangeForSlot({
         subject: '算数',
-        startLessonId: 'cm-step-17',
+        startLessonId: 'cm-auto-sum2-算数-小5-小数のかけ算',
         student: studentAtStep17,
         curriculumMasters: sampleCurriculum
       });
 
       // 単元テスト（cm-step-19-test）で必ずストップし、STEP 20 にまたがないこと
-      expect(range.start_lesson_id).toBe('cm-step-17');
+      expect(range.start_lesson_id).toBe('cm-auto-sum2-算数-小5-小数のかけ算');
       expect(range.end_lesson_id).toBe('cm-step-19-test');
       expect(range.end_lesson_name).toContain('単元確認テスト');
     });
@@ -241,7 +241,13 @@ describe('生徒情報（学校名・個性タグ）完全同期 ＆ 単元テ�
     it('該当の単元テストに「合格（passed）」の記録が存在する場合のみ、次の単元（STEP 20〜）がスケジュール対象としてアンロックされる', () => {
       const studentWithStep18Completed: Student = {
         ...mockStudent,
-        completed_lesson_ids: ['cm-step-17', 'cm-step-18']
+        completed_lesson_ids: [
+          'cm-step-17',
+          'cm-step-18',
+          'cm-auto-sum1-算数-小5-小数のかけ算',
+          'cm-auto-sum2-算数-小5-小数のかけ算',
+          'cm-auto-sum3-算数-小5-小数のかけ算'
+        ]
       };
 
       // 1. テスト未受験・未合格のとき: findNextUncompletedLessonForSubject は単元テスト（STEP 19）を返す

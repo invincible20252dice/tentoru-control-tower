@@ -129,10 +129,15 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
   });
 
   it('stops at unit test when lesson range encounters a unit test without overflowing into the next unit', () => {
-    // STEP 4から開始した場合、4レッスン進むと STEP 4 -> STEP 5 -> 単元テスト -> 次単元STEP 1 となるが、単元テストでストップすること
+    // まとめテスト(2)まで完了した生徒が、レベルA（4レッスン分）で開始した場合、
+    // まとめテスト(3) -> 単元テスト と進み、次単元（小数のわり算）に進まず単元テストでストップすること
     const studentNearTest: Student = {
       ...studentLevelA,
-      completed_lesson_ids: ['cm-step1', 'cm-step2', 'cm-step3']
+      completed_lesson_ids: [
+        'cm-step1', 'cm-step2', 'cm-step3', 'cm-step4', 'cm-step5',
+        'cm-auto-sum1-算数-小5-小数のかけ算',
+        'cm-auto-sum2-算数-小5-小数のかけ算'
+      ]
     };
 
     const range = calculateLessonRangeForSlot({
@@ -141,7 +146,7 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
       curriculumMasters: sampleMasters
     });
 
-    expect(range.start_lesson_name).toContain('STEP 4');
+    expect(range.start_lesson_name).toContain('まとめテスト（３）');
     expect(range.end_lesson_name).toContain('単元確認テスト');
     expect(range.end_lesson_name).not.toContain('小数のわり算');
   });

@@ -72,7 +72,13 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
     selected_days: ['tuesday', 'friday'],
     selected_subjects: ['算数'],
     start_unit_math: 'cm-kazu-1',
-    completed_lesson_ids: ['cm-kazu-1', 'cm-kazu-2'],
+    completed_lesson_ids: [
+      'cm-kazu-1',
+      'cm-kazu-2',
+      'cm-auto-sum1-算数-小1-かずと すうじ',
+      'cm-auto-sum2-算数-小1-かずと すうじ',
+      'cm-auto-sum3-算数-小1-かずと すうじ'
+    ],
     period_count: 2
   };
 

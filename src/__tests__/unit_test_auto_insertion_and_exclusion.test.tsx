@@ -40,8 +40,10 @@ describe('Unit Test Auto Insertion and Curriculum Exclusion Feature', () => {
 
     const processed = ensureMathEnglishUnitTests(sampleMasters);
 
-    // 小数のかけ算 の後に 1つの単元確認テスト、 割算の筆算 の後に 1つの単元確認テスト が挿入され、合計 5件になること
-    expect(processed.length).toBe(5);
+    // 小数のかけ算 (2授業 + まとめテスト3件 + 単元確認テスト1件 = 6件)
+    // 割算の筆算 (1授業 + まとめテスト3件 + 単元確認テスト1件 = 5件)
+    // 合計 11件になること
+    expect(processed.length).toBe(11);
 
     const test1 = processed.find(p => p.unit_name === '小数のかけ算' && p.item_type === 'unit_test');
     expect(test1).toBeDefined();
@@ -84,9 +86,9 @@ describe('Unit Test Auto Insertion and Curriculum Exclusion Feature', () => {
 
     const processed = ensureMathEnglishUnitTests(sampleMasters);
 
-    // 学年表記揺れ（小学1年 / 1年生 / 小1）が正規化され、重複テストがデデュプリケーションされて「授業1件＋テスト1件」の合計2件に納まること
-    expect(processed.length).toBe(2);
-    expect(processed[1].lesson_name).toBe('たしざん - 単元確認テスト');
+    // 学年表記揺れ（小学1年 / 1年生 / 小1）が正規化され、重複テストがデデュプリケーションされて「授業1件＋まとめテスト3件＋テスト1件」の合計5件に納まること
+    expect(processed.length).toBe(5);
+    expect(processed[4].lesson_name).toBe('たしざん - 単元確認テスト');
   });
 
   it('prevents duplicate unit test creation when unit test already exists in the unit group', () => {
@@ -112,8 +114,8 @@ describe('Unit Test Auto Insertion and Curriculum Exclusion Feature', () => {
 
     const processed = ensureMathEnglishUnitTests(sampleMasters);
 
-    // 既に単元テストが存在するため二重追加されず合計2件に収まること
-    expect(processed.length).toBe(2);
+    // 既に単元テストが存在するため二重追加されず、「授業1件＋まとめテスト3件＋テスト1件」の合計5件に収まること
+    expect(processed.length).toBe(5);
   });
 
   it('skips excluded lessons when finding next uncompleted lesson and calculating slots', () => {
