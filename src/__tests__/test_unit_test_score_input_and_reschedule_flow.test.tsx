@@ -308,9 +308,19 @@ describe('Unit Test Score Input, Teacher Dashboard Realtime Sync, Remedial Flow 
       fireEvent.click(submitBtn);
     });
 
-    // 1. 本日授業に「【やり直し授業】分数のかけ算 復習」が追加されること
+    // 1. コマ1の不合格表示と「単元確認テスト　ーやり直しー」ボタンの出現（合格/不合格ボタンは消失）
     await waitFor(() => {
-      expect(screen.getByText(/【やり直し授業】分数のかけ算 復習/i)).toBeInTheDocument();
+      expect(screen.getByText('⚠️ 不合格 (やり直し授業へ)')).toBeInTheDocument();
+      expect(screen.queryByTestId('complete-task-btn-1')).not.toBeInTheDocument();
+      expect(screen.getByTestId('remedial-task-action-btn-1')).toHaveTextContent(/単元確認テスト\s*ーやり直しー/);
+    });
+
+    // 「単元確認テスト　ーやり直しー」ボタンをクリックできること
+    fireEvent.click(screen.getByTestId('remedial-task-action-btn-1'));
+
+    // 本日授業に「単元確認テスト　ーやり直しー」が追加されること
+    await waitFor(() => {
+      expect(screen.getAllByText(/単元確認テスト\s*ーやり直しー/i).length).toBeGreaterThan(0);
     });
 
     // やり直し授業に「この授業を完了にする」ボタンが発生すること

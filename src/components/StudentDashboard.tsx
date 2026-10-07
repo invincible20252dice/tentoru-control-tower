@@ -258,6 +258,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
     };
 
+    // やり直しタスクの場合は独自の復習・テストステップをそのまま使用
+    const isRemedial = Boolean(
+      task.custom_unit_name?.includes('やり直し') ||
+      task.start_lesson_name?.includes('やり直し') ||
+      task.lesson_range?.includes('やり直し') ||
+      task.custom_unit_name?.includes('ーやり直しー') ||
+      task.start_lesson_name?.includes('ーやり直しー') ||
+      task.lesson_range?.includes('ーやり直しー')
+    );
+    if (isRemedial) {
+      const remedialName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '単元確認テスト　ーやり直しー';
+      return [{ id: task.id || `task-${task.period}`, name: remedialName, fullTitle: remedialName }];
+    }
+
     const mastersSource = mastersOverride || (curriculumMasters.length > 0 ? curriculumMasters : (typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : []));
 
     // 1. 該当コマの教科のみに最優先で厳密絞り込み（他教科混入を完全遮断）
@@ -610,6 +624,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
+      .replace(/単元確認テスト\s*ーやり直しー/g, '')
+      .replace(/ーやり直しー/g, '')
       .replace(/\s*-\s*単元確認テスト/g, '')
       .replace(/\s*-\s*単元テスト/g, '')
       .replace(/\s*-\s*確認テスト/g, '')
@@ -670,16 +686,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return [...prev, todayMiniFailed];
     });
 
-    // 1. 自動的に「やり直し授業」が生徒の管理画面に追加され、完了するボタンも発生する
+    // 1. 自動的に「単元確認テスト　ーやり直しー」が生徒の管理画面に追加され、完了するボタンも発生する
     const currentDayTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
     const maxPeriod = currentDayTasks.length > 0 ? Math.max(...currentDayTasks.map(t => t.period || 1)) : 1;
     const remedialPeriod = maxPeriod + 1;
-    const remedialTitle = `【やり直し授業】${cleanUnitName} 復習`;
+    const remedialTitle = '単元確認テスト　ーやり直しー';
 
     const remedialTask: LearningTask = {
       id: `task-remedial-${currentStudent.id}-${Date.now()}`,
       student_id: currentStudent.id,
-      unit_id: targetTask?.unit_id || `remedial-${Date.now()}`,
+      unit_id: `remedial-${Date.now()}`,
       scheduled_date: currentDateStr,
       period: remedialPeriod,
       status: 'unstarted',
@@ -761,9 +777,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     };
     await db.addLearningLog(log);
 
-    showToast(`⚠️ テスト不合格のため本日の授業に【やり直し授業】を追加しました。次回通塾日（${nextAttendanceDate}）に再テストを実施します。`);
+    showToast(`⚠️ テスト不合格のため本日の授業に「単元確認テスト　ーやり直しー」を追加しました。次回通塾日（${nextAttendanceDate}）に再テストを実施します。`);
     if (typeof window !== 'undefined') {
-      window.alert(`不合格のため、本日の授業に【やり直し授業】を追加しました。\n次回通塾日（${nextAttendanceDate}）に再テスト（${cleanUnitName}）を自動セットしました。`);
+      window.alert(`不合格のため、本日の授業に「単元確認テスト　ーやり直しー」を追加しました。\n次回通塾日（${nextAttendanceDate}）に再テスト（${cleanUnitName}）を自動セットしました。`);
     }
 
     loadData();
@@ -1025,6 +1041,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
+      .replace(/単元確認テスト\s*ーやり直しー/g, '')
+      .replace(/ーやり直しー/g, '')
       .replace(/\s*-\s*単元確認テスト/g, '')
       .replace(/\s*-\s*単元テスト/g, '')
       .replace(/\s*-\s*確認テスト/g, '')
@@ -1274,6 +1292,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
+      .replace(/単元確認テスト\s*ーやり直しー/g, '')
+      .replace(/ーやり直しー/g, '')
       .replace(/\s*-\s*単元確認テスト/g, '')
       .replace(/\s*-\s*単元テスト/g, '')
       .replace(/\s*-\s*確認テスト/g, '')
@@ -1865,7 +1885,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   const isRemedialTask = Boolean(
                     task.custom_unit_name?.includes('やり直し授業') ||
                     task.start_lesson_name?.includes('やり直し授業') ||
-                    task.lesson_range?.includes('やり直し授業')
+                    task.lesson_range?.includes('やり直し授業') ||
+                    task.custom_unit_name?.includes('ーやり直しー') ||
+                    task.start_lesson_name?.includes('ーやり直しー') ||
+                    task.lesson_range?.includes('ーやり直しー') ||
+                    task.custom_unit_name?.includes('単元確認テスト　ーやり直しー') ||
+                    task.start_lesson_name?.includes('単元確認テスト　ーやり直しー') ||
+                    task.lesson_range?.includes('単元確認テスト　ーやり直しー')
                   );
                   const isUnitTestTask = Boolean(
                     !isReviewOrCheckTask &&
@@ -1927,6 +1953,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                   return (
                     <div 
                       key={task.id} 
+                      id={`period-row-${task.period}`}
                       className={`${styles.periodRow} ${isMainQuest ? styles.mainQuestRow : ''}`} 
                       data-testid={`period-row-${task.period}`}
                     >
@@ -2106,21 +2133,48 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         <div className={styles.actions}>
                           {isUnitTestTask ? (
                             task.status !== 'completed' && (
-                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                <button 
-                                  onClick={() => handleSaveTaskUnitTestScore(task, taskScores[task.id] || '100')} 
-                                  className={`${styles.btn} ${styles.btnSuccess}`}
-                                  data-testid={`complete-task-btn-${task.period}`}
-                                >
-                                  単元テストを受ける (合格)
-                                </button>
-                                <button 
-                                  onClick={() => handleFailTest(task)} 
-                                  className={`${styles.btn} ${styles.btnSecondary}`}
-                                >
-                                  テストを受ける (不合格)
-                                </button>
-                              </div>
+                              task.status === 'failed' ? (
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const lastPeriod = todayTasks.length > 0 ? Math.max(...todayTasks.map(t => t.period || 1)) : 1;
+                                      const remedialEl = document.querySelector(`[data-testid="period-row-${lastPeriod}"]`) ||
+                                                         document.getElementById(`period-row-${lastPeriod}`);
+                                      if (typeof remedialEl?.scrollIntoView === 'function') {
+                                        remedialEl.scrollIntoView({ behavior: 'smooth' });
+                                      }
+                                    }}
+                                    className={`${styles.btn} ${styles.btnSecondary}`}
+                                    style={{
+                                      backgroundColor: '#fee2e2',
+                                      borderColor: '#fca5a5',
+                                      color: '#b91c1c',
+                                      fontWeight: 800,
+                                      cursor: 'pointer'
+                                    }}
+                                    data-testid={`remedial-task-action-btn-${task.period}`}
+                                  >
+                                    単元確認テスト　ーやり直しー
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  <button 
+                                    onClick={() => handleSaveTaskUnitTestScore(task, taskScores[task.id] || '100')} 
+                                    className={`${styles.btn} ${styles.btnSuccess}`}
+                                    data-testid={`complete-task-btn-${task.period}`}
+                                  >
+                                    単元テストを受ける (合格)
+                                  </button>
+                                  <button 
+                                    onClick={() => handleFailTest(task)} 
+                                    className={`${styles.btn} ${styles.btnSecondary}`}
+                                  >
+                                    テストを受ける (不合格)
+                                  </button>
+                                </div>
+                              )
                             )
                           ) : showCustomCompletion ? (
                             task.status !== 'completed' && (

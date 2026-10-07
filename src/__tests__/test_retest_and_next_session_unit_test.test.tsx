@@ -196,9 +196,11 @@ describe('Unit Test Flow: Session Separation, Remedial Task on Failure, and Cros
       fireEvent.click(failButton);
     });
 
-    // 1. 自動的に「やり直し授業」が追加され、完了するボタンが発生すること
+    // 1. 自動的に「単元確認テスト　ーやり直しー」が追加され、完了するボタンが発生すること
     await waitFor(() => {
-      expect(screen.getAllByText(/【やり直し授業】.*復習/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/単元確認テスト\s*ーやり直しー/i).length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('complete-task-btn-1')).not.toBeInTheDocument();
+      expect(screen.getByTestId('remedial-task-action-btn-1')).toHaveTextContent(/単元確認テスト\s*ーやり直しー/);
     });
 
     // やり直し授業（第2コマ）の「🎯 完了にする」ボタンが存在することを確認
@@ -391,9 +393,9 @@ describe('Unit Test Flow: Session Separation, Remedial Task on Failure, and Cros
       fireEvent.click(saveBtn);
     });
 
-    // やり直し授業が当日に追加されること
+    // 単元確認テスト　ーやり直しー が当日に追加されること
     await waitFor(() => {
-      expect(screen.getAllByText(/【やり直し授業】.*復習/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/単元確認テスト\s*ーやり直しー/i).length).toBeGreaterThan(0);
     });
 
     // 次回通塾日（2026-10-09）に再テストが自動予約されていること
