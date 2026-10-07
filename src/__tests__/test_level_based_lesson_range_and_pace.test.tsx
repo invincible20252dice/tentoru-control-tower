@@ -128,9 +128,9 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
     expect(rangeC.end_lesson_name).toContain('STEP 1');
   });
 
-  it('stops at unit test when lesson range encounters a unit test without overflowing into the next unit', () => {
+  it('stops at summary test (3) when lesson range encounters a unit test, never including unit test in same slot', () => {
     // まとめテスト(2)まで完了した生徒が、レベルA（4レッスン分）で開始した場合、
-    // まとめテスト(3) -> 単元テスト と進み、次単元（小数のわり算）に進まず単元テストでストップすること
+    // まとめテスト(3)でストップし、単元テストは同コマに含まれないこと（次回授業で単独実施）
     const studentNearTest: Student = {
       ...studentLevelA,
       completed_lesson_ids: [
@@ -147,8 +147,25 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
     });
 
     expect(range.start_lesson_name).toContain('まとめテスト（３）');
-    expect(range.end_lesson_name).toContain('単元確認テスト');
+    expect(range.end_lesson_name).toContain('まとめテスト（３）');
+    expect(range.end_lesson_name).not.toContain('単元確認テスト');
     expect(range.end_lesson_name).not.toContain('小数のわり算');
+
+    // 次回（まとめテスト3完了後）は単元テスト単独で1コマ
+    const studentAfterSummary3: Student = {
+      ...studentNearTest,
+      completed_lesson_ids: [
+        ...studentNearTest.completed_lesson_ids,
+        'cm-auto-sum3-算数-小5-小数のかけ算'
+      ]
+    };
+    const nextSlotRange = calculateLessonRangeForSlot({
+      student: studentAfterSummary3,
+      subject: '算数',
+      curriculumMasters: sampleMasters
+    });
+    expect(nextSlotRange.start_lesson_name).toContain('単元確認テスト');
+    expect(nextSlotRange.end_lesson_name).toContain('単元確認テスト');
   });
 
   it('renders elementary milestone timeline with level-based pace calculation in TeacherDashboard and hides level toggle buttons', async () => {

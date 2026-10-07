@@ -40,9 +40,8 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       completed_lesson_ids: ['cm-nb-1', 'cm-nb-2', 'cm-nb-3'] // なんばんめ(1)〜(3)まで完了
     };
 
-    // 1. なんばんめ(4)からペース5でコマ割り計算した場合（4 + まとめテスト1〜3 + 単元確認テスト）
-    // ensureMathEnglishUnitTests により「なんばんめ - 単元確認テスト」が生成されているため、
-    // なんばんめの全レッスン消化後は「なんばんめ - 単元確認テスト」となり、新単元「いろいろな かたち」にはまたがない！
+    // 1. なんばんめ(4)からペース5でコマ割り計算した場合（4 + まとめテスト1〜3）
+    // 新仕様: 単元テストは同日授業に含まれず、まとめテスト（３）でストップする
     const slotRange = calculateLessonRangeForSlot({
       subject: '算数',
       student,
@@ -51,7 +50,8 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
     });
 
     expect(slotRange.start_lesson_name).toContain('なんばんめ(4)');
-    expect(slotRange.end_lesson_name).toContain('単元確認テスト');
+    expect(slotRange.end_lesson_name).toContain('まとめテスト（３）');
+    expect(slotRange.end_lesson_name).not.toContain('単元確認テスト');
     expect(slotRange.end_lesson_name).not.toContain('いろいろな かたち');
 
     const allMasters = ensureMathEnglishUnitTests(mathMasters);
@@ -146,21 +146,19 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
       expect(screen.getByText(/さんの学習画面/)).toBeInTheDocument();
     });
 
-    // Verify STEP 1: まとめテスト（３） and STEP 2: 単元確認テスト are both present in step cards
+    // Verify STEP 1: まとめテスト（３） is present in step cards and 単元確認テスト is NOT included in this slot
     await waitFor(() => {
       const step1Card = screen.getByTestId('step-card-1-0');
-      const step2Card = screen.getByTestId('step-card-1-1');
       expect(step1Card).toHaveTextContent('STEP 1:');
       expect(step1Card).toHaveTextContent('まとめテスト（３）');
-      expect(step2Card).toHaveTextContent('STEP 2:');
-      expect(step2Card).toHaveTextContent('単元確認テスト');
+      expect(screen.queryByTestId('step-card-1-1')).toBeNull();
 
-      // Verify progress count shows 0 / 2
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 2 完了');
+      // Verify progress count shows 0 / 1
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 1 完了');
 
-      // Ensure 'いろいろな かたち' is NOT in this slot
+      // Ensure 'いろいろな かたち' and '単元確認テスト' are NOT in this slot
       expect(step1Card).not.toHaveTextContent('いろいろな かたち');
-      expect(step2Card).not.toHaveTextContent('いろいろな かたち');
+      expect(step1Card).not.toHaveTextContent('単元確認テスト');
     });
 
     // Complete STEP 1
@@ -168,17 +166,8 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
     fireEvent.click(completeBtn1);
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 2 完了');
+      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 1 完了');
       expect(screen.getByTestId('step-done-badge-1-0')).toBeInTheDocument();
-    });
-
-    // Complete STEP 2 (単元確認テスト)
-    const completeBtn2 = screen.getByTestId('step-complete-btn-1-1');
-    fireEvent.click(completeBtn2);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('2 / 2 完了');
-      expect(screen.getByTestId('step-done-badge-1-1')).toBeInTheDocument();
       expect(screen.getByTestId('task-completed-badge-1')).toHaveTextContent('合格完了！');
     });
   });

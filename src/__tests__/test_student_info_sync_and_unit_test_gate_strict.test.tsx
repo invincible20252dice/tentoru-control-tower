@@ -217,14 +217,14 @@ describe('生徒情報（学校名・個性タグ）完全同期 ＆ 単元テ�
       expect(step20Item).toHaveTextContent('○ 予定');
     });
 
-    it('自動リスケ実行時に、単元テストに到達した時点でループがブレークし、From〜To は単元テストまでで終了する', () => {
+    it('自動リスケ実行時に、まとめテスト(3)に到達した時点でループがブレークし、単元テストは同日授業に含まれずまとめテスト(3)で終了する', () => {
       const studentAtStep17: Student = {
         ...mockStudent,
         level: 'A', // レベルAは通常4レッスン進む
         completed_lesson_ids: []
       };
 
-      // まとめテスト(2)からスタート（4レッスン進むと次単元 STEP 20 まで進みうる設定）
+      // まとめテスト(2)からスタート（通常4レッスン進む設定でも、単元テストの手前＝まとめテスト(3)でストップ）
       const range = calculateLessonRangeForSlot({
         subject: '算数',
         startLessonId: 'cm-auto-sum2-算数-小5-小数のかけ算',
@@ -232,10 +232,22 @@ describe('生徒情報（学校名・個性タグ）完全同期 ＆ 単元テ�
         curriculumMasters: sampleCurriculum
       });
 
-      // 単元テスト（cm-step-19-test）で必ずストップし、STEP 20 にまたがないこと
+      // まとめテスト(3)で必ずストップし、単元テスト（cm-step-19-test）やSTEP 20にまたがないこと
       expect(range.start_lesson_id).toBe('cm-auto-sum2-算数-小5-小数のかけ算');
-      expect(range.end_lesson_id).toBe('cm-step-19-test');
-      expect(range.end_lesson_name).toContain('単元確認テスト');
+      expect(range.end_lesson_id).toBe('cm-auto-sum3-算数-小5-小数のかけ算');
+      expect(range.end_lesson_name).toContain('まとめテスト（３）');
+      expect(range.end_lesson_name).not.toContain('単元確認テスト');
+
+      // 次回（まとめテスト3完了後）は単元テスト単独で1コマ
+      const nextRange = calculateLessonRangeForSlot({
+        subject: '算数',
+        startLessonId: 'cm-step-19-test',
+        student: studentAtStep17,
+        curriculumMasters: sampleCurriculum
+      });
+      expect(nextRange.start_lesson_id).toBe('cm-step-19-test');
+      expect(nextRange.end_lesson_id).toBe('cm-step-19-test');
+      expect(nextRange.end_lesson_name).toContain('単元確認テスト');
     });
 
     it('該当の単元テストに「合格（passed）」の記録が存在する場合のみ、次の単元（STEP 20〜）がスケジュール対象としてアンロックされる', () => {

@@ -3784,7 +3784,10 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       unmount();
 
       // 2. 合格アクションのテスト (handlePassTest: isUnitTestTask && 爆速前倒し)
+      await db.deleteLearningTasksForDate(studentSpeed.id, todayStr);
       taskUnitTest.custom_unit_name = '正の数・負の数 - 確認テスト';
+      taskUnitTest.status = 'unstarted';
+      taskUnitTest.test_passed = false;
       await db.saveLearningTasks([taskUnitTest]);
 
       render(
@@ -3794,7 +3797,7 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
         />
       );
 
-      const passBtn = screen.getByRole('button', { name: /単元テストを受ける \(合格\)|このコマの全ステップを一括完了にする/i });
+      const passBtn = screen.getByTestId('complete-task-btn-1');
       await act(async () => {
         fireEvent.click(passBtn);
       });

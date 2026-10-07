@@ -495,6 +495,184 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
   };
 
+  // 次回通塾予定日の計算ヘルパー
+  const getNextAttendanceDate = (baseDateStr: string, st: Student): string => {
+    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
+    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
+    
+    const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+    const targetDayNums = days.map(d => dayMap[d.toLowerCase()]).filter(n => n !== undefined);
+    
+    const d = new Date(validBase);
+    for (let i = 1; i <= 14; i++) {
+      const future = new Date(d.getTime() + i * 24 * 60 * 60 * 1000);
+      if (targetDayNums.includes(future.getDay())) {
+        return future.toISOString().split('T')[0];
+      }
+    }
+    const fallback = new Date(d.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return fallback.toISOString().split('T')[0];
+  };
+
+  // 合格時：次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
+  const scheduleNextUnitForStudent = async (st: Student, targetSubject?: string) => {
+    const nextAttendanceDate = getNextAttendanceDate(currentDateStr, st);
+    const completedSet = new Set((st.completed_lesson_ids || []).map(String));
+    const isElem = st.grade.startsWith('小') || /^[1-6]年生?$/.test(st.grade) || st.grade === '園児';
+    const activeSubj = targetSubject || (isElem ? '算数' : '数学');
+    
+    let candidateMasters = curriculumMasters
+      .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    if (candidateMasters.length === 0) {
+      candidateMasters = db.getCurriculumMasters()
+        .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    }
+    
+    const nextNewMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
+    if (nextNewMaster) {
+      const nextTitle = nextNewMaster.unit_name ? `${nextNewMaster.unit_name} - ${nextNewMaster.lesson_name}` : nextNewMaster.lesson_name;
+      const nextNewTask: LearningTask = {
+        id: `task-nextunit-${st.id}-${nextAttendanceDate}-1`,
+        student_id: st.id,
+        unit_id: nextNewMaster.id,
+        scheduled_date: nextAttendanceDate,
+        period: 1,
+        status: 'unstarted',
+        video_watched: false,
+        test_passed: false,
+        subject: activeSubj,
+        custom_unit_name: nextTitle,
+        start_lesson_id: nextNewMaster.id,
+        end_lesson_id: nextNewMaster.id,
+        start_lesson_name: nextTitle,
+        end_lesson_name: nextTitle,
+        lesson_range: nextTitle,
+        created_at: new Date().toISOString()
+      };
+      await db.deleteLearningTasksForDate(st.id, nextAttendanceDate);
+      await db.saveLearningTasks([nextNewTask]);
+      showToast(`🎉 単元テスト合格＆他教科完了！次回通塾日（${nextAttendanceDate}）から新単元「${nextTitle}」へ進みます！`);
+    }
+  };
+
+  // テスト不合格時のアクション（やり直し授業の自動追加＆完了ボタン発生、次回通塾日に再テスト自動予約）
+  const handleProcessUnitTestFailure = async (
+    targetTask?: LearningTask,
+    testSubject?: string,
+    testUnitName?: string,
+    testPassingLine?: string | null
+  ) => {
+    const unit = targetTask ? units.find(u => u.id === targetTask.unit_id) : undefined;
+    const subjectName = targetTask?.subject || testSubject || (unit ? unit.subject : '算数');
+    let rawUnitName = targetTask?.start_lesson_name || targetTask?.custom_unit_name || testUnitName || (unit ? unit.name : '単元');
+    const cleanUnitName = rawUnitName.replace(/【やり直し授業】/g, '').replace(/（再テスト）/g, '').replace(/復習/g, '').trim() || '単元';
+    const reTestContent = `${subjectName}: ${cleanUnitName}（再テスト）`;
+
+    if (targetTask) {
+      const updatedTask: LearningTask = {
+        ...targetTask,
+        status: 'failed' as const,
+        test_passed: false
+      };
+      setTasks(prev => prev.map(t => t.id === targetTask.id ? updatedTask : t));
+      setTodayTasks(prev => prev.map(t => t.id === targetTask.id ? updatedTask : t));
+      await db.saveLearningTasks([updatedTask]);
+    }
+
+    // 1. 自動的に「やり直し授業」が生徒の管理画面に追加され、完了するボタンも発生する
+    const currentDayTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
+    const maxPeriod = currentDayTasks.length > 0 ? Math.max(...currentDayTasks.map(t => t.period || 1)) : 1;
+    const remedialPeriod = maxPeriod + 1;
+    const remedialTitle = `【やり直し授業】${cleanUnitName} 復習`;
+
+    const remedialTask: LearningTask = {
+      id: `task-remedial-${currentStudent.id}-${Date.now()}`,
+      student_id: currentStudent.id,
+      unit_id: targetTask?.unit_id || `remedial-${Date.now()}`,
+      scheduled_date: currentDateStr,
+      period: remedialPeriod,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: subjectName,
+      custom_unit_name: remedialTitle,
+      start_lesson_id: '',
+      end_lesson_id: '',
+      start_lesson_name: remedialTitle,
+      end_lesson_name: remedialTitle,
+      lesson_range: remedialTitle,
+      completed_lesson_ids: [],
+      created_at: new Date().toISOString()
+    };
+    
+    setTasks(prev => [...prev, remedialTask]);
+    setTodayTasks(prev => [...prev, remedialTask]);
+    await db.saveLearningTasks([remedialTask]);
+
+    // 2. 次回通塾予定日の計算 & 再テスト自動スケジュール
+    const nextAttendanceDate = getNextAttendanceDate(currentDateStr, currentStudent);
+
+    // 次回通塾日の「本日のテスト」に再テストを自動セット
+    const reTestResult: MiniTestResult = {
+      id: `mini-retest-${currentStudent.id}-${nextAttendanceDate}-${Date.now()}`,
+      student_id: currentStudent.id,
+      date: nextAttendanceDate,
+      subject: subjectName,
+      test_type: 'unit_test',
+      unit_name: cleanUnitName,
+      test_content: reTestContent,
+      score: null,
+      passing_line: targetTask?.passing_line || testPassingLine || '80%以上',
+      target_scope: 'individual',
+      created_at: new Date().toISOString()
+    };
+    await db.saveMiniTestResult(reTestResult);
+
+    // 次回通塾日のコマ割りに「開始: 再テスト 〜 終了: 再テスト」を自動セット (新単元授業を割り当てない)
+    const reTestTask: LearningTask = {
+      id: `task-retest-${currentStudent.id}-${nextAttendanceDate}-1`,
+      student_id: currentStudent.id,
+      unit_id: targetTask?.unit_id || `retest-${Date.now()}`,
+      scheduled_date: nextAttendanceDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: subjectName,
+      custom_unit_name: reTestContent,
+      start_lesson_id: targetTask?.start_lesson_id || targetTask?.unit_id || '',
+      end_lesson_id: targetTask?.end_lesson_id || targetTask?.unit_id || '',
+      start_lesson_name: `${cleanUnitName}（再テスト）`,
+      end_lesson_name: `${cleanUnitName}（再テスト）`,
+      lesson_range: `${cleanUnitName}（再テスト）`,
+      created_at: new Date().toISOString()
+    };
+    await db.deleteLearningTasksForDate(currentStudent.id, nextAttendanceDate);
+    await db.saveLearningTasks([reTestTask]);
+
+    // ログ記録
+    const log: LearningLog = {
+      id: `log-${Date.now()}`,
+      student_id: currentStudent.id,
+      unit_id: targetTask?.unit_id || `retest-${Date.now()}`,
+      log_type: 'test_result',
+      score: 40,
+      total_questions: 10,
+      incorrect_genres: ['計算ミス', '符号の誤り'],
+      created_at: new Date().toISOString()
+    };
+    await db.addLearningLog(log);
+
+    showToast(`⚠️ テスト不合格のため本日の授業に【やり直し授業】を追加しました。次回通塾日（${nextAttendanceDate}）に再テストを実施します。`);
+    if (typeof window !== 'undefined') {
+      window.alert(`不合格のため、本日の授業に【やり直し授業】を追加しました。\n次回通塾日（${nextAttendanceDate}）に再テスト（${cleanUnitName}）を自動セットしました。`);
+    }
+
+    loadData();
+  };
+
   // 各授業ステップの受講完了アクション (Optimistic UI & Async Save)
   const handleCompleteLessonStep = async (
     task: LearningTask,
@@ -541,6 +719,21 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     if (isAllStepsCompleted) {
       showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
+
+      // 他の教科の授業もすべて完了したか確認
+      const allCurrentTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
+      const otherTasks = allCurrentTasks.filter(t => t.id !== task.id);
+      const allOthersCompleted = otherTasks.every(t => t.status === 'completed');
+      if (allOthersCompleted) {
+        // 当日単元テストに合格しているタスクがあるかチェック
+        const passedUnitTest = allCurrentTasks.find(t => 
+          (t.custom_unit_name?.includes('単元テスト') || t.custom_unit_name?.includes('確認テスト') || t.start_lesson_name?.includes('単元テスト')) &&
+          (t.status === 'completed' || t.test_passed)
+        );
+        if (passedUnitTest) {
+          await scheduleNextUnitForStudent(updatedStudent, passedUnitTest.subject);
+        }
+      }
     } else {
       showToast(`🎉 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講完了にしました！`);
     }
@@ -650,6 +843,36 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     }));
 
     await db.saveMiniTestResult(updated);
+
+    const isUnitTest = test.test_type === 'unit_test' || 
+                       test.unit_name?.includes('単元テスト') || 
+                       test.test_content?.includes('単元テスト') ||
+                       test.unit_name?.includes('確認テスト');
+
+    if (isUnitTest && scoreVal !== null) {
+      const relatedTask = todayTasks.find(t => 
+        (t.subject === test.subject || !t.subject) &&
+        (t.custom_unit_name?.includes('単元テスト') || t.custom_unit_name?.includes('確認テスト') || t.start_lesson_name?.includes('単元テスト'))
+      );
+
+      if (!isPassed) {
+        await handleProcessUnitTestFailure(relatedTask, test.subject, test.unit_name || test.test_content, test.passing_line);
+        return;
+      } else {
+        if (relatedTask) {
+          await handlePassTest(relatedTask);
+          return;
+        } else {
+          const otherUncompleted = todayTasks.some(t => t.status !== 'completed');
+          if (otherUncompleted) {
+            showToast('単元テスト合格！他の教科の授業を完了すると、次回から新しい単元に進みます！');
+          } else {
+            await scheduleNextUnitForStudent(currentStudent, test.subject);
+          }
+        }
+      }
+    }
+
     if (typeof window !== 'undefined') {
       window.alert('小テスト点数を送信しました！');
     }
@@ -731,6 +954,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     } catch (e) {
       console.warn('addLearningLog error:', e);
     }
+
+    // 他の教科の授業もすべて完了したか確認
+    const allCurrentTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
+    const otherTasks = allCurrentTasks.filter(t => t.id !== task.id);
+    const allOthersCompleted = otherTasks.every(t => t.status === 'completed');
+    if (allOthersCompleted) {
+      const passedUnitTest = allCurrentTasks.find(t => 
+        (t.custom_unit_name?.includes('単元テスト') || t.custom_unit_name?.includes('確認テスト') || t.start_lesson_name?.includes('単元テスト')) &&
+        (t.status === 'completed' || t.test_passed)
+      );
+      if (passedUnitTest) {
+        await scheduleNextUnitForStudent(updatedStudent, passedUnitTest.subject);
+      }
+    }
   };
 
   // 1. 動画視聴ボタンのアクション
@@ -802,44 +1039,37 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       }
     }
 
+    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+    setTodayTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
     await db.saveLearningTasks([updated]);
     await db.saveStudent(updatedStudent);
 
-    // 合格時：次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
-    const isUnitTestTask = task.custom_unit_name?.includes('確認テスト') || task.custom_unit_name?.includes('単元テスト') || task.start_lesson_name?.includes('確認テスト');
+    // 合格時：他の教科の授業も完了していれば、次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
+    const isUnitTestTask = task.custom_unit_name?.includes('確認テスト') || 
+                           task.custom_unit_name?.includes('単元テスト') || 
+                           task.start_lesson_name?.includes('確認テスト') ||
+                           task.start_lesson_name?.includes('単元テスト') ||
+                           task.lesson_range?.includes('単元テスト');
+    const allDayTasks = db.getLearningTasks().filter(t => t.student_id === updatedStudent.id && t.scheduled_date === currentDateStr);
+    const otherTasksToday = allDayTasks.filter(t => t.id !== task.id);
+    const hasUncompletedOtherTask = otherTasksToday.some(t => t.status !== 'completed');
+
     if (isUnitTestTask) {
-      const nextAttendanceDate = getNextAttendanceDate(currentDateStr, updatedStudent);
-      const completedSet = new Set((updatedStudent.completed_lesson_ids || []).map(String));
-      const isElem = updatedStudent.grade.startsWith('小') || /^[1-6]年生?$/.test(updatedStudent.grade) || updatedStudent.grade === '園児';
-      const activeSubj = task.subject || (isElem ? '算数' : '数学');
-      
-      const candidateMasters = curriculumMasters
-        .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      
-      const nextNewMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
-      if (nextNewMaster) {
-        const nextTitle = nextNewMaster.unit_name ? `${nextNewMaster.unit_name} - ${nextNewMaster.lesson_name}` : nextNewMaster.lesson_name;
-        const nextNewTask: LearningTask = {
-          id: `task-nextunit-${updatedStudent.id}-${nextAttendanceDate}-1`,
-          student_id: updatedStudent.id,
-          unit_id: nextNewMaster.id,
-          scheduled_date: nextAttendanceDate,
-          period: 1,
-          status: 'unstarted',
-          video_watched: false,
-          test_passed: false,
-          subject: activeSubj,
-          custom_unit_name: nextTitle,
-          start_lesson_id: nextNewMaster.id,
-          end_lesson_id: nextNewMaster.id,
-          start_lesson_name: nextTitle,
-          end_lesson_name: nextTitle,
-          lesson_range: nextTitle,
-          created_at: new Date().toISOString()
-        };
-        await db.deleteLearningTasksForDate(updatedStudent.id, nextAttendanceDate);
-        await db.saveLearningTasks([nextNewTask]);
+      if (hasUncompletedOtherTask) {
+        showToast('単元テスト合格！他の教科の授業を完了すると、次回から新しい単元に進みます！');
+      } else {
+        await scheduleNextUnitForStudent(updatedStudent, task.subject);
+      }
+    } else {
+      // 通常授業完了時でも、本日単元テスト合格済みがあり全教科完了した場合は次回新単元をアンロック
+      if (!hasUncompletedOtherTask) {
+        const passedUnitTest = allDayTasks.find(t => 
+          (t.custom_unit_name?.includes('単元テスト') || t.custom_unit_name?.includes('確認テスト') || t.start_lesson_name?.includes('単元テスト')) &&
+          (t.status === 'completed' || t.test_passed)
+        );
+        if (passedUnitTest) {
+          await scheduleNextUnitForStudent(updatedStudent, passedUnitTest.subject);
+        }
       }
     }
 
@@ -901,97 +1131,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     loadData();
   };
 
-  // 次回通塾予定日の計算ヘルパー
-  const getNextAttendanceDate = (baseDateStr: string, st: Student): string => {
-    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
-    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
-    
-    const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
-    const targetDayNums = days.map(d => dayMap[d.toLowerCase()]).filter(n => n !== undefined);
-    
-    const d = new Date(validBase);
-    for (let i = 1; i <= 14; i++) {
-      const future = new Date(d.getTime() + i * 24 * 60 * 60 * 1000);
-      if (targetDayNums.includes(future.getDay())) {
-        return future.toISOString().split('T')[0];
-      }
-    }
-    const fallback = new Date(d.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return fallback.toISOString().split('T')[0];
-  };
-
-  // 3. テスト不合格時のアクション（新単元ブロック ＆ 次回通塾日に再テスト自動予約）
+  // 3. テスト不合格時のアクション（新単元ブロック ＆ 次回通塾日に再テスト自動予約＆当日やり直し授業追加）
   const handleFailTest = async (task: LearningTask) => {
-    const updatedTask: LearningTask = {
-      ...task,
-      status: 'failed' as const,
-      test_passed: false
-    };
-    await db.saveLearningTasks([updatedTask]);
-
-    const unit = units.find(u => u.id === task.unit_id);
-    const subjectName = task.subject || (unit ? unit.subject : 'その他');
-    const unitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const reTestContent = `${subjectName}: ${unitName}（再テスト）`;
-
-    const nextAttendanceDate = getNextAttendanceDate(currentDateStr, currentStudent);
-
-    // 1. 次回通塾日の「本日のテスト」に再テストを自動セット
-    const reTestResult: MiniTestResult = {
-      id: `mini-retest-${currentStudent.id}-${nextAttendanceDate}-${Date.now()}`,
-      student_id: currentStudent.id,
-      date: nextAttendanceDate,
-      subject: subjectName,
-      test_type: 'unit_test',
-      unit_name: unitName,
-      test_content: reTestContent,
-      score: null,
-      passing_line: task.passing_line || '80%以上',
-      target_scope: 'individual',
-      created_at: new Date().toISOString()
-    };
-    await db.saveMiniTestResult(reTestResult);
-
-    // 2. 次回通塾日のコマ割りに「開始: 再テスト 〜 終了: 再テスト」を自動セット (新単元授業を割り当てない)
-    const reTestTask: LearningTask = {
-      id: `task-retest-${currentStudent.id}-${nextAttendanceDate}-1`,
-      student_id: currentStudent.id,
-      unit_id: task.unit_id || `retest-${Date.now()}`,
-      scheduled_date: nextAttendanceDate,
-      period: 1,
-      status: 'unstarted',
-      video_watched: false,
-      test_passed: false,
-      subject: subjectName,
-      custom_unit_name: reTestContent,
-      start_lesson_id: task.start_lesson_id || task.unit_id,
-      end_lesson_id: task.end_lesson_id || task.unit_id,
-      start_lesson_name: `${unitName}（再テスト）`,
-      end_lesson_name: `${unitName}（再テスト）`,
-      lesson_range: `${unitName}（再テスト）`,
-      created_at: new Date().toISOString()
-    };
-    await db.deleteLearningTasksForDate(currentStudent.id, nextAttendanceDate);
-    await db.saveLearningTasks([reTestTask]);
-
-    const log: LearningLog = {
-      id: `log-${Date.now()}`,
-      student_id: student.id,
-      unit_id: task.unit_id,
-      log_type: 'test_result',
-      score: 40,
-      total_questions: 10,
-      incorrect_genres: ['計算ミス', '符号の誤り'],
-      created_at: new Date().toISOString()
-    };
-    await db.addLearningLog(log);
-
-    showToast(`⚠️ テスト不合格のため次回通塾日（${nextAttendanceDate}）に【再テスト】を自動予約しました。次回合格を目指しましょう！`);
-    if (typeof window !== 'undefined') {
-      window.alert(`不合格のため、新単元への進行はブロックされます。\n次回通塾日（${nextAttendanceDate}）に再テスト（${reTestContent}）を自動セットしました。`);
-    }
-
-    loadData();
+    await handleProcessUnitTestFailure(task);
   };
 
   // 4. 当日全コマ完了後の「🚀 次の単元を先取り学習する」アクション

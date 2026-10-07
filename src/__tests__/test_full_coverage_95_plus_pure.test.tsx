@@ -107,17 +107,15 @@ describe("Pure Fundamental 95%+ Full Coverage Master Suite", () => {
       expect(screen.queryByTestId("complete-task-btn-1")).toBeInTheDocument();
     });
 
-    // 1. Click unit test pass button (handles handlePassTest with next unit transition)
+    // 1. Click unit test pass button (handles handlePassTest with pending status until other subjects complete)
     const utPassBtn = screen.getByTestId("complete-task-btn-1");
     await act(async () => {
       fireEvent.click(utPassBtn);
     });
 
-    // Verify next unit task was created in DB for next attendance date (2026-09-25)
-    await waitFor(async () => {
-      const nextTasks = await db.fetchLearningTasks(elemStudent.id);
-      expect(nextTasks.some(t => t.scheduled_date === "2026-09-25" && t.subject === "算数")).toBe(true);
-    });
+    // 他教科（英語）が未完了なので次回通塾日（2026-09-25）の新単元タスクはまだ保留されていること
+    const interimTasks = await db.fetchLearningTasks(elemStudent.id);
+    expect(interimTasks.some(t => t.scheduled_date === "2026-09-25" && t.subject === "算数")).toBe(false);
 
     // 2. Click video watch button on period 2
     const watchVideoBtn = screen.queryByText(/動画を視聴する/);
@@ -127,13 +125,19 @@ describe("Pure Fundamental 95%+ Full Coverage Master Suite", () => {
       });
     }
 
-    // 3. Click STEP 1 completion button
-    const step1Btns = screen.queryAllByText(/STEP 1 完了/) || screen.queryAllByText(/受講完了/);
-    if (step1Btns.length > 0) {
+    // 3. 他教科（英語）の授業を完了にする
+    const engCompleteBtn = screen.queryByTestId("complete-task-btn-2") || screen.queryByTestId("step-complete-btn-2-0");
+    if (engCompleteBtn) {
       await act(async () => {
-        fireEvent.click(step1Btns[0]);
+        fireEvent.click(engCompleteBtn);
       });
     }
+
+    // 全教科完了後、次回通塾日（2026-09-25）に新単元タスクが作成されること！
+    await waitFor(async () => {
+      const nextTasks = await db.fetchLearningTasks(elemStudent.id);
+      expect(nextTasks.some(t => t.scheduled_date === "2026-09-25" && t.subject === "算数")).toBe(true);
+    });
 
     // 4. Test fail button
     const failBtn = screen.queryByText(/テストを受ける \(不合格\)/);

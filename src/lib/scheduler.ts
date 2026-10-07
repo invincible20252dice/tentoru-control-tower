@@ -914,12 +914,12 @@ export function calculateLessonRangeForSlot(params: {
   }
 
   // 単元テストの境界制御:
-  // startIdx から順番に進める際、途中で「単元確認テスト」に到達した場合は、その単元テストまででストップ（新単元の授業にまたがない）
+  // startIdx が通常授業・まとめテスト・Check Test 等の場合、単元テストは同日の連続授業に含めない。
+  // （例: まとめテスト(3)やCheck Testまで到達したとしても、単元テストは同日に行わず、必ず次回の授業日に実施する）
   let endIdx = startIdx;
   const maxStep = Math.max(1, effectivePace || 1);
   for (let step = 0; step < maxStep && (startIdx + step) < masterLessons.length; step++) {
     const currentItem = masterLessons[startIdx + step];
-    endIdx = startIdx + step;
     const isReviewOrCheck = (currentItem.name || '').includes('まとめテスト') || (currentItem.name || '').toLowerCase().includes('check test');
     const isUnitTest = !isReviewOrCheck && (
       currentItem.item_type === 'unit_test' || 
@@ -929,10 +929,17 @@ export function calculateLessonRangeForSlot(params: {
         (currentItem.name || '').includes('確認テスト')
       )
     );
-    // 単元テストに到達したら、その単元テストでストップ（ループを即時ブレーク）
     if (isUnitTest) {
+      if (step > 0) {
+        // 通常授業やまとめテストから進んできた場合、単元テストの直前（まとめテスト(3)やCheck Test等）で終了する
+        endIdx = startIdx + step - 1;
+      } else {
+        // 開始授業自体が単元テストの場合は、その単元テスト単独（1コマ単独）として受講する
+        endIdx = startIdx;
+      }
       break;
     }
+    endIdx = startIdx + step;
   }
 
   const startItem = masterLessons[startIdx];
@@ -2136,7 +2143,12 @@ export function generateSlotsForSelectedSubjects(params: {
       range.end_lesson_name?.includes('確認テスト')
     ));
 
-    if (isUnitTest || alreadyTestedToday) {
+    const isUnitBoundaryReached = isUnitTest || 
+      Boolean(range.end_lesson_name?.includes('まとめテスト（３）') || 
+              range.end_lesson_name?.includes('まとめテスト(3)') || 
+              range.end_lesson_name?.toLowerCase().includes('check test'));
+
+    if (isUnitBoundaryReached || alreadyTestedToday) {
       subjectReachedUnitTest.add(sub);
     }
 

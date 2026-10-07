@@ -51,7 +51,7 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
       completed_lesson_ids: ['cm-m-3', 'cm-m-4'] // STEP 3, 4 完了済み
     };
 
-    // 残りSTEP 5からペース6コマ（STEP5, 6, まとめテスト1, 2, 3, 単元テスト）で進める場合、単元テストで終了する（新単元には進まない）
+    // 残りSTEP 5からペース6コマで進める場合でも、単元テストは同日授業に含まれず「まとめテスト（３）」で終了する
     const rangeResult = calculateLessonRangeForSlot({
       student,
       subject: '算数',
@@ -60,7 +60,8 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
     });
 
     expect(rangeResult.start_lesson_name).toContain('なんばんめ(3)');
-    expect(rangeResult.end_lesson_name).toContain('単元確認テスト');
+    expect(rangeResult.end_lesson_name).toContain('まとめテスト（３）');
+    expect(rangeResult.end_lesson_name).not.toContain('単元確認テスト');
     expect(rangeResult.end_lesson_name).not.toContain('いろいろな かたち');
 
     // STEP 3〜6が完了している状態のとき、次の授業は「まとめテスト（１）」
