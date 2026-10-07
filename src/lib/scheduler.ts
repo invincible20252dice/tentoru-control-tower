@@ -16,6 +16,41 @@ export function formatLessonRange(startName?: string | null, endName?: string | 
 }
 
 /**
+ * 単元名やテスト名の表記揺れを吸収し、比較用の正規化文字列を生成する
+ * - 全角英数・記号の半角化
+ * - 全角空白 (\u3000) を半角空白に変換し、連続空白を1つに縮約・トリム
+ * - ハイフン・ダッシュ類の統一
+ * - 「- 単元確認テスト」「- 単元テスト」「（再テスト）」「ーやり直しー」等の装飾接尾辞を除去
+ */
+export function normalizeUnitName(name?: string | null): string {
+  if (!name) return '';
+  return name
+    .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[\s\u3000]+/g, ' ')
+    .trim()
+    .replace(/[-−ー―]/g, '-')
+    .replace(/\s*-\s*(単元確認テスト|単元テスト|確認テスト|テスト|やり直し|再テスト|まとめテスト).*$/i, '')
+    .replace(/[（(](再テスト|やり直し|復習)[）)]/g, '')
+    .trim();
+}
+
+/**
+ * 単元名やテスト内容が同一単元・同一テストを指しているか判定する
+ */
+export function isMatchingUnitOrTest(source?: string | null, target?: string | null): boolean {
+  if (!source || !target) return false;
+  const sRaw = source.replace(/[\s\u3000]+/g, ' ').trim();
+  const tRaw = target.replace(/[\s\u3000]+/g, ' ').trim();
+  if (sRaw === tRaw || sRaw.includes(tRaw) || tRaw.includes(sRaw)) return true;
+
+  const sNorm = normalizeUnitName(source);
+  const tNorm = normalizeUnitName(target);
+  if (!sNorm || !tNorm) return false;
+  return sNorm === tNorm || sNorm.includes(tNorm) || tNorm.includes(sNorm);
+}
+
+/**
  * 生徒の指定教科における最新の単元テスト合否状況（合格/不合格）を取得する
  */
 export function getLatestUnitTestStatusForSubject(params: {
@@ -44,13 +79,15 @@ export function getLatestUnitTestStatusForSubject(params: {
 
   const latestByContent = new Map<string, MiniTestResult>();
   studentResults.forEach(r => {
-    const key = r.unit_name || r.test_content;
+    const rawKey = r.unit_name || r.test_content;
+    const normKey = normalizeUnitName(rawKey);
+    const key = normKey || rawKey;
     if (!latestByContent.has(key)) {
       latestByContent.set(key, r);
     }
   });
 
-  for (const [key, result] of latestByContent.entries()) {
+  for (const [normKey, result] of latestByContent.entries()) {
     let passScore = 80;
     if (result.passing_line) {
       const match = result.passing_line.match(/\d+/);
@@ -61,14 +98,30 @@ export function getLatestUnitTestStatusForSubject(params: {
     const isFailed = result.passed === false || result.status === 'failed' || (result.score !== null && result.score !== undefined && result.score < passScore);
 
     if (isPassed) {
-      completedUnitTestKeys.add(key);
-      if (result.unit_name) completedUnitTestKeys.add(result.unit_name);
+      completedUnitTestKeys.add(normKey);
+      if (result.unit_name) {
+        completedUnitTestKeys.add(result.unit_name);
+        completedUnitTestKeys.add(normalizeUnitName(result.unit_name));
+      }
       completedUnitTestKeys.add(result.test_content);
+      completedUnitTestKeys.add(normalizeUnitName(result.test_content));
     } else if (isFailed) {
       if (!failedUnitTest) {
         failedUnitTest = result;
       }
     }
+  }
+
+  // もし最新不合格テストが存在する場合、その単元キーが過去合格にあっても安全のため合格キーから除外
+  if (failedUnitTest) {
+    const fNorm = normalizeUnitName(failedUnitTest.unit_name || failedUnitTest.test_content);
+    completedUnitTestKeys.delete(fNorm);
+    if (failedUnitTest.unit_name) {
+      completedUnitTestKeys.delete(failedUnitTest.unit_name);
+      completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.unit_name));
+    }
+    completedUnitTestKeys.delete(failedUnitTest.test_content);
+    completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.test_content));
   }
 
   return {
@@ -512,7 +565,7 @@ export function findNextUncompletedLessonForSubject(params: {
 
 
 
-  // 3. 単元テスト合否判定（不合格時は新単元への進行をストップして再テスト・復習位置に固定）
+  // 3. 単元テスト合否判定（不合格時は新単元への進行をストップして再テスト位置に固定）
   const unitTestStatus = getLatestUnitTestStatusForSubject({
     studentId: student.id,
     subject,
@@ -526,7 +579,8 @@ export function findNextUncompletedLessonForSubject(params: {
       completedIds.add(String(k));
       masterLessons.forEach(m => {
         const mName = m.name || '';
-        if (mName === k || m.unit_name === k || mName.includes(k) || (m.unit_name && k.includes(m.unit_name))) {
+        const mUnit = m.unit_name || '';
+        if (mName === k || mUnit === k || isMatchingUnitOrTest(mName, k) || isMatchingUnitOrTest(mUnit, k)) {
           completedIds.add(m.id);
           completedIds.add(String(m.id));
           completedIds.add(mName);
@@ -535,18 +589,38 @@ export function findNextUncompletedLessonForSubject(params: {
     });
   }
 
+  // 最新の単元テストが不合格の場合: その単元テスト（再テスト）を直ちに次回開始授業として固定特定
   if (unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest) {
     const failedTest = unitTestStatus.failedUnitTest;
-    const testKey = failedTest.unit_name || failedTest.test_content || '';
-    const failedIdx = masterLessons.findIndex(m => {
-      const mName = m.name || '';
-      return (testKey && mName.includes(testKey)) || (failedTest.unit_name && mName.includes(failedTest.unit_name));
+    const testUnitKey = failedTest.unit_name || failedTest.test_content || '';
+
+    // 1. masterLessons から該当単元の「単元確認テスト」を優先検索
+    const failedUnitTestIdx = masterLessons.findIndex(m => {
+      const isTest = m.item_type === 'unit_test' || 
+        Boolean(m.name && (m.name.includes('単元確認テスト') || m.name.includes('単元テスト') || m.name.includes('確認テスト')));
+      if (!isTest) return false;
+      return isMatchingUnitOrTest(m.unit_name, testUnitKey) || isMatchingUnitOrTest(m.name, testUnitKey);
     });
-    if (failedIdx >= 0) {
+
+    if (failedUnitTestIdx >= 0) {
       return {
-        lessonId: masterLessons[failedIdx].id,
-        lessonName: masterLessons[failedIdx].name,
-        masterIndex: failedIdx,
+        lessonId: masterLessons[failedUnitTestIdx].id,
+        lessonName: masterLessons[failedUnitTestIdx].name,
+        masterIndex: failedUnitTestIdx,
+        hasFailedUnitTest: true,
+        failedUnitTest: failedTest
+      };
+    }
+
+    // 2. 単元確認テスト名が完全一致しない場合でも、該当単元のレッスンアイテムから特定
+    const fallbackUnitIdx = masterLessons.findIndex(m => {
+      return isMatchingUnitOrTest(m.unit_name, testUnitKey) || isMatchingUnitOrTest(m.name, testUnitKey);
+    });
+    if (fallbackUnitIdx >= 0) {
+      return {
+        lessonId: masterLessons[fallbackUnitIdx].id,
+        lessonName: masterLessons[fallbackUnitIdx].name,
+        masterIndex: fallbackUnitIdx,
         hasFailedUnitTest: true,
         failedUnitTest: failedTest
       };
@@ -583,17 +657,27 @@ export function findNextUncompletedLessonForSubject(params: {
 
     if (isUnitTest) {
       if (i < startThresholdIdx) continue;
+      const lNorm = normalizeUnitName(l.name);
+      const lUnitNorm = normalizeUnitName(l.unit_name);
+
       const hasFailedRecord = Boolean(
         unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest && (
-          (l.unit_name && unitTestStatus.failedUnitTest.unit_name === l.unit_name) ||
-          (unitTestStatus.failedUnitTest.test_content && l.name && l.name.includes(unitTestStatus.failedUnitTest.test_content))
+          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.unit_name, l.unit_name) ||
+          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.test_content, l.name) ||
+          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.unit_name, l.name) ||
+          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.test_content, l.unit_name)
         )
       );
 
+      // 単元テストの合格判定:
+      // 不合格記録がある場合は絶対に合格ではない（!hasFailedRecord）
+      // 不合格記録がない場合のみ、テスト合否記録 (completedUnitTestKeys) または 完了リスト (completedIds) を認める
       const isTestPassed = !hasFailedRecord && Boolean(
         unitTestStatus.completedUnitTestKeys.has(l.id) ||
         unitTestStatus.completedUnitTestKeys.has(String(l.id)) ||
         unitTestStatus.completedUnitTestKeys.has(l.name) ||
+        (lNorm && unitTestStatus.completedUnitTestKeys.has(lNorm)) ||
+        (lUnitNorm && unitTestStatus.completedUnitTestKeys.has(lUnitNorm)) ||
         (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name)) ||
         completedIds.has(l.id) ||
         completedIds.has(String(l.id)) ||
@@ -601,14 +685,14 @@ export function findNextUncompletedLessonForSubject(params: {
       );
 
       // 単元テストが未合格（未受験または不合格）の場合、合否ゲート発動！
-      // この単元テストで進行を強制ストップし、以降の授業（STEP 20〜）への進行を厳格に禁止する。
+      // この単元テストで進行を強制ストップし、以降の授業（新単元等）への進行を厳格に禁止する。
       if (!isTestPassed) {
         return {
           lessonId: l.id,
           lessonName: l.name,
           masterIndex: i,
-          hasFailedUnitTest: unitTestStatus.hasFailedUnitTest,
-          failedUnitTest: unitTestStatus.failedUnitTest
+          hasFailedUnitTest: hasFailedRecord || unitTestStatus.hasFailedUnitTest,
+          failedUnitTest: hasFailedRecord ? unitTestStatus.failedUnitTest : (unitTestStatus.hasFailedUnitTest ? unitTestStatus.failedUnitTest : null)
         };
       }
     } else {
@@ -962,16 +1046,22 @@ export function calculateLessonRangeForSlot(params: {
   let rangeStr = isStartUnitTest ? startName : formatLessonRange(startName, endName);
 
   if (hasFailed && failedTestObj) {
-    const unitLabel = failedTestObj.unit_name || failedTestObj.test_content;
-    startName = `【再テスト対策・総復習】${unitLabel}`;
-    endName = `【再テスト対策・総復習】${unitLabel}`;
-    rangeStr = `【弱点補強】${unitLabel} 総復習＆再テスト対策`;
-    paceReason = `単元テスト不合格のため新単元進行をストップし、${unitLabel}の総復習を割り当てました`;
+    const rawLabel = failedTestObj.unit_name || failedTestObj.test_content || '';
+    const cleanUnitName = normalizeUnitName(rawLabel) || rawLabel.replace(/^[^-]+-\s*/, '').trim();
+
+    // 不合格となった単元テストアイテムを startItem / endItem として確実に固定
+    const utItem = masterLessons[startIdx];
+    const utName = utItem?.name || `${cleanUnitName} - 単元確認テスト`;
+
+    startName = `【再テスト対策・総復習】${cleanUnitName}`;
+    endName = `【再テスト対策・総復習】${cleanUnitName}`;
+    rangeStr = `【弱点補強】${cleanUnitName} 総復習＆再テスト対策`;
+    paceReason = `単元テスト不合格のため新単元進行をストップし、${cleanUnitName}の総復習を割り当てました`;
   }
 
   return {
     start_lesson_id: startItem?.id || null,
-    end_lesson_id: endItem?.id || startItem?.id || null,
+    end_lesson_id: (hasFailed && failedTestObj) ? (startItem?.id || null) : (endItem?.id || startItem?.id || null),
     start_lesson_name: startName,
     end_lesson_name: endName,
     lesson_range: rangeStr || null,
@@ -2162,7 +2252,7 @@ export function generateSlotsForSelectedSubjects(params: {
     let finalEndId = isStartUnitTest ? finalStartId : (range.end_lesson_id || finalStartId);
     let finalStartName = range.start_lesson_name || '';
     let finalEndName = isStartUnitTest ? finalStartName : (range.end_lesson_name || finalStartName);
-    let finalRangeText = isStartUnitTest ? finalStartName : (range.lesson_range || finalStartName);
+    let finalRangeText = range.lesson_range || finalStartName;
 
     if (hasPriorSlotTodayForSubject && isUnitTest) {
       const priorSlot = Object.values(slots).reverse().find(s => s.subject === sub);

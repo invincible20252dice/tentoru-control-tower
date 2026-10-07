@@ -794,9 +794,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       custom_unit_name: reTestContent,
       start_lesson_id: targetTask?.start_lesson_id || targetTask?.unit_id || '',
       end_lesson_id: targetTask?.end_lesson_id || targetTask?.unit_id || '',
-      start_lesson_name: `${cleanUnitName}（再テスト）`,
-      end_lesson_name: `${cleanUnitName}（再テスト）`,
-      lesson_range: `${cleanUnitName}（再テスト）`,
+      start_lesson_name: `${cleanUnitName} - 単元確認テスト（再テスト）`,
+      end_lesson_name: `${cleanUnitName} - 単元確認テスト（再テスト）`,
+      lesson_range: `${cleanUnitName} - 単元確認テスト（再テスト）`,
       created_at: new Date().toISOString()
     };
     await db.deleteLearningTasksForDate(currentStudent.id, nextAttendanceDate);

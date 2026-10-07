@@ -1025,7 +1025,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getAllByText('未完').length).toBeGreaterThan(0);
     expect(screen.getAllByText('提出済み').length).toBeGreaterThan(0);
 
-    const scoreInput = screen.getByPlaceholderText('点数を入力');
+    const scoreInput = screen.getAllByPlaceholderText('点数を入力')[0];
     const saveScoreBtn = screen.getByRole('button', { name: /撃破報告（保存）|結果を保存/ });
     fireEvent.change(scoreInput, { target: { value: '150' } });
     fireEvent.click(saveScoreBtn);

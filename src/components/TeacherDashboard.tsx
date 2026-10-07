@@ -844,8 +844,53 @@ export default function TeacherDashboard({
           const validTasks = today.filter(t => t.period && (t.subject || t.unit_id || t.start_lesson_id || t.custom_unit_name));
           
           if (validTasks.length > 0) {
+            const miniResultsAll = db.getMiniTestResults(freshSt.id);
+
             today.forEach(t => {
               if (t.period) {
+                const sub = t.subject || '算数';
+                const utStatus = getLatestUnitTestStatusForSubject({
+                  studentId: freshSt.id,
+                  subject: sub,
+                  miniTestResults: miniResultsAll
+                });
+
+                // 直近の単元テストが不合格の教科で、既存タスクが単元テスト(再テスト)以外を指している場合は新単元進行をブロックし再テストへ自動補正
+                const isTaskUnitTest = Boolean(
+                  (t.start_lesson_name && (t.start_lesson_name.includes('単元確認テスト') || t.start_lesson_name.includes('単元テスト') || t.start_lesson_name.includes('再テスト'))) ||
+                  (t.custom_unit_name && (t.custom_unit_name.includes('単元確認テスト') || t.custom_unit_name.includes('単元テスト') || t.custom_unit_name.includes('再テスト')))
+                );
+
+                if (utStatus.hasFailedUnitTest && utStatus.failedUnitTest && !isTaskUnitTest) {
+                  const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
+                  const correctedRange = calculateLessonRangeForSlot({
+                    subject: sub,
+                    student: freshSt,
+                    tasks: freshTasks,
+                    branchRules,
+                    curriculumMasters: listMasters,
+                    curriculumUnits: listUnits,
+                    schoolId: freshSt.school_id,
+                    lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
+                    miniTestResults: miniResultsAll
+                  });
+
+                  newPeriods[t.period] = {
+                    subject: sub,
+                    unitId: correctedRange.start_lesson_id || t.unit_id,
+                    customTheme: '',
+                    startLessonId: correctedRange.start_lesson_id || t.start_lesson_id || t.unit_id,
+                    endLessonId: correctedRange.end_lesson_id || correctedRange.start_lesson_id || t.end_lesson_id || t.unit_id,
+                    startLessonName: correctedRange.start_lesson_name || '',
+                    endLessonName: correctedRange.end_lesson_name || correctedRange.start_lesson_name || '',
+                    lessonRange: correctedRange.lesson_range || ''
+                  };
+                  if (t.period > loadedPeriodCount) {
+                    loadedPeriodCount = t.period;
+                  }
+                  return;
+                }
+
                 const units = listUnits;
                 const unit = units.find(u => u.id === t.unit_id);
                 const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
