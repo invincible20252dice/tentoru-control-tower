@@ -41,16 +41,43 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const masters = typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : [];
     const results = typeof db.getMiniTestResults === 'function' ? db.getMiniTestResults() : [];
     
-    // 不合格の単元テストを特定
+    // 単元ごとの最新合否を判定し、最新が不合格のもののみ failedUnitKeys に特定
     const failedUnitKeys = new Set<string>();
-    results
-      .filter(r => r.student_id === student.id && (r.passed === false || r.status === 'failed'))
-      .forEach(r => {
-        const uNorm = normalizeUnitName(r.unit_name || r.test_content);
-        if (uNorm) failedUnitKeys.add(uNorm);
+    const studentResults = results
+      .filter(r => r.student_id === student.id && (r.test_type === 'unit_test' || r.test_content?.includes('テスト') || r.test_content?.includes('確認')))
+      .sort((a, b) => new Date(b.date || b.created_at || 0).getTime() - new Date(a.date || a.created_at || 0).getTime());
+
+    const latestByNorm = new Map<string, (typeof studentResults)[0]>();
+    studentResults.forEach(r => {
+      const rawKey = r.unit_name || r.test_content;
+      const norm = normalizeUnitName(rawKey);
+      const key = norm || rawKey;
+      if (!key) return;
+      const hasEval = (r.score !== null && r.score !== undefined) || r.passed !== undefined || r.status === 'passed' || r.status === 'failed';
+      const existing = latestByNorm.get(key);
+      if (!existing) {
+        latestByNorm.set(key, r);
+      } else {
+        const existingHasEval = (existing.score !== null && existing.score !== undefined) || existing.passed !== undefined || existing.status === 'passed' || existing.status === 'failed';
+        if (!existingHasEval && hasEval) {
+          latestByNorm.set(key, r);
+        }
+      }
+    });
+
+    latestByNorm.forEach((r, key) => {
+      let passScore = 80;
+      if (r.passing_line) {
+        const match = r.passing_line.match(/\d+/);
+        if (match) passScore = parseInt(match[0], 10);
+      }
+      const isFailed = r.passed === false || r.status === 'failed' || (r.score !== null && r.score !== undefined && r.score < passScore);
+      if (isFailed) {
+        failedUnitKeys.add(key);
         if (r.unit_name) failedUnitKeys.add(r.unit_name);
         if (r.test_content) failedUnitKeys.add(r.test_content);
-      });
+      }
+    });
 
     // 不合格の単元テストマスターID
     const failedMasterIds = new Set<string>();

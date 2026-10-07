@@ -259,3 +259,273 @@ ${customInfo}
     throw error;
   }
 }
+
+// -------------------------------------------------------------
+// 生徒・保護者・講師 3者共有用「面談の要約」生成
+// -------------------------------------------------------------
+export async function generateInterviewSummary(params: {
+  interviewType: 'two-way' | 'three-way';
+  interview: Partial<StudentInterview2 & StudentInterview3>;
+  student?: Partial<Student> | null;
+}): Promise<string> {
+  const { interviewType, interview, student } = params;
+  const apiKey = getGeminiApiKey();
+  const studentName = student?.name || '生徒';
+  const customInfo = interview.custom_fields && interview.custom_fields.length > 0
+    ? interview.custom_fields.map(f => `・${f.label}: ${f.value || '未記入'}`).join('\n')
+    : 'なし';
+
+  const isThreeWay = interviewType === 'three-way';
+  const parentLabel = interview.parent_type === 'mother' ? 'お母様' :
+    interview.parent_type === 'father' ? 'お父様' :
+    interview.parent_type === 'both' ? 'ご両親' :
+    interview.parent_type || '保護者様';
+
+  const prompt = isThreeWay ? `あなたは教育現場の面談ディレクターです。
+生徒（${studentName}さん）、保護者（${parentLabel}）、講師の【三者面談】の内容を、生徒・保護者・講師の3者全員が共有しやすく、前向きに取り組める【面談の要約シート】としてまとめてください。
+
+【面談データ】
+・生徒: ${studentName} (${student?.grade || ''})
+・担当者: ${interview.interviewer || '担当講師'} / 面談日: ${interview.interview_date || '本日'}
+・同席保護者: ${parentLabel}
+・保護者の不安・相談: ${interview.parent_anxieties || '特になし'}
+・面談で話した内容: ${interview.discussed_content || '学習・進路相談'}
+・メモ・補足: ${interview.notes || 'なし'}
+・カスタム項目: ${customInfo}
+
+以下の構成で、温かく分かりやすいMarkdown形式で出力してください：
+### 📋 三者面談の要約（生徒・保護者・講師 共有シート）
+1. 🎯 面談の目的と現状の共有
+2. 💡 話し合いのハイライト（進路・学習・家庭での様子）
+3. 🤝 3者の約束・今後のアクション
+   - 👦 生徒自身ががんばること
+   - 👨‍👩‍👧 ご家庭での温かい見守り・サポート
+   - 🏫 塾・講師の指導方針・次回までの伴走計画` :
+  `あなたは教育現場の面談ディレクターです。
+生徒（${studentName}さん）と講師の【二者面談】の内容を、生徒・保護者・講師の3者全員が共有しやすく、安心とやる気が生まれる【面談の要約シート】としてまとめてください。
+
+【面談データ】
+・生徒: ${studentName} (${student?.grade || ''})
+・担当者: ${interview.interviewer || '担当講師'} / 面談日: ${interview.interview_date || '本日'}
+・将来の夢・目標: ${interview.dream_goal || '未設定'} / 志望校: ${interview.target_school || '未設定'}
+・部活動・交友関係: ${interview.club_activity || 'なし'} (${interview.club_members_count ? interview.club_members_count + '人' : ''}) / ${interview.close_friends || ''}
+・勉強の不安: ${interview.study_anxiety || '特になし'}
+・自己評価: ${interview.self_evaluation || '未回答'} / 課題点: ${interview.student_challenges || '未回答'}
+・求める行動: ${interview.required_actions || '特になし'}
+・期待すること: ${interview.expectations || '特になし'}
+・目標順位/点数: ${interview.target_rank || ''} / ${interview.target_score || ''}
+・メモ: ${interview.notes || 'なし'}
+・カスタム項目: ${customInfo}
+
+以下の構成で、温かく分かりやすいMarkdown形式で出力してください：
+### 📋 二者面談の要約（生徒・保護者・講師 共有シート）
+1. 🎯 面談の目的と目標（夢・志望校）
+2. 🌟 本人の強みと現在の振り返り（自己評価と課題）
+3. 🤝 3者の約束・今後のアクション
+   - 👦 生徒自身ががんばること（スモールステップ）
+   - 👨‍👩‍👧 ご家庭での温かい見守り・サポート
+   - 🏫 塾・講師の指導方針・次回までの伴走計画`;
+
+  if (!apiKey) {
+    if (isThreeWay) {
+      return `### 📋 三者面談の要約（生徒・保護者・講師 共有シート）
+
+#### 1. 🎯 面談の目的と現状の共有
+- **面談対象**: ${studentName}さん (${student?.grade || ''}) / 同席: ${parentLabel}
+- **面談日 / 担当**: ${interview.interview_date || '本日'}（担当: ${interview.interviewer || '講師'}）
+- **共有テーマ**: ${interview.discussed_content || '志望校・学習計画および家庭連携について'}
+
+#### 2. 💡 話し合いのハイライト
+- **保護者様の想い・ご不安**: ${interview.parent_anxieties ? `「${interview.parent_anxieties}」について率直にお話しいただきました。` : '学習習慣の定着や進路に向けた見守り体制について確認しました。'}
+- **生徒本人の様子**: 今後の目標に向けて前向きに学習へ取り組む意欲が確認できました。
+- **共有できた方向性**: 焦らず一歩ずつステップを踏んで進めていく方針で一致しました。
+
+#### 3. 🤝 3者の約束・今後のアクション
+- 👦 **${studentName}さん自身ががんばること**:
+  - 毎回の授業前の宿題をやり切り、間違えた問題の解き直しを習慣化する。
+- 👨‍👩‍👧 **ご家庭での温かい見守り・サポート**:
+  - 「勉強しなさい」の指示出しは塾にお任せいただき、家庭では努力しているプロセスを認めて安心できる居場所を作る。
+- 🏫 **塾・講師の指導方針・次回までの伴走計画**:
+  - 個別学習計画に基づき、単元ごとの定着を小テストで徹底確認。定期的な進捗をご家庭へ共有します。`;
+    }
+
+    return `### 📋 二者面談の要約（生徒・保護者・講師 共有シート）
+
+#### 1. 🎯 面談の目的と目標
+- **面談対象**: ${studentName}さん (${student?.grade || ''})（担当: ${interview.interviewer || '講師'}）
+- **将来の夢・なりたい像**: ${interview.dream_goal || '自分のやりたいこと・目標に向けて邁進'}
+- **目標校・目標指標**: ${interview.target_school ? `志望校「${interview.target_school}」` : '目標達成に向けて'}（${interview.target_score ? `目標点: ${interview.target_score}点` : ''}${interview.target_rank ? ` 目標順位: ${interview.target_rank}` : ''}）
+
+#### 2. 🌟 本人の強みと現在の振り返り
+- **現在の自己評価と課題**: 本人の自己評価は「${interview.self_evaluation || '一歩ずつ前進'}」であり、課題として「${interview.student_challenges || '日々の学習継続'}」が挙がりました。
+- **不安への向き合い方**: ${interview.study_anxiety ? `「${interview.study_anxiety}」という不安について、原因と対策を整理しました。` : '疑問点を抱え込まずすぐに講師に相談できる環境を作ります。'}
+- **日々の生活・部活**: ${interview.club_activity ? `部活動（${interview.club_activity}）と両立しながら進めるペースを整えます。` : '生活リズムを整えながら学習時間を確保します。'}
+
+#### 3. 🤝 3者の約束・今後のアクション
+- 👦 **${studentName}さん自身ががんばること**:
+  - ${interview.required_actions || '授業で習ったことをその日のうちに1回見直す。'}
+- 👨‍👩‍👧 **ご家庭での温かい見守り・サポート**:
+  - 日々の小さな頑張り（机に向かったこと、来塾したこと）を温かく言葉にして認める。
+- 🏫 **塾・講師の指導方針・次回までの伴走計画**:
+  - 単元テストの確実な合格と、つまずき箇所の即時フォローを行い、自信を育てます。`;
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (error) {
+    console.error('Gemini API Error (Interview Summary):', error);
+    throw error;
+  }
+}
+
+// -------------------------------------------------------------
+// 音声録音（文字起こしテキスト）から面談各項目への自動振り分け抽出
+// -------------------------------------------------------------
+export interface ParsedInterviewFields {
+  interviewer?: string;
+  interview_date?: string;
+  dream_goal?: string;
+  target_school?: string;
+  club_activity?: string;
+  club_members_count?: string;
+  close_friends?: string;
+  study_anxiety?: string;
+  self_evaluation?: string;
+  student_challenges?: string;
+  required_actions?: string;
+  expectations?: string;
+  target_rank?: string;
+  target_score?: string;
+  parent_type?: string;
+  parent_anxieties?: string;
+  discussed_content?: string;
+  notes?: string;
+}
+
+export async function parseInterviewTranscriptToFields(
+  transcript: string,
+  interviewType: 'two-way' | 'three-way'
+): Promise<ParsedInterviewFields> {
+  if (!transcript || transcript.trim().length === 0) {
+    return {};
+  }
+
+  const apiKey = getGeminiApiKey();
+
+  // ルールベース・正規表現による高精度抽出（フォールバック兼用）
+  const extractRuleBased = (): ParsedInterviewFields => {
+    const res: ParsedInterviewFields = {};
+    const text = transcript;
+
+    // 志望校
+    const schoolMatch = text.match(/(?:志望校|行きたい高校|行きたい大学|目標校|受験校)[は:：が]?\s*([^\s,、。]+(?:高校|中学校|大学|校)?)/);
+    if (schoolMatch) res.target_school = schoolMatch[1].replace(/(?:です|だ|を目指しています|を目指してます|に行きたいです|に行きたい)$/, '').trim();
+
+    // 夢・目標
+    const dreamMatch = text.match(/(?:将来の夢|夢|なりたい(?:もの|職業|像))[は:：が]?\s*([^\s,、。]+(?:になりたい|になる|先生|医師|プログラマー|公務員|デザイナー)?)/);
+    if (dreamMatch) res.dream_goal = dreamMatch[1].replace(/(になりたい|になる)$/, '').trim();
+
+    // 部活
+    const clubMatch = text.match(/(?:部活|クラブ|所属)[は:：が]?\s*([^\s,、。]+(?:部|クラブ|チーム)?)/);
+    if (clubMatch) res.club_activity = clubMatch[1].replace(/(?:です|だ|に入っています|に入ってます|をやっています|をやてます)$/, '').trim();
+
+    // 部活人数
+    const membersMatch = text.match(/(?:部員|人数|メンバー)[は:：が]?\s*(\d+)\s*人/);
+    if (membersMatch) res.club_members_count = membersMatch[1].trim();
+
+    // 仲良い人
+    const friendsMatch = text.match(/(?:仲良い(?:人|友達|友だち)|よく一緒にいる(?:人|友達))[は:：が]?\s*([^\s,、。]+)/);
+    if (friendsMatch) res.close_friends = friendsMatch[1].replace(/(?:です|だ|よ|ね)$/, '').trim();
+
+    // 勉強の不安・悩み
+    const anxietyMatch = text.match(/(?:不安|悩み|心配|困っていること)[は:：が]?\s*([^。]+(?:です|ます|こと)?)/);
+    if (anxietyMatch) res.study_anxiety = anxietyMatch[1].trim();
+
+    // 自己評価
+    const evalMatch = text.match(/(?:自己評価|自分の評価|手応え|今の勉強)[は:：が]?\s*([^。]+(?:点|割|良い|悪い|普通|まだまだ|頑張っている)?)/);
+    if (evalMatch) res.self_evaluation = evalMatch[1].trim();
+
+    // 課題点
+    const challengeMatch = text.match(/(?:課題|弱点|直したいところ|改善点)[は:：が]?\s*([^。]+)/);
+    if (challengeMatch) res.student_challenges = challengeMatch[1].trim();
+
+    // 求める行動
+    const actionMatch = text.match(/(?:行動|約束|やるべきこと|宿題|毎日の勉強)[は:：が]?\s*([^。]+)/);
+    if (actionMatch) res.required_actions = actionMatch[1].trim();
+
+    // 目標点数
+    const scoreMatch = text.match(/(?:目標点|次のテストで|目標)[は:：が]?\s*(\d+)\s*点/);
+    if (scoreMatch) res.target_score = `${scoreMatch[1]}点`;
+
+    // 保護者の不安（三者面談）
+    const parentAnxMatch = text.match(/(?:保護者|お母さん|お父さん|親)の?(?:不安|相談|心配)[は:：が]?\s*([^。]+)/);
+    if (parentAnxMatch) res.parent_anxieties = parentAnxMatch[1].trim();
+
+    // 話した内容
+    if (interviewType === 'three-way') {
+      res.discussed_content = text.slice(0, 300).trim();
+    }
+    res.notes = `【音声文字起こし】\n${text}`;
+
+    return res;
+  };
+
+  if (!apiKey) {
+    return extractRuleBased();
+  }
+
+  try {
+    const prompt = `以下は教育現場での${interviewType === 'three-way' ? '三者面談' : '二者面談'}の音声文字起こしテキストです。
+この会話から情報を抽出し、指定のJSON形式で返してください。会話に含まれていない項目はnullとしてください。
+
+【文字起こし】
+${transcript}
+
+【出力JSONフォーマット】
+{
+  "interviewer": "面談担当講師名またはnull",
+  "dream_goal": "将来の夢・なりたい像またはnull",
+  "target_school": "志望校またはnull",
+  "club_activity": "所属部活またはnull",
+  "club_members_count": "部活人数(数字文字列)またはnull",
+  "close_friends": "仲の良い人またはnull",
+  "study_anxiety": "勉強に関しての不安またはnull",
+  "self_evaluation": "今の勉強への自己評価またはnull",
+  "student_challenges": "今の生徒の課題点またはnull",
+  "required_actions": "行動ベースで求めることまたはnull",
+  "expectations": "これから期待していることまたはnull",
+  "target_rank": "目標順位またはnull",
+  "target_score": "目標点数またはnull",
+  "parent_type": "同席保護者(mother/father/both/その他)またはnull",
+  "parent_anxieties": "保護者の不安・疑問またはnull",
+  "discussed_content": "面談で話した主な内容の簡潔な要約またはnull"
+}`;
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return extractRuleBased();
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    const merged = { ...extractRuleBased() };
+    Object.keys(parsed).forEach(k => {
+      if (parsed[k] !== null && parsed[k] !== undefined && parsed[k] !== '') {
+        (merged as any)[k] = String(parsed[k]);
+      }
+    });
+    return merged;
+  } catch (e) {
+    console.error('Failed to parse transcript via Gemini, falling back to rule-based:', e);
+    return extractRuleBased();
+  }
+}
+

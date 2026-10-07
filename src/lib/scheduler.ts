@@ -20,18 +20,34 @@ export function formatLessonRange(startName?: string | null, endName?: string | 
  * - 全角英数・記号の半角化
  * - 全角空白 (\u3000) を半角空白に変換し、連続空白を1つに縮約・トリム
  * - ハイフン・ダッシュ類の統一
+ * - 先頭の教科プレフィックス（「算数:」「英語:」等）や【再テスト対策・総】【弱点補強】等の除去
  * - 「- 単元確認テスト」「- 単元テスト」「（再テスト）」「ーやり直しー」等の装飾接尾辞を除去
  */
 export function normalizeUnitName(name?: string | null): string {
   if (!name) return '';
-  return name
+  let cleaned = name
     .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[\s\u3000]+/g, ' ')
     .trim()
-    .replace(/[-−ー―]/g, '-')
+    .replace(/[-−ー―]/g, '-');
+
+  // 先頭の教科プレフィックスや角括弧装飾を再帰的に除去
+  let prev = '';
+  while (prev !== cleaned) {
+    prev = cleaned;
+    cleaned = cleaned
+      .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
+      .replace(/^【(?:再テスト[^】]*|弱点補強[^】]*|やり直し[^】]*|総復習[^】]*|復習[^】]*|補習[^】]*|テスト[^】]*|単元[^】]*)】\s*/i, '')
+      .replace(/^【[^】]+】\s*/i, '')
+      .replace(/^\[[^\]]+\]\s*/i, '')
+      .trim();
+  }
+
+  return cleaned
     .replace(/\s*-\s*(単元確認テスト|単元テスト|確認テスト|テスト|やり直し|再テスト|まとめテスト).*$/i, '')
-    .replace(/[（(](再テスト|やり直し|復習)[）)]/g, '')
+    .replace(/[（(](再テスト|やり直し|復習|テスト)[）)]/g, '')
+    .replace(/[-−ー―]やり直し[-−ー―]/g, '')
     .trim();
 }
 
@@ -63,7 +79,9 @@ export function getLatestUnitTestStatusForSubject(params: {
   completedUnitTestKeys: Set<string>;
 } {
   const { studentId, subject, miniTestResults } = params;
-  const results = miniTestResults || db.getMiniTestResults();
+  const results = (miniTestResults && miniTestResults.length > 0) 
+    ? miniTestResults 
+    : (studentId ? db.getMiniTestResults(studentId) : db.getMiniTestResults());
 
   const targetSub = subject;
   const studentResults = results
@@ -82,8 +100,17 @@ export function getLatestUnitTestStatusForSubject(params: {
     const rawKey = r.unit_name || r.test_content;
     const normKey = normalizeUnitName(rawKey);
     const key = normKey || rawKey;
-    if (!latestByContent.has(key)) {
+    if (!key) return;
+
+    const hasEvaluation = (r.score !== null && r.score !== undefined) || r.passed !== undefined || r.status === 'passed' || r.status === 'failed';
+    const existing = latestByContent.get(key);
+    if (!existing) {
       latestByContent.set(key, r);
+    } else {
+      const existingHasEval = (existing.score !== null && existing.score !== undefined) || existing.passed !== undefined || existing.status === 'passed' || existing.status === 'failed';
+      if (!existingHasEval && hasEvaluation) {
+        latestByContent.set(key, r);
+      }
     }
   });
 
@@ -400,11 +427,14 @@ export function findNextUncompletedLessonForSubject(params: {
     curriculumUnits: rawUnits = [],
     schoolId = student?.school_id,
     lessonProgressList = [],
-    miniTestResults = []
+    miniTestResults: rawMiniTestResults
   } = params;
 
   const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
   const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
+  const miniTestResults = (rawMiniTestResults && rawMiniTestResults.length > 0)
+    ? rawMiniTestResults
+    : (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults());
 
   const isElem = Boolean(
     student?.grade?.startsWith('小') || 
@@ -853,11 +883,14 @@ export function calculateLessonRangeForSlot(params: {
     tasks = [],
     branchRules,
     lessonProgressList = [],
-    miniTestResults = []
+    miniTestResults: rawMiniTestResults
   } = params;
 
   const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
   const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
+  const miniTestResults = (rawMiniTestResults && rawMiniTestResults.length > 0)
+    ? rawMiniTestResults
+    : (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults());
 
   const isElem = Boolean(
     student?.grade?.startsWith('小') || 

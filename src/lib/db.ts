@@ -174,7 +174,9 @@ export interface StudentInterview2 {
   target_score?: string;        // 目標点数
   notes?: string;               // その他
   custom_fields?: StudentInterviewCustomField[];
-  ai_coaching_advice?: string;  // AIコーチング・声かけアドバイス
+  ai_coaching_advice?: string;  // AIコーチング・声かけアドバイス（後方互換）
+  interview_summary?: string;   // 面談の要約（生徒・保護者・講師共有用）
+  audio_transcript?: string;    // 面談の録音文字起こし
   created_at: string;
   updated_at?: string;
 }
@@ -190,7 +192,9 @@ export interface StudentInterview3 {
   future_direction_agreed: boolean | 'yes' | 'no' | string; // 今後の方向性は話したか？（Yes / No）
   notes?: string;               // その他
   custom_fields?: StudentInterviewCustomField[];
-  ai_coaching_advice?: string;  // AIコーチング・家庭連携アドバイス
+  ai_coaching_advice?: string;  // AIコーチング・家庭連携アドバイス（後方互換）
+  interview_summary?: string;   // 面談の要約（生徒・保護者・講師共有用）
+  audio_transcript?: string;    // 面談の録音文字起こし
   created_at: string;
   updated_at?: string;
 }

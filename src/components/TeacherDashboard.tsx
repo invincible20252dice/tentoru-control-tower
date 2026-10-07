@@ -4,7 +4,7 @@ import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 import { HorizontalDatePicker } from './HorizontalDatePicker';
 import { BranchManagement } from './BranchManagement';
 import { CurriculumCsvImport } from './CurriculumCsvImport';
-import { Building2, FileSpreadsheet } from 'lucide-react';
+import { Building2, FileSpreadsheet, Mic, MicOff, Download, Image as ImageIcon, Sparkles, FileText } from 'lucide-react';
 import { 
   db, 
   Student, 
@@ -66,10 +66,20 @@ import {
   getSortedSubjectsByProgressRate,
   generateSlotsForSelectedSubjects,
   getLatestUnitTestStatusForSubject,
-  ensureMathEnglishUnitTests
+  normalizeUnitName,
+  ensureMathEnglishUnitTests,
+  isMatchingUnitOrTest
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
-import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage, generateInterview2CoachingAdvice, generateInterview3CoachingAdvice } from '../lib/gemini';
+import { 
+  getGeminiApiKey, 
+  saveGeminiApiKey, 
+  analyzeReportCardImage, 
+  generateInterview2CoachingAdvice, 
+  generateInterview3CoachingAdvice,
+  generateInterviewSummary,
+  parseInterviewTranscriptToFields
+} from '../lib/gemini';
 
 export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import' | 'two-way-interview' | 'three-way-interview';
 
@@ -345,6 +355,11 @@ export default function TeacherDashboard({
   const [customFields2, setCustomFields2] = useState<StudentInterviewCustomField[]>([]);
   const [aiCoachingAdvice2, setAiCoachingAdvice2] = useState('');
   const [isGeneratingAdvice2, setIsGeneratingAdvice2] = useState(false);
+  const [transcript2, setTranscript2] = useState('');
+  const [isRecording2, setIsRecording2] = useState(false);
+  const [isParsingTranscript2, setIsParsingTranscript2] = useState(false);
+  const interviewSummaryCardRef2 = useRef<HTMLDivElement>(null);
+  const recognition2Ref = useRef<any>(null);
 
   // 三者面談用 State
   const [interviews3, setInterviews3] = useState<StudentInterview3[]>([]);
@@ -359,6 +374,11 @@ export default function TeacherDashboard({
   const [customFields3, setCustomFields3] = useState<StudentInterviewCustomField[]>([]);
   const [aiCoachingAdvice3, setAiCoachingAdvice3] = useState('');
   const [isGeneratingAdvice3, setIsGeneratingAdvice3] = useState(false);
+  const [transcript3, setTranscript3] = useState('');
+  const [isRecording3, setIsRecording3] = useState(false);
+  const [isParsingTranscript3, setIsParsingTranscript3] = useState(false);
+  const interviewSummaryCardRef3 = useRef<HTMLDivElement>(null);
+  const recognition3Ref = useRef<any>(null);
 
   const resetInterview2Form = () => {
     setSelectedInterview2Id(null);
@@ -379,6 +399,7 @@ export default function TeacherDashboard({
     setNotes2('');
     setCustomFields2([]);
     setAiCoachingAdvice2('');
+    setTranscript2('');
   };
 
   const selectInterview2 = (item: StudentInterview2) => {
@@ -399,7 +420,8 @@ export default function TeacherDashboard({
     setTargetScore2(item.target_score || '');
     setNotes2(item.notes || '');
     setCustomFields2(item.custom_fields || []);
-    setAiCoachingAdvice2(item.ai_coaching_advice || '');
+    setAiCoachingAdvice2(item.interview_summary || item.ai_coaching_advice || '');
+    setTranscript2(item.audio_transcript || '');
   };
 
   const handleSaveInterview2 = async () => {
@@ -431,6 +453,8 @@ export default function TeacherDashboard({
       notes: notes2,
       custom_fields: customFields2,
       ai_coaching_advice: aiCoachingAdvice2,
+      interview_summary: aiCoachingAdvice2,
+      audio_transcript: transcript2,
       created_at: new Date().toISOString()
     };
     await db.saveStudentInterview2(payload);
@@ -457,6 +481,97 @@ export default function TeacherDashboard({
     alert('面談記録を削除しました。');
   };
 
+  const handleToggleRecording2 = () => {
+    if (isRecording2) {
+      if (recognition2Ref.current) {
+        try { recognition2Ref.current.stop(); } catch (e) {}
+      }
+      setIsRecording2(false);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('お使いの環境ではWeb Speech APIによる音声認識がサポートされていません。テキストエリアに面談議事録を直接入力または貼り付けしてください。');
+      return;
+    }
+    try {
+      const rec = new SpeechRecognition();
+      rec.lang = 'ja-JP';
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = (event: any) => {
+        let text = '';
+        for (let i = 0; i < event.results.length; i++) {
+          text += event.results[i][0].transcript;
+        }
+        setTranscript2(text);
+      };
+      rec.onerror = (e: any) => {
+        console.warn('SpeechRecognition error:', e);
+        setIsRecording2(false);
+      };
+      rec.onend = () => {
+        setIsRecording2(false);
+      };
+      recognition2Ref.current = rec;
+      rec.start();
+      setIsRecording2(true);
+    } catch (e: any) {
+      alert(`録音の開始に失敗しました: ${e?.message || e}`);
+      setIsRecording2(false);
+    }
+  };
+
+  const handleParseTranscript2 = async () => {
+    if (!transcript2 || transcript2.trim() === '') {
+      alert('音声文字起こしテキストがありません。録音を行うか、テキストを入力してください。');
+      return;
+    }
+    setIsParsingTranscript2(true);
+    try {
+      const parsed = await parseInterviewTranscriptToFields(transcript2, 'two-way');
+      if (parsed.interviewer) setInterviewer2(parsed.interviewer);
+      if (parsed.target_school) setTargetSchool2(parsed.target_school);
+      if (parsed.dream_goal) setDreamGoal2(parsed.dream_goal);
+      if (parsed.club_activity) setClubActivity2(parsed.club_activity);
+      if (parsed.club_members_count) setClubMembersCount2(parsed.club_members_count);
+      if (parsed.close_friends) setCloseFriends2(parsed.close_friends);
+      if (parsed.study_anxiety) setStudyAnxiety2(parsed.study_anxiety);
+      if (parsed.self_evaluation) setSelfEvaluation2(parsed.self_evaluation);
+      if (parsed.student_challenges) setStudentChallenges2(parsed.student_challenges);
+      if (parsed.required_actions) setRequiredActions2(parsed.required_actions);
+      if (parsed.expectations) setExpectations2(parsed.expectations);
+      if (parsed.target_rank) setTargetRank2(parsed.target_rank);
+      if (parsed.target_score) setTargetScore2(parsed.target_score);
+      if (parsed.notes) setNotes2(prev => prev ? `${prev}\n\n${parsed.notes}` : parsed.notes || '');
+      alert('音声議事録から面談各項目へ自動入力しました。');
+    } catch (e: any) {
+      alert(`自動入力でエラーが発生しました: ${e?.message || e}`);
+    } finally {
+      setIsParsingTranscript2(false);
+    }
+  };
+
+  const handleDownloadSummaryImage2 = async () => {
+    if (!interviewSummaryCardRef2.current) return;
+    try {
+      const canvas = await html2canvas(interviewSummaryCardRef2.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      const sName = selectedStudent?.name || '生徒';
+      a.download = `二者面談要約シート_${sName}_${interviewDate2}.png`;
+      a.click();
+    } catch (e: any) {
+      alert(`画像書き出しでエラーが発生しました: ${e?.message || e}`);
+    }
+  };
+
   const handleGenerateAdvice2 = async () => {
     setIsGeneratingAdvice2(true);
     try {
@@ -478,10 +593,14 @@ export default function TeacherDashboard({
         notes: notes2,
         custom_fields: customFields2
       };
-      const advice = await generateInterview2CoachingAdvice(draft, selectedStudent);
-      setAiCoachingAdvice2(advice);
+      const summary = await generateInterviewSummary({
+        interviewType: 'two-way',
+        interview: draft,
+        student: selectedStudent
+      });
+      setAiCoachingAdvice2(summary);
     } catch (e: any) {
-      alert(`AIアドバイス生成でエラーが発生しました: ${e?.message || e}`);
+      alert(`面談の要約生成でエラーが発生しました: ${e?.message || e}`);
     } finally {
       setIsGeneratingAdvice2(false);
     }
@@ -508,6 +627,7 @@ export default function TeacherDashboard({
     setNotes3('');
     setCustomFields3([]);
     setAiCoachingAdvice3('');
+    setTranscript3('');
   };
 
   const selectInterview3 = (item: StudentInterview3) => {
@@ -520,7 +640,8 @@ export default function TeacherDashboard({
     setFutureDirectionAgreed3(item.future_direction_agreed === false || item.future_direction_agreed === 'no' ? 'no' : 'yes');
     setNotes3(item.notes || '');
     setCustomFields3(item.custom_fields || []);
-    setAiCoachingAdvice3(item.ai_coaching_advice || '');
+    setAiCoachingAdvice3(item.interview_summary || item.ai_coaching_advice || '');
+    setTranscript3(item.audio_transcript || '');
   };
 
   const handleSaveInterview3 = async () => {
@@ -544,6 +665,8 @@ export default function TeacherDashboard({
       notes: notes3,
       custom_fields: customFields3,
       ai_coaching_advice: aiCoachingAdvice3,
+      interview_summary: aiCoachingAdvice3,
+      audio_transcript: transcript3,
       created_at: new Date().toISOString()
     };
     await db.saveStudentInterview3(payload);
@@ -570,6 +693,88 @@ export default function TeacherDashboard({
     alert('面談記録を削除しました。');
   };
 
+  const handleToggleRecording3 = () => {
+    if (isRecording3) {
+      if (recognition3Ref.current) {
+        try { recognition3Ref.current.stop(); } catch (e) {}
+      }
+      setIsRecording3(false);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('お使いの環境ではWeb Speech APIによる音声認識がサポートされていません。テキストエリアに面談議事録を直接入力または貼り付けしてください。');
+      return;
+    }
+    try {
+      const rec = new SpeechRecognition();
+      rec.lang = 'ja-JP';
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = (event: any) => {
+        let text = '';
+        for (let i = 0; i < event.results.length; i++) {
+          text += event.results[i][0].transcript;
+        }
+        setTranscript3(text);
+      };
+      rec.onerror = (e: any) => {
+        console.warn('SpeechRecognition error:', e);
+        setIsRecording3(false);
+      };
+      rec.onend = () => {
+        setIsRecording3(false);
+      };
+      recognition3Ref.current = rec;
+      rec.start();
+      setIsRecording3(true);
+    } catch (e: any) {
+      alert(`録音の開始に失敗しました: ${e?.message || e}`);
+      setIsRecording3(false);
+    }
+  };
+
+  const handleParseTranscript3 = async () => {
+    if (!transcript3 || transcript3.trim() === '') {
+      alert('音声文字起こしテキストがありません。録音を行うか、テキストを入力してください。');
+      return;
+    }
+    setIsParsingTranscript3(true);
+    try {
+      const parsed = await parseInterviewTranscriptToFields(transcript3, 'three-way');
+      if (parsed.interviewer) setInterviewer3(parsed.interviewer);
+      if (parsed.parent_type) setParentType3(parsed.parent_type);
+      if (parsed.parent_anxieties) setParentAnxieties3(parsed.parent_anxieties);
+      if (parsed.discussed_content) setDiscussedContent3(parsed.discussed_content);
+      if (parsed.notes) setNotes3(prev => prev ? `${prev}\n\n${parsed.notes}` : parsed.notes || '');
+      alert('音声議事録から面談各項目へ自動入力しました。');
+    } catch (e: any) {
+      alert(`自動入力でエラーが発生しました: ${e?.message || e}`);
+    } finally {
+      setIsParsingTranscript3(false);
+    }
+  };
+
+  const handleDownloadSummaryImage3 = async () => {
+    if (!interviewSummaryCardRef3.current) return;
+    try {
+      const canvas = await html2canvas(interviewSummaryCardRef3.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      const sName = selectedStudent?.name || '生徒';
+      a.download = `三者面談要約シート_${sName}_${interviewDate3}.png`;
+      a.click();
+    } catch (e: any) {
+      alert(`画像書き出しでエラーが発生しました: ${e?.message || e}`);
+    }
+  };
+
   const handleGenerateAdvice3 = async () => {
     setIsGeneratingAdvice3(true);
     try {
@@ -583,10 +788,14 @@ export default function TeacherDashboard({
         notes: notes3,
         custom_fields: customFields3
       };
-      const advice = await generateInterview3CoachingAdvice(draft, selectedStudent);
-      setAiCoachingAdvice3(advice);
+      const summary = await generateInterviewSummary({
+        interviewType: 'three-way',
+        interview: draft,
+        student: selectedStudent
+      });
+      setAiCoachingAdvice3(summary);
     } catch (e: any) {
-      alert(`AIアドバイス生成でエラーが発生しました: ${e?.message || e}`);
+      alert(`面談の要約生成でエラーが発生しました: ${e?.message || e}`);
     } finally {
       setIsGeneratingAdvice3(false);
     }
@@ -1189,7 +1398,18 @@ export default function TeacherDashboard({
                   (t.custom_unit_name && (t.custom_unit_name.includes('単元確認テスト') || t.custom_unit_name.includes('単元テスト') || t.custom_unit_name.includes('再テスト')))
                 );
 
-                if (utStatus.hasFailedUnitTest && utStatus.failedUnitTest && !isTaskUnitTest) {
+                // 単元テスト合否状況に応じた自動補正：
+                // 1) 不合格の場合: 新単元進行をブロックし再テストへ自動補正
+                // 2) 合格の場合: 既存タスクが古い再テスト/単元確認テストのまま残っていれば、新単元（次のレッスン）へと自動更新
+                const isTaskPassedUnitTest = isTaskUnitTest && Boolean(
+                  (t.start_lesson_id && utStatus.completedUnitTestKeys.has(t.start_lesson_id)) ||
+                  (t.start_lesson_name && utStatus.completedUnitTestKeys.has(normalizeUnitName(t.start_lesson_name))) ||
+                  (t.custom_unit_name && utStatus.completedUnitTestKeys.has(normalizeUnitName(t.custom_unit_name))) ||
+                  (t.start_lesson_id && freshSt.completed_lesson_ids?.includes(t.start_lesson_id)) ||
+                  (t.start_lesson_name && freshSt.completed_lesson_ids?.some(cid => isMatchingUnitOrTest(cid, t.start_lesson_name)))
+                );
+
+                if ((utStatus.hasFailedUnitTest && utStatus.failedUnitTest && !isTaskUnitTest) || isTaskPassedUnitTest) {
                   const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
                   const correctedRange = calculateLessonRangeForSlot({
                     subject: sub,
@@ -4516,14 +4736,14 @@ export default function TeacherDashboard({
               className={`${styles.menuItem} ${activeTab === 'two-way-interview' ? styles.menuItemActive : ''}`}
               onClick={() => setActiveTab('two-way-interview')}
             >
-              💬 二者面談
+              二者面談
             </button>
             <button
               data-testid="menu-three-way-interview"
               className={`${styles.menuItem} ${activeTab === 'three-way-interview' ? styles.menuItemActive : ''}`}
               onClick={() => setActiveTab('three-way-interview')}
             >
-              👨‍👩‍👦 三者面談
+              三者面談
             </button>
           </div>
 
@@ -7497,6 +7717,83 @@ export default function TeacherDashboard({
                           </div>
                         </div>
 
+                        {/* 🎙️ 音声録音＆議事録AI自動入力パネル */}
+                        <div style={{ background: '#f0fdf4', padding: '14px 16px', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#166534' }}>
+                                🎙️ 面談音声の録音＆議事録自動入力
+                              </span>
+                              {isRecording2 && (
+                                <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.72rem', padding: '2px 8px', borderRadius: '999px', fontWeight: 700 }}>
+                                  ● 録音中
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                type="button"
+                                data-testid="interview2-record-btn"
+                                onClick={handleToggleRecording2}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: isRecording2 ? '#dc2626' : '#16a34a',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                {isRecording2 ? <MicOff size={14} /> : <Mic size={14} />}
+                                {isRecording2 ? '⏹️ 録音を停止' : '🎙️ 音声録音を開始'}
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="interview2-parse-transcript-btn"
+                                onClick={handleParseTranscript2}
+                                disabled={isParsingTranscript2 || !transcript2}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: isParsingTranscript2 || !transcript2 ? '#cbd5e1' : '#059669',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: isParsingTranscript2 || !transcript2 ? 'not-allowed' : 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Sparkles size={14} />
+                                {isParsingTranscript2 ? '⏳ 解析・入力中...' : '✨ 議事録から各項目へ自動入力'}
+                              </button>
+                            </div>
+                          </div>
+                          <textarea
+                            data-testid="interview2-transcript"
+                            value={transcript2}
+                            onChange={e => setTranscript2(e.target.value)}
+                            placeholder="音声認識で文字起こしされたテキストがここに表示されます。既存のメモや議事録テキストを直接貼り付けて「✨ 議事録から各項目へ自動入力」を押すこともできます。"
+                            rows={3}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #86efac',
+                              fontSize: '0.82rem',
+                              background: '#ffffff',
+                              lineHeight: 1.5
+                            }}
+                          />
+                        </div>
+
                         {/* 基本項目グリッド */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                           <div>
@@ -7719,6 +8016,7 @@ export default function TeacherDashboard({
                                   />
                                   <button
                                     type="button"
+                                    data-testid={`interview2-remove-custom-field-${idx}`}
                                     onClick={() => handleRemoveCustomField2(f.id)}
                                     style={{
                                       padding: '6px 8px',
@@ -7739,55 +8037,134 @@ export default function TeacherDashboard({
                         </div>
                       </div>
 
-                      {/* AI コーチング・カウンセリングまとめセクション */}
-                      <div style={{ background: '#fdf4ff', padding: '20px', borderRadius: '10px', border: '1px solid #f0abfc', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {/* 面談の要約（生徒・保護者・講師 3者共有用）セクション */}
+                      <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
-                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#86198f' }}>
-                              🤖 AIコーチング・声かけアドバイス生成
+                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#1e293b' }}>
+                              📋 面談の要約（生徒・保護者・講師 3者共有用）
                             </h4>
-                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#a21caf' }}>
-                              入力された面談内容をもとに、心理カウンセリング視点での今後の接し方や具体的な声かけフレーズをAIがまとめます。
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                              二者面談で話した内容を生徒・保護者・講師の3者で共有しやすい形にまとめます。1枚の画像として出力してご家庭と共有も可能です。
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            data-testid="interview2-generate-ai-btn"
-                            onClick={handleGenerateAdvice2}
-                            disabled={isGeneratingAdvice2}
-                            style={{
-                              padding: '8px 16px',
-                              background: isGeneratingAdvice2 ? '#d8b4fe' : 'linear-gradient(135deg, #a855f7, #9333ea)',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '0.85rem',
-                              cursor: isGeneratingAdvice2 ? 'not-allowed' : 'pointer',
-                              fontWeight: 700,
-                              boxShadow: '0 2px 4px rgba(147, 51, 234, 0.2)'
-                            }}
-                          >
-                            {isGeneratingAdvice2 ? '⏳ 生成中...' : '✨ アドバイスを自動生成'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              data-testid="interview2-generate-ai-btn"
+                              onClick={handleGenerateAdvice2}
+                              disabled={isGeneratingAdvice2}
+                              style={{
+                                padding: '8px 14px',
+                                background: isGeneratingAdvice2 ? '#93c5fd' : 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: isGeneratingAdvice2 ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                              }}
+                            >
+                              <Sparkles size={15} />
+                              {isGeneratingAdvice2 ? '⏳ 要約生成中...' : '✨ 面談の要約を生成'}
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="interview2-download-image-btn"
+                              onClick={handleDownloadSummaryImage2}
+                              disabled={!aiCoachingAdvice2}
+                              style={{
+                                padding: '8px 14px',
+                                background: !aiCoachingAdvice2 ? '#cbd5e1' : 'linear-gradient(135deg, #10b981, #059669)',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: !aiCoachingAdvice2 ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)'
+                              }}
+                            >
+                              <Download size={15} />
+                              🖼️ 面談シート画像を出力
+                            </button>
+                          </div>
                         </div>
 
                         <textarea
                           data-testid="interview2-ai-advice"
                           value={aiCoachingAdvice2}
                           onChange={e => setAiCoachingAdvice2(e.target.value)}
-                          placeholder="「✨ アドバイスを自動生成」ボタンを押すと、生徒の心理状況分析、今後の指導方針、具体的な声かけ例（授業前後・宿題確認時）が自動で構築されます。講師による追記・修正も可能です。"
-                          rows={10}
+                          placeholder="「✨ 面談の要約を生成」ボタンを押すと、生徒・保護者・講師で共有できるわかりやすい面談要約（目標、強み、課題、3者の約束・アクションプラン）が自動構築されます。講師による追記・修正も可能です。"
+                          rows={9}
                           style={{
                             width: '100%',
                             padding: '12px',
                             borderRadius: '8px',
-                            border: '1px solid #e879f9',
+                            border: '1px solid #94a3b8',
                             background: '#ffffff',
                             fontSize: '0.85rem',
                             lineHeight: 1.6,
                             fontFamily: 'inherit'
                           }}
                         />
+
+                        {/* 1枚の画像化用プレビューカード要素 */}
+                        <div style={{ marginTop: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569' }}>
+                            👀 共有用画像プレビュー（出力時にこのカードが1枚の高画質画像になります）:
+                          </span>
+                          <div
+                            ref={interviewSummaryCardRef2}
+                            data-testid="interview2-summary-card-preview"
+                            style={{
+                              marginTop: '8px',
+                              background: '#ffffff',
+                              border: '2px solid #3b82f6',
+                              borderRadius: '12px',
+                              padding: '24px',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                              maxWidth: '750px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #3b82f6', paddingBottom: '12px', marginBottom: '16px' }}>
+                              <div>
+                                <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e3a8a', fontWeight: 800 }}>
+                                  【二者面談 共有シート】
+                                </h2>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                                  個別指導・学習伴走プラン（生徒 × 講師）
+                                </p>
+                              </div>
+                              <div style={{ textAlign: 'right', fontSize: '0.85rem', color: '#334155' }}>
+                                <div><strong>生徒名:</strong> {selectedStudent?.name || '生徒'} ({selectedStudent?.grade || ''})</div>
+                                <div><strong>面談日:</strong> {interviewDate2} / <strong>担当:</strong> {interviewer2 || '担当講師'}</div>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', background: '#f1f5f9', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                              <div>🎯 <strong>志望校:</strong> {targetSchool2 || '未定'}</div>
+                              <div>✨ <strong>将来の夢:</strong> {dreamGoal2 || '目標に向かって邁進'}</div>
+                              <div>🏃 <strong>部活動:</strong> {clubActivity2 || 'なし'}</div>
+                              <div>📊 <strong>目標点:</strong> {targetScore2 || '設定中'}</div>
+                            </div>
+
+                            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.85rem', lineHeight: 1.7, color: '#1e293b', whiteSpace: 'pre-wrap' }}>
+                              {aiCoachingAdvice2 || '「✨ 面談の要約を生成」ボタンを押すと、生徒・保護者・講師で共有できる要約がここにレイアウトされます。'}
+                            </div>
+
+                            <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                              進学個別指導塾 学習管理システム
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -7933,6 +8310,83 @@ export default function TeacherDashboard({
                               💾 面談を保存
                             </button>
                           </div>
+                        </div>
+
+                        {/* 🎙️ 音声録音＆議事録AI自動入力パネル */}
+                        <div style={{ background: '#f0fdfa', padding: '14px 16px', borderRadius: '8px', border: '1px solid #99f6e4', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f766e' }}>
+                                🎙️ 面談音声の録音＆議事録自動入力
+                              </span>
+                              {isRecording3 && (
+                                <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.72rem', padding: '2px 8px', borderRadius: '999px', fontWeight: 700 }}>
+                                  ● 録音中
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                type="button"
+                                data-testid="interview3-record-btn"
+                                onClick={handleToggleRecording3}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: isRecording3 ? '#dc2626' : '#0d9488',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                {isRecording3 ? <MicOff size={14} /> : <Mic size={14} />}
+                                {isRecording3 ? '⏹️ 録音を停止' : '🎙️ 音声録音を開始'}
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="interview3-parse-transcript-btn"
+                                onClick={handleParseTranscript3}
+                                disabled={isParsingTranscript3 || !transcript3}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: isParsingTranscript3 || !transcript3 ? '#cbd5e1' : '#0f766e',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: isParsingTranscript3 || !transcript3 ? 'not-allowed' : 'pointer',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Sparkles size={14} />
+                                {isParsingTranscript3 ? '⏳ 解析・入力中...' : '✨ 議事録から各項目へ自動入力'}
+                              </button>
+                            </div>
+                          </div>
+                          <textarea
+                            data-testid="interview3-transcript"
+                            value={transcript3}
+                            onChange={e => setTranscript3(e.target.value)}
+                            placeholder="音声認識で文字起こしされたテキストがここに表示されます。既存のメモや議事録テキストを直接貼り付けて「✨ 議事録から各項目へ自動入力」を押すこともできます。"
+                            rows={3}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #5eead4',
+                              fontSize: '0.82rem',
+                              background: '#ffffff',
+                              lineHeight: 1.5
+                            }}
+                          />
                         </div>
 
                         {/* 基本項目グリッド */}
@@ -8088,6 +8542,7 @@ export default function TeacherDashboard({
                                   />
                                   <button
                                     type="button"
+                                    data-testid={`interview3-remove-custom-field-${idx}`}
                                     onClick={() => handleRemoveCustomField3(f.id)}
                                     style={{
                                       padding: '6px 8px',
@@ -8108,44 +8563,73 @@ export default function TeacherDashboard({
                         </div>
                       </div>
 
-                      {/* AI コーチング・家庭連携まとめセクション */}
-                      <div style={{ background: '#f0fdfa', padding: '20px', borderRadius: '10px', border: '1px solid #99f6e4', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {/* 面談の要約（生徒・保護者・講師 3者共有用）セクション */}
+                      <div style={{ background: '#f0fdfa', padding: '20px', borderRadius: '10px', border: '1px solid #99f6e4', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
                             <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#115e59' }}>
-                              🤖 AIコーチング・家庭連携アドバイス生成
+                              📋 面談の要約（生徒・保護者・講師 3者共有用）
                             </h4>
                             <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#0f766e' }}>
-                              面談内容を分析し、保護者の不安解消、家庭での安心基地づくり、塾と家庭の連携アクションプランをAIがまとめます。
+                              三者面談で話した内容を生徒・保護者・講師の3者で共有しやすい形にまとめます。1枚の画像として出力してご家庭と共有も可能です。
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            data-testid="interview3-generate-ai-btn"
-                            onClick={handleGenerateAdvice3}
-                            disabled={isGeneratingAdvice3}
-                            style={{
-                              padding: '8px 16px',
-                              background: isGeneratingAdvice3 ? '#99f6e4' : 'linear-gradient(135deg, #0d9488, #0f766e)',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '0.85rem',
-                              cursor: isGeneratingAdvice3 ? 'not-allowed' : 'pointer',
-                              fontWeight: 700,
-                              boxShadow: '0 2px 4px rgba(13, 148, 136, 0.2)'
-                            }}
-                          >
-                            {isGeneratingAdvice3 ? '⏳ 生成中...' : '✨ アドバイスを自動生成'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              data-testid="interview3-generate-ai-btn"
+                              onClick={handleGenerateAdvice3}
+                              disabled={isGeneratingAdvice3}
+                              style={{
+                                padding: '8px 14px',
+                                background: isGeneratingAdvice3 ? '#99f6e4' : 'linear-gradient(135deg, #0d9488, #0f766e)',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: isGeneratingAdvice3 ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                boxShadow: '0 2px 4px rgba(13, 148, 136, 0.2)'
+                              }}
+                            >
+                              <Sparkles size={15} />
+                              {isGeneratingAdvice3 ? '⏳ 要約生成中...' : '✨ 面談の要約を生成'}
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="interview3-download-image-btn"
+                              onClick={handleDownloadSummaryImage3}
+                              disabled={!aiCoachingAdvice3}
+                              style={{
+                                padding: '8px 14px',
+                                background: !aiCoachingAdvice3 ? '#cbd5e1' : 'linear-gradient(135deg, #10b981, #059669)',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: !aiCoachingAdvice3 ? 'not-allowed' : 'pointer',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)'
+                              }}
+                            >
+                              <Download size={15} />
+                              🖼️ 面談シート画像を出力
+                            </button>
+                          </div>
                         </div>
 
                         <textarea
                           data-testid="interview3-ai-advice"
                           value={aiCoachingAdvice3}
                           onChange={e => setAiCoachingAdvice3(e.target.value)}
-                          placeholder="「✨ アドバイスを自動生成」ボタンを押すと、三者面談の総括、塾・家庭での役割分担、生徒・保護者へのアプローチ指針、次回フォローへのアクションプランが自動で構築されます。講師による追記・修正も可能です。"
-                          rows={10}
+                          placeholder="「✨ 面談の要約を生成」ボタンを押すと、三者面談の総括、話し合いのハイライト、3者の約束（生徒自身、ご家庭の見守り、塾の指導方針）が自動構築されます。講師による追記・修正も可能です。"
+                          rows={9}
                           style={{
                             width: '100%',
                             padding: '12px',
@@ -8157,6 +8641,56 @@ export default function TeacherDashboard({
                             fontFamily: 'inherit'
                           }}
                         />
+
+                        {/* 1枚の画像化用プレビューカード要素 */}
+                        <div style={{ marginTop: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#115e59' }}>
+                            👀 共有用画像プレビュー（出力時にこのカードが1枚の高画質画像になります）:
+                          </span>
+                          <div
+                            ref={interviewSummaryCardRef3}
+                            data-testid="interview3-summary-card-preview"
+                            style={{
+                              marginTop: '8px',
+                              background: '#ffffff',
+                              border: '2px solid #0d9488',
+                              borderRadius: '12px',
+                              padding: '24px',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                              maxWidth: '750px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0d9488', paddingBottom: '12px', marginBottom: '16px' }}>
+                              <div>
+                                <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#115e59', fontWeight: 800 }}>
+                                  【三者面談 共有シート】
+                                </h2>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                                  三者連携・学習サポート方針（生徒 × 保護者 × 講師）
+                                </p>
+                              </div>
+                              <div style={{ textAlign: 'right', fontSize: '0.85rem', color: '#334155' }}>
+                                <div><strong>生徒名:</strong> {selectedStudent?.name || '生徒'} ({selectedStudent?.grade || ''})</div>
+                                <div><strong>同席:</strong> {parentType3 === 'mother' ? 'お母様' : parentType3 === 'father' ? 'お父様' : parentType3 === 'both' ? 'ご両親' : parentType3}</div>
+                                <div><strong>面談日:</strong> {interviewDate3} / <strong>担当:</strong> {interviewer3 || '担当講師'}</div>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', background: '#f0fdfa', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                              <div>🤝 <strong>共有テーマ:</strong> {discussedContent3 || '志望校・学習方針'}</div>
+                              <div>💭 <strong>保護者様のご不安:</strong> {parentAnxieties3 || '特になし'}</div>
+                              <div>🧭 <strong>方向性の合意:</strong> {futureDirectionAgreed3 === 'yes' ? '合意形成済み' : '継続検討'}</div>
+                            </div>
+
+                            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.85rem', lineHeight: 1.7, color: '#1e293b', whiteSpace: 'pre-wrap' }}>
+                              {aiCoachingAdvice3 || '「✨ 面談の要約を生成」ボタンを押すと、生徒・保護者・講師で共有できる要約がここにレイアウトされます。'}
+                            </div>
+
+                            <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                              進学個別指導塾 学習管理システム
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
