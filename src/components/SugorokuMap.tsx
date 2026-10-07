@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styles from './SugorokuMap.module.css';
-import { db, CurriculumUnit, LearningTask, CurriculumMaster, Student } from '../lib/db';
+import { db, CurriculumUnit, LearningTask, CurriculumMaster, Student, MiniTestResult } from '../lib/db';
+import { getLatestUnitTestStatusForSubject, normalizeUnitName } from '../lib/scheduler';
 
 export interface SugorokuMapProps {
   subject?: string;
@@ -9,6 +10,7 @@ export interface SugorokuMapProps {
   units?: CurriculumUnit[];
   tasks?: LearningTask[];
   todayTasks?: LearningTask[];
+  miniTestResults?: MiniTestResult[];
   theme?: 'light' | 'dark';
   onSelectSubject?: (sub: string) => void;
 }
@@ -20,6 +22,7 @@ export default function SugorokuMap({
   units = [],
   tasks = [],
   todayTasks = [],
+  miniTestResults,
   theme = 'light',
   onSelectSubject
 }: SugorokuMapProps) {
@@ -86,6 +89,92 @@ export default function SugorokuMap({
         fullTitle: u.name,
         sortOrder: u.sequence_order || 0
       }));
+
+  // 単元テストの最新合否状況を取得
+  const unitTestStatus = getLatestUnitTestStatusForSubject({
+    studentId: student?.id || '',
+    subject: activeSubject,
+    miniTestResults: miniTestResults || (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults())
+  });
+
+  const isMatchingTest = (a?: string | null, b?: string | null): boolean => {
+    if (!a || !b) return false;
+    const clean = (s: string) => s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
+    const an = clean(a);
+    const bn = clean(b);
+    return an === bn || an.includes(bn) || bn.includes(an);
+  };
+
+  const isUnitTestNode = (node: { id: string; name: string; fullTitle?: string }) => {
+    const master = currentSubjectMasters.find(m => m.id === node.id || String(m.id) === String(node.id));
+    if (master && master.item_type === 'unit_test') return true;
+    const name = node.name || '';
+    const title = node.fullTitle || '';
+    const isReviewOrCheck = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
+    if (isReviewOrCheck) return false;
+    return name.includes('単元確認テスト') || name.includes('単元テスト') || title.includes('単元確認テスト') || title.includes('単元テスト');
+  };
+
+  // 不合格となった単元テストノードの特定
+  let failedUnitTestNodeIndex = -1;
+  if (unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest) {
+    const fTest = unitTestStatus.failedUnitTest;
+    failedUnitTestNodeIndex = nodes.findIndex(n => {
+      if (!isUnitTestNode(n)) return false;
+      return isMatchingTest(n.name, fTest.unit_name) ||
+             isMatchingTest(n.name, fTest.test_content) ||
+             isMatchingTest(n.fullTitle, fTest.unit_name) ||
+             isMatchingTest(n.fullTitle, fTest.test_content);
+    });
+  }
+
+  const checkNodeCompleted = (node: typeof nodes[0], index: number, task?: LearningTask): boolean => {
+    // 不合格単元テストがある場合、その不合格単元テストノード以降は絶対に完了（クリア）にしない！
+    if (failedUnitTestNodeIndex >= 0 && index >= failedUnitTestNodeIndex) {
+      return false;
+    }
+
+    const isTest = isUnitTestNode(node);
+    if (isTest) {
+      // 単元テストノードの場合:
+      // 不合格記録がある場合は絶対に未完了
+      const hasFailedRecord = Boolean(
+        unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest && (
+          isMatchingTest(node.name, unitTestStatus.failedUnitTest.unit_name) ||
+          isMatchingTest(node.name, unitTestStatus.failedUnitTest.test_content) ||
+          isMatchingTest(node.fullTitle, unitTestStatus.failedUnitTest.unit_name) ||
+          isMatchingTest(node.fullTitle, unitTestStatus.failedUnitTest.test_content)
+        )
+      );
+      if (hasFailedRecord) return false;
+
+      // 合格判定: completedUnitTestKeys または task.test_passed === true
+      const nNorm = normalizeUnitName(node.name);
+      const tNorm = normalizeUnitName(node.fullTitle);
+      const isPassedByKey = Boolean(
+        unitTestStatus.completedUnitTestKeys.has(node.id) ||
+        unitTestStatus.completedUnitTestKeys.has(String(node.id)) ||
+        unitTestStatus.completedUnitTestKeys.has(node.name) ||
+        (nNorm && unitTestStatus.completedUnitTestKeys.has(nNorm)) ||
+        (tNorm && unitTestStatus.completedUnitTestKeys.has(tNorm))
+      );
+      const isPassedByTask = Boolean(task && task.test_passed === true && task.status === 'completed');
+      return isPassedByKey || isPassedByTask;
+    }
+
+    // 通常授業ノードの場合:
+    return Boolean(student?.completed_lesson_ids && (
+      student.completed_lesson_ids.includes(node.id) || 
+      student.completed_lesson_ids.includes(String(node.id)) ||
+      student.completed_lesson_ids.map(String).includes(String(node.id))
+    )) ||
+    tasks.some(t => t.completed_lesson_ids && (
+      t.completed_lesson_ids.includes(node.id) || 
+      t.completed_lesson_ids.includes(String(node.id)) ||
+      t.completed_lesson_ids.map(String).includes(String(node.id))
+    )) ||
+    Boolean(task && (task.unit_id === node.id || task.start_lesson_id === node.id || String(task.unit_id) === String(node.id) || String(task.start_lesson_id) === String(node.id)) && (task.status === 'completed' || task.test_passed === true));
+  };
 
   // 学生のタスクをマッピング (キー: unit_id / start_lesson_id)
   const taskMap = new Map<string, LearningTask>();
@@ -165,48 +254,44 @@ export default function SugorokuMap({
   let playerNodeId: string | null = null;
   let playerSubStep: 'video' | 'test' | null = null;
 
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    const task = taskMap.get(node.id) || tasks.find(t => 
-      (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
-      (t.unit_id === node.id || t.start_lesson_id === node.id || t.end_lesson_id === node.id ||
-       String(t.unit_id) === String(node.id) || String(t.start_lesson_id) === String(node.id) || String(t.end_lesson_id) === String(node.id) ||
-       t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
-    );
-    
-    const isNodeCompleted = 
-      Boolean(student?.completed_lesson_ids && (
-        student.completed_lesson_ids.includes(node.id) || 
-        student.completed_lesson_ids.includes(String(node.id)) ||
-        student.completed_lesson_ids.map(String).includes(String(node.id))
-      )) ||
-      tasks.some(t => t.completed_lesson_ids && (
-        t.completed_lesson_ids.includes(node.id) || 
-        t.completed_lesson_ids.includes(String(node.id)) ||
-        t.completed_lesson_ids.map(String).includes(String(node.id))
-      )) ||
-      (task && (task.unit_id === node.id || task.start_lesson_id === node.id || String(task.unit_id) === String(node.id) || String(task.start_lesson_id) === String(node.id)) && (task.status === 'completed' || task.test_passed === true));
+  // 1. 不合格の単元テストがある場合、その不合格単元テストノード（再テスト）を現在地とする！
+  if (failedUnitTestNodeIndex >= 0 && nodes[failedUnitTestNodeIndex]) {
+    playerNodeId = nodes[failedUnitTestNodeIndex].id;
+    playerSubStep = 'test';
+  } else {
+    // 2. 未完了の先頭ノードを現在地とする
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const task = taskMap.get(node.id) || tasks.find(t => 
+        (t.subject === activeSubject || (!t.subject && activeSubject === '数学')) && 
+        (t.unit_id === node.id || t.start_lesson_id === node.id || t.end_lesson_id === node.id ||
+         String(t.unit_id) === String(node.id) || String(t.start_lesson_id) === String(node.id) || String(t.end_lesson_id) === String(node.id) ||
+         t.custom_unit_name?.includes(node.name) || t.lesson_range?.includes(node.name) || t.start_lesson_name === node.name || t.end_lesson_name === node.name)
+      );
+      
+      const isNodeCompleted = checkNodeCompleted(node, i, task);
 
-    if (isNodeCompleted || task?.status === 'skipped') {
-      continue;
-    }
+      if (isNodeCompleted || task?.status === 'skipped') {
+        continue;
+      }
 
-    if (!task) {
-      playerNodeId = node.id;
-      playerSubStep = 'video';
-      break;
-    }
+      if (!task) {
+        playerNodeId = node.id;
+        playerSubStep = isUnitTestNode(node) ? 'test' : 'video';
+        break;
+      }
 
-    if (!task.video_watched && task.status !== 'completed') {
-      playerNodeId = node.id;
-      playerSubStep = 'video';
-      break;
-    }
+      if (!task.video_watched && task.status !== 'completed') {
+        playerNodeId = node.id;
+        playerSubStep = 'video';
+        break;
+      }
 
-    if (!task.test_passed && task.status !== 'completed') {
-      playerNodeId = node.id;
-      playerSubStep = 'test';
-      break;
+      if (!task.test_passed && task.status !== 'completed') {
+        playerNodeId = node.id;
+        playerSubStep = 'test';
+        break;
+      }
     }
   }
 
@@ -384,18 +469,7 @@ export default function SugorokuMap({
             );
 
             const isSkipped = task?.status === 'skipped';
-            const isCompleted = 
-              Boolean(student?.completed_lesson_ids && (
-                student.completed_lesson_ids.includes(node.id) || 
-                student.completed_lesson_ids.includes(String(node.id)) ||
-                student.completed_lesson_ids.map(String).includes(String(node.id))
-              )) ||
-              tasks.some(t => t.completed_lesson_ids && (
-                t.completed_lesson_ids.includes(node.id) || 
-                t.completed_lesson_ids.includes(String(node.id)) ||
-                t.completed_lesson_ids.map(String).includes(String(node.id))
-              )) ||
-              (task && (task.unit_id === node.id || task.start_lesson_id === node.id || String(task.unit_id) === String(node.id) || String(task.start_lesson_id) === String(node.id)) && (task.status === 'completed' || task.test_passed === true));
+            const isCompleted = checkNodeCompleted(node, index, task);
             const isVideoWatched = task?.video_watched || isCompleted;
             const isTestPassed = task?.test_passed || isCompleted;
 

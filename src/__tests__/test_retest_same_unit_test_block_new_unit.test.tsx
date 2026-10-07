@@ -232,4 +232,158 @@ describe('単元テスト不合格時の次回授業再テスト割り当て & �
 
     unmount();
   });
+
+  it('5. 講師画面で10/16が再テストのとき、生徒の学習画面（StudentDashboard）でコマ1のステップが通常授業（STEP 1〜6）にならず「単元確認テスト」1ステップのみとなること', async () => {
+    const processedMasters = ensureMathEnglishUnitTests(sampleMasters);
+    await db.saveCurriculumMasters(processedMasters);
+
+    const unitTestItem = processedMasters.find(m => m.unit_name === '3つの かずの けいさん' && m.item_type === 'unit_test')!;
+
+    const studentKenshin: Student = {
+      id: 'std-kenshin-sync-1',
+      student_id: 'std-kenshin-sync-1',
+      name: '中尾謙信',
+      grade: '小1',
+      level: 'B',
+      selected_subjects: ['算数'],
+      completed_lesson_ids: ['cm-m-1-1', 'cm-m-1-2']
+    };
+    await db.saveStudent(studentKenshin);
+
+    // 10/13 不合格
+    const failedMiniTest: MiniTestResult = {
+      id: 'mini-kenshin-fail-sync',
+      student_id: studentKenshin.id,
+      date: '2026-10-13',
+      subject: '算数',
+      test_type: 'unit_test',
+      unit_name: '3つの　かずの　けいさん',
+      test_content: '3つの　かずの　けいさん - 単元確認テスト',
+      score: 70,
+      passed: false,
+      status: 'failed',
+      passing_line: '80%以上',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(failedMiniTest);
+
+    // 10/16 講師画面で設定されたコマ1のタスク
+    const taskOnOct16: LearningTask = {
+      id: 'task-sync-oct16-1',
+      student_id: studentKenshin.id,
+      unit_id: unitTestItem.id,
+      scheduled_date: '2026-10-16',
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      start_lesson_id: unitTestItem.id,
+      end_lesson_id: unitTestItem.id,
+      start_lesson_name: '【再テスト対策・総復習】3つの　かずの　けいさん',
+      end_lesson_name: '【再テスト対策・総復習】3つの　かずの　けいさん',
+      lesson_range: '【弱点補強】算数: 3つの かずの けいさん 総復習＆再テスト対策',
+      completed_lesson_ids: []
+    };
+    await db.saveLearningTasks([taskOnOct16]);
+
+    const { unmount } = render(
+      <StudentDashboard
+        student={studentKenshin}
+        initialDate="2026-10-16"
+        onBackToPortal={vi.fn()}
+      />
+    );
+
+    // コマ1に「【弱点補強】算数: 3つの かずの けいさん 総復習＆再テスト対策」が表示されること
+    await waitFor(() => {
+      expect(screen.getByText(/【弱点補強】算数: 3つの かずの けいさん 総復習＆再テスト対策/)).toBeInTheDocument();
+    });
+
+    // 1ステップのみ（通常授業 6ステップになっていないこと）
+    expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 1 完了');
+    expect(screen.getByTestId('step-card-1-0')).toHaveTextContent(/STEP 1:/);
+    expect(screen.getByTestId('step-card-1-0')).toHaveTextContent(/単元確認テスト/);
+    expect(screen.getByTestId('step-card-1-0')).not.toHaveTextContent(/3つの数の計算の順序/);
+    expect(screen.queryByTestId('step-card-1-1')).not.toBeInTheDocument();
+
+    unmount();
+  });
+
+  it('6. SugorokuMap: 単元テスト不合格時、単元テストノードに王冠（👑）がつかず現在地（🌟）にとどまり、新単元（くりあがりのあるたしざん）に進まないこと', async () => {
+    const processedMasters = ensureMathEnglishUnitTests(sampleMasters);
+    await db.saveCurriculumMasters(processedMasters);
+
+    const unitTestItem = processedMasters.find(m => m.unit_name === '3つの かずの けいさん' && m.item_type === 'unit_test')!;
+
+    const studentKenshin: Student = {
+      id: 'std-kenshin-sugoroku-1',
+      student_id: 'std-kenshin-sugoroku-1',
+      name: '中尾謙信',
+      grade: '小1',
+      level: 'B',
+      selected_subjects: ['算数'],
+      completed_lesson_ids: ['cm-m-1-1', 'cm-m-1-2']
+    };
+    await db.saveStudent(studentKenshin);
+
+    // 不合格テスト
+    const failedMiniTest: MiniTestResult = {
+      id: 'mini-kenshin-fail-map',
+      student_id: studentKenshin.id,
+      date: '2026-10-13',
+      subject: '算数',
+      test_type: 'unit_test',
+      unit_name: '3つの　かずの　けいさん',
+      test_content: '3つの　かずの　けいさん - 単元確認テスト',
+      score: 70,
+      passed: false,
+      status: 'failed',
+      passing_line: '80%以上',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(failedMiniTest);
+
+    const taskOnOct16: LearningTask = {
+      id: 'task-map-today-1',
+      student_id: studentKenshin.id,
+      unit_id: unitTestItem.id,
+      scheduled_date: '2026-10-16',
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      start_lesson_id: unitTestItem.id,
+      end_lesson_id: unitTestItem.id,
+      start_lesson_name: '【再テスト対策・総復習】3つの　かずの　けいさん',
+      end_lesson_name: '【再テスト対策・総復習】3つの　かずの　けいさん',
+      lesson_range: '【弱点補強】算数: 3つの かずの けいさん 総復習＆再テスト対策',
+      completed_lesson_ids: []
+    };
+    await db.saveLearningTasks([taskOnOct16]);
+
+    const { unmount } = render(
+      <StudentDashboard
+        student={studentKenshin}
+        initialDate="2026-10-16"
+        onBackToPortal={vi.fn()}
+      />
+    );
+
+    // SugorokuMap で算数マップが表示されていること
+    await waitFor(() => {
+      expect(screen.getByText(/算数の学習マップ/)).toBeInTheDocument();
+    });
+
+    // マップ内に単元確認テストのノードが存在し、アクティブラベル（現在地🌟）が付いていること
+    const testLabels = screen.getAllByText(/単元確認テスト/);
+    expect(testLabels.length).toBeGreaterThan(0);
+
+    // 単元確認テストのノードがアクティブ（現在地）になっていること
+    const activeUnitNode = document.querySelector('._activeLabel_db8afd, [class*="activeLabel"], [class*="circleActive"]');
+    expect(activeUnitNode).toBeInTheDocument();
+
+    unmount();
+  });
 });

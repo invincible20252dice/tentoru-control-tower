@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
 import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig, StudentLessonProgress } from '../lib/db';
-import { ensureMathEnglishUnitTests, normalizeGrade } from '../lib/scheduler';
+import { ensureMathEnglishUnitTests, normalizeGrade, getLatestUnitTestStatusForSubject, normalizeUnitName } from '../lib/scheduler';
 import SugorokuMap from './SugorokuMap';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
 
@@ -37,12 +37,44 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   const sanitizeCompletedLessonIds = (ids?: any[]): string[] => {
     if (!Array.isArray(ids)) return [];
+    const masters = typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : [];
+    const results = typeof db.getMiniTestResults === 'function' ? db.getMiniTestResults() : [];
+    
+    // 不合格の単元テストを特定
+    const failedUnitKeys = new Set<string>();
+    results
+      .filter(r => r.student_id === student.id && (r.passed === false || r.status === 'failed'))
+      .forEach(r => {
+        const uNorm = normalizeUnitName(r.unit_name || r.test_content);
+        if (uNorm) failedUnitKeys.add(uNorm);
+        if (r.unit_name) failedUnitKeys.add(r.unit_name);
+        if (r.test_content) failedUnitKeys.add(r.test_content);
+      });
+
+    // 不合格の単元テストマスターID
+    const failedMasterIds = new Set<string>();
+    masters.forEach(m => {
+      const isUnitTest = m.item_type === 'unit_test' || (m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト');
+      if (isUnitTest) {
+        const mNorm = normalizeUnitName(m.unit_name || m.lesson_name);
+        if (
+          failedUnitKeys.has(m.id) ||
+          (mNorm && failedUnitKeys.has(mNorm)) ||
+          (m.unit_name && failedUnitKeys.has(m.unit_name)) ||
+          (m.lesson_name && failedUnitKeys.has(m.lesson_name))
+        ) {
+          failedMasterIds.add(m.id);
+          failedMasterIds.add(String(m.id));
+        }
+      }
+    });
+
     return Array.from(new Set(
       ids
         .filter(Boolean)
         .map(String)
         .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.includes('単元確認テスト'))
+        .filter(s => s.length > 0 && !s.includes('単元確認テスト') && !failedMasterIds.has(s))
     ));
   };
 
@@ -326,9 +358,23 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       }
     }
 
+    const isUnitTestLike = (str?: string | null) => {
+      if (!str) return false;
+      return str.includes('単元確認テスト') || 
+             str.includes('単元テスト') || 
+             str.includes('確認テスト') || 
+             str.includes('再テスト') || 
+             str.includes('総復習') || 
+             str.includes('弱点補強') || 
+             str.includes('やり直し');
+    };
+
     const isPureUnitTestTask = Boolean(
-      (task.start_lesson_name && task.start_lesson_name.includes('単元確認テスト')) ||
-      (task.lesson_range && task.lesson_range.includes('単元確認テスト') && !task.lesson_range.includes('〜'))
+      isUnitTestLike(task.start_lesson_name) ||
+      isUnitTestLike(task.end_lesson_name) ||
+      (task.lesson_range && isUnitTestLike(task.lesson_range) && !task.lesson_range.includes('〜')) ||
+      (task.lesson_range && (task.lesson_range.includes('再テスト') || task.lesson_range.includes('弱点補強') || task.lesson_range.includes('総復習') || task.lesson_range.includes('やり直し'))) ||
+      (task.custom_unit_name && isUnitTestLike(task.custom_unit_name))
     );
 
     const findIndexInList = (
@@ -409,10 +455,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             m.lesson_name.includes('単元テスト') || 
             m.lesson_name.includes('確認テスト')
           );
+          const isRetestTask = Boolean(
+            (task.start_lesson_name && task.start_lesson_name.includes('再テスト')) ||
+            (task.lesson_range && task.lesson_range.includes('再テスト')) ||
+            (task.custom_unit_name && task.custom_unit_name.includes('再テスト'))
+          );
           const cleanLessonName = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
-          const displayLessonName = isUnitTest 
+          let displayLessonName = isUnitTest 
             ? (cleanLessonName.includes('単元確認テスト') || cleanLessonName.includes('単元テスト') ? cleanLessonName : `${cleanLessonName} (単元テスト)`)
             : cleanLessonName;
+          if (isUnitTest && isRetestTask && !displayLessonName.includes('再テスト')) {
+            displayLessonName = `${displayLessonName} (再テスト)`;
+          }
           return {
             id: m.id,
             sort_order: m.sort_order,
@@ -431,6 +485,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         if (startIdx >= 0 && endIdx >= 0) {
           const startItem = masterLessons[startIdx];
           const endItem = masterLessons[endIdx];
+          const isTargetUnitTest = isPureUnitTestTask || Boolean(startItem.isUnitTest) || Boolean(endItem.isUnitTest);
 
           // 同一単元内の場合は、その単元のみに絞り込んでからスライス（他単元の重複sort_order混入を完全遮断）
           if (startItem.unit_name && endItem.unit_name && startItem.unit_name === endItem.unit_name) {
@@ -441,7 +496,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
               const minI = Math.min(sIdx, eIdx);
               const maxI = Math.max(sIdx, eIdx);
               const sliced = sameUnitLessons.slice(minI, maxI + 1);
-              if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+              if (!isTargetUnitTest && sliced.every(item => item.isUnitTest)) {
                 const lessonItemsOnly = sameUnitLessons.filter(item => !item.isUnitTest);
                 if (lessonItemsOnly.length > 0) return lessonItemsOnly;
               }
@@ -452,7 +507,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           const minI = Math.min(startIdx, endIdx);
           const maxI = Math.max(startIdx, endIdx);
           const sliced = masterLessons.slice(minI, maxI + 1);
-          if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+          if (!isTargetUnitTest && sliced.every(item => item.isUnitTest)) {
             const lessonItemsOnly = masterLessons.filter(item => !item.isUnitTest);
             if (lessonItemsOnly.length > 0) return lessonItemsOnly;
           }
@@ -478,7 +533,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           const maxOrder = Math.max(startOrder, endOrder);
           const rangeItems = masterLessons.filter(m => m.sort_order !== undefined && m.sort_order >= minOrder && m.sort_order <= maxOrder);
           if (rangeItems.length > 0) {
-            if (!isPureUnitTestTask && rangeItems.every(item => item.isUnitTest)) {
+            const isTargetUnitTest = isPureUnitTestTask || rangeItems.some(i => i.isUnitTest);
+            if (!isTargetUnitTest && rangeItems.every(item => item.isUnitTest)) {
               const lessonItemsOnly = masterLessons.filter(item => !item.isUnitTest);
               if (lessonItemsOnly.length > 0) return lessonItemsOnly;
             }
@@ -490,7 +546,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           const minI = startIdx >= 0 && endIdx >= 0 ? Math.min(startIdx, endIdx) : (startIdx >= 0 ? startIdx : endIdx);
           const maxI = startIdx >= 0 && endIdx >= 0 ? Math.max(startIdx, endIdx) : (endIdx >= 0 ? endIdx : startIdx);
           const sliced = masterLessons.slice(minI, maxI + 1);
-          if (!isPureUnitTestTask && sliced.every(item => item.isUnitTest)) {
+          const isTargetUnitTest = isPureUnitTestTask || sliced.some(i => i.isUnitTest);
+          if (!isTargetUnitTest && sliced.every(item => item.isUnitTest)) {
             const validItem = masterLessons[startIdx >= 0 ? startIdx : endIdx];
             if (validItem.unit_name) {
               const sameUnitLessons = masterLessons.filter(m => m.unit_name === validItem.unit_name && !m.isUnitTest);
@@ -688,6 +745,22 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return [...prev, todayMiniFailed];
     });
 
+    // 不合格となった単元テストのIDを生徒の completed_lesson_ids から確実に除去
+    const filteredCompletedIds = (currentStudent.completed_lesson_ids || []).filter(id => {
+      if (targetTask) {
+        if (id === targetTask.unit_id || id === targetTask.start_lesson_id || id === targetTask.end_lesson_id) return false;
+      }
+      return true;
+    });
+    if (filteredCompletedIds.length !== (currentStudent.completed_lesson_ids || []).length) {
+      const cleanedStudent: Student = {
+        ...currentStudent,
+        completed_lesson_ids: filteredCompletedIds
+      };
+      setCurrentStudent(cleanedStudent);
+      await db.saveStudent(cleanedStudent);
+    }
+
     // 1. 直後のコマ（2コマ目）に「単元確認テスト　ーやり直しー」を挿入し、後続タスクをシフト＆旧やり直しタスクを排除
     const currentDayAllTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
 
@@ -836,10 +909,19 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
     currentTaskCompletedIds.add(stepIdStr);
 
-    const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
-    studentCompletedIds.add(stepIdStr);
+    const isStepUnitTest = Boolean(
+      step.name.includes('単元確認テスト') ||
+      step.name.includes('単元テスト') ||
+      step.name.includes('確認テスト') ||
+      step.name.includes('再テスト') ||
+      step.fullTitle.includes('単元確認テスト') ||
+      step.fullTitle.includes('単元テスト') ||
+      step.fullTitle.includes('確認テスト') ||
+      step.fullTitle.includes('再テスト')
+    );
 
     const isUnitTest = Boolean(
+      isStepUnitTest ||
       task.start_lesson_name?.includes('単元テスト') ||
       task.start_lesson_name?.includes('確認テスト') ||
       task.start_lesson_name?.includes('単元確認テスト') ||
@@ -857,6 +939,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       task.custom_unit_name?.includes('単元確認テスト') ||
       task.custom_unit_name?.includes('再テスト')
     ) && !task.custom_unit_name?.includes('ーやり直しー') && !task.start_lesson_name?.includes('ーやり直しー') && !task.lesson_range?.includes('ーやり直しー');
+
+    const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
+    if (!isUnitTest) {
+      studentCompletedIds.add(stepIdStr);
+    }
 
     const isAllStepsCompleted = allSteps.length > 0 && allSteps.every(s => currentTaskCompletedIds.has(String(s.id)));
 
@@ -901,8 +988,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const updatedStudent: Student = {
       ...currentStudent,
       completed_lesson_ids: Array.from(studentCompletedIds),
-      last_completed_lesson_id: stepIdStr,
-      last_completed_at: new Date().toISOString()
+      ...(isUnitTest ? {} : {
+        last_completed_lesson_id: stepIdStr,
+        last_completed_at: new Date().toISOString()
+      })
     };
 
     // ⚡️ 1. Optimistic UI Update: Reactステートを即座に更新（通信完了を待たずに画面描画）
@@ -2355,6 +2444,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             units={units}
             tasks={tasks}
             todayTasks={todayTasks}
+            miniTestResults={miniTestResults}
             theme={theme}
           />
         </div>
