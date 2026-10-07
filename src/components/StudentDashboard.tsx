@@ -111,6 +111,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return db.getHomeworkResults().filter(r => r.student_id === student.id && r.date === d);
   });
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
+  const [taskScores, setTaskScores] = useState<Record<string, string>>({});
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
   const [activeMobileTab, setActiveMobileTab] = useState<'mission' | 'map'>('mission');
   const [lessonProgressList, setLessonProgressList] = useState<StudentLessonProgress[]>(() => 
@@ -213,6 +214,22 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       initialScores[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
     });
     setStudentScores(initialScores);
+
+    const initialTaskScores: Record<string, string> = {};
+    today.forEach(t => {
+      const matched = todayMini.find(m => 
+        (m.task_id === t.id) ||
+        (m.subject === t.subject && (
+          m.test_content === (t.lesson_range || t.custom_unit_name || t.start_lesson_name) ||
+          (t.start_lesson_name && m.test_content?.includes(t.start_lesson_name)) ||
+          m.test_type === 'unit_test'
+        ))
+      );
+      if (matched && matched.score !== null && matched.score !== undefined) {
+        initialTaskScores[t.id] = matched.score.toString();
+      }
+    });
+    setTaskScores(initialTaskScores);
 
     // 宿題結果
     let todayHw: HomeworkResult[] = [];
@@ -588,8 +605,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   ) => {
     const unit = targetTask ? units.find(u => u.id === targetTask.unit_id) : undefined;
     const subjectName = targetTask?.subject || testSubject || (unit ? unit.subject : '算数');
-    let rawUnitName = targetTask?.start_lesson_name || targetTask?.custom_unit_name || testUnitName || (unit ? unit.name : '単元');
-    const cleanUnitName = rawUnitName.replace(/【やり直し授業】/g, '').replace(/（再テスト）/g, '').replace(/復習/g, '').trim() || '単元';
+    const rawUnitName = targetTask?.start_lesson_name || targetTask?.custom_unit_name || testUnitName || (unit ? unit.name : '単元');
+    const cleanUnitName = rawUnitName
+      .replace(/【やり直し授業】/g, '')
+      .replace(/（再テスト）/g, '')
+      .replace(/復習/g, '')
+      .replace(/\s*-\s*単元確認テスト/g, '')
+      .replace(/\s*-\s*単元テスト/g, '')
+      .replace(/\s*-\s*確認テスト/g, '')
+      .replace(/単元確認テスト/g, '')
+      .replace(/単元テスト/g, '')
+      .replace(/確認テスト/g, '')
+      .trim() || '単元';
     const reTestContent = `${subjectName}: ${cleanUnitName}（再テスト）`;
 
     if (targetTask) {
@@ -602,6 +629,46 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       setTodayTasks(prev => prev.map(t => t.id === targetTask.id ? updatedTask : t));
       await db.saveLearningTasks([updatedTask]);
     }
+
+    // 0. 本日の小テスト結果管理にも不合格結果を保存・更新（講師ダッシュボードとの完全連動）
+    const failedScoreVal = targetTask && taskScores[targetTask.id] ? parseInt(taskScores[targetTask.id], 10) : 60;
+    const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
+    const existingMini = todayMini.find(m => 
+      (targetTask && m.task_id === targetTask.id) ||
+      (m.subject === subjectName && (m.test_content?.includes(cleanUnitName) || m.unit_name === cleanUnitName))
+    );
+    const todayMiniFailed: MiniTestResult = {
+      id: existingMini?.id || `mini-unit-fail-${currentStudent.id}-${targetTask?.id || Date.now()}`,
+      student_id: currentStudent.id,
+      task_id: targetTask?.id,
+      date: currentDateStr,
+      subject: subjectName,
+      test_type: 'unit_test',
+      unit_name: cleanUnitName,
+      test_content: `${subjectName}: ${cleanUnitName} - 単元確認テスト`,
+      score: isNaN(failedScoreVal) ? 60 : failedScoreVal,
+      passed: false,
+      status: 'failed',
+      passing_line: targetTask?.passing_line || testPassingLine || '80%以上',
+      target_scope: 'individual',
+      completed_at: new Date().toISOString(),
+      students: {
+        id: currentStudent.id,
+        name: currentStudent.name,
+        grade: currentStudent.grade
+      },
+      created_at: existingMini?.created_at || new Date().toISOString()
+    };
+    await db.saveMiniTestResult(todayMiniFailed);
+    setMiniTestResults(prev => {
+      const idx = prev.findIndex(p => p.id === todayMiniFailed.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = todayMiniFailed;
+        return copy;
+      }
+      return [...prev, todayMiniFailed];
+    });
 
     // 1. 自動的に「やり直し授業」が生徒の管理画面に追加され、完了するボタンも発生する
     const currentDayTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
@@ -646,8 +713,15 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       unit_name: cleanUnitName,
       test_content: reTestContent,
       score: null,
+      passed: null,
+      status: 'unstarted',
       passing_line: targetTask?.passing_line || testPassingLine || '80%以上',
       target_scope: 'individual',
+      students: {
+        id: currentStudent.id,
+        name: currentStudent.name,
+        grade: currentStudent.grade
+      },
       created_at: new Date().toISOString()
     };
     await db.saveMiniTestResult(reTestResult);
@@ -917,6 +991,102 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     loadData();
   };
 
+  // 生徒学習画面の各教科コマ下から単元テスト結果（点数）を送信・記録
+  const handleSaveTaskUnitTestScore = async (task: LearningTask, scoreInput?: string) => {
+    const rawVal = scoreInput !== undefined && scoreInput !== '' ? scoreInput : (taskScores[task.id] || '');
+    if (rawVal === '') {
+      if (typeof window !== 'undefined') window.alert('点数を入力してください。');
+      return;
+    }
+
+    const scoreVal = parseInt(rawVal, 10);
+    if (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100) {
+      if (typeof window !== 'undefined') window.alert('0〜100の点数を入力してください。');
+      return;
+    }
+
+    const stLevel = currentStudent.level || 'A';
+    let passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+    if (task.passing_line) {
+      const matchNum = task.passing_line.match(/\d+/);
+      if (matchNum) {
+        const limit = parseInt(matchNum[0], 10);
+        passScore = (task.passing_line.includes('%') || task.passing_line.includes('割'))
+          ? (task.passing_line.includes('割') ? limit * 10 : limit)
+          : limit;
+      }
+    }
+
+    const isPassed = scoreVal >= passScore;
+    const unit = units.find(u => u.id === task.unit_id);
+    const subjectName = task.subject || (unit ? unit.subject : 'その他');
+    const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
+    const cleanUnitName = rawUnitName
+      .replace(/【やり直し授業】/g, '')
+      .replace(/（再テスト）/g, '')
+      .replace(/復習/g, '')
+      .replace(/\s*-\s*単元確認テスト/g, '')
+      .replace(/\s*-\s*単元テスト/g, '')
+      .replace(/\s*-\s*確認テスト/g, '')
+      .replace(/単元確認テスト/g, '')
+      .replace(/単元テスト/g, '')
+      .replace(/確認テスト/g, '')
+      .trim() || '単元';
+    const testContent = `${subjectName}: ${cleanUnitName} - 単元確認テスト`;
+
+    // 講師ダッシュボードの「小テスト結果管理」と完全連動するMiniTestResultを作成・更新
+    const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
+    const existingMini = todayMini.find(m => 
+      (m.task_id === task.id) ||
+      (m.subject === subjectName && (m.test_content === testContent || m.unit_name === cleanUnitName))
+    );
+
+    const miniResult: MiniTestResult = {
+      id: existingMini?.id || `mini-unit-${currentStudent.id}-${task.id}`,
+      student_id: currentStudent.id,
+      task_id: task.id,
+      date: currentDateStr,
+      subject: subjectName,
+      test_type: 'unit_test',
+      unit_name: cleanUnitName,
+      test_content: testContent,
+      score: scoreVal,
+      passed: isPassed,
+      status: isPassed ? 'passed' : 'failed',
+      completed_at: new Date().toISOString(),
+      passing_line: task.passing_line || `レベル${stLevel} (${passScore}点以上)`,
+      target_scope: 'individual',
+      students: {
+        id: currentStudent.id,
+        name: currentStudent.name,
+        grade: currentStudent.grade
+      },
+      created_at: existingMini?.created_at || new Date().toISOString()
+    };
+
+    await db.saveMiniTestResult(miniResult);
+    setMiniTestResults(prev => {
+      const idx = prev.findIndex(p => p.id === miniResult.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = miniResult;
+        return copy;
+      }
+      return [...prev, miniResult];
+    });
+
+    setTaskScores(prev => ({ ...prev, [task.id]: String(scoreVal) }));
+
+    if (isPassed) {
+      await handlePassTest(task, scoreVal);
+      if (typeof window !== 'undefined') {
+        window.alert(`🎉 単元テスト合格！ (${scoreVal}点)\n講師ダッシュボードに小テスト結果が連動・記録されました。`);
+      }
+    } else {
+      await handleProcessUnitTestFailure(task, subjectName, cleanUnitName, miniResult.passing_line);
+    }
+  };
+
   // カリキュラム外タスク または 全ステップを一括完了にする
   const handleCompleteCustomTask = async (task: LearningTask) => {
     const stepLessons = getTaskStepLessons(task);
@@ -1046,7 +1216,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   };
 
   // 2. テスト受験ボタンのアクション (合格)
-  const handlePassTest = async (task: LearningTask) => {
+  const handlePassTest = async (task: LearningTask, passedScore?: number) => {
     const stepLessons = getTaskStepLessons(task);
     const stepIds = stepLessons.map(s => String(s.id));
 
@@ -1096,6 +1266,61 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     await db.saveLearningTasks([updated]);
     await db.saveStudent(updatedStudent);
 
+    // 単元テストの場合、小テスト結果管理にも合格結果を保存（講師ダッシュボード完全連動）
+    const unit = units.find(u => u.id === task.unit_id);
+    const subjectName = task.subject || (unit ? unit.subject : 'その他');
+    const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
+    const cleanUnitName = rawUnitName
+      .replace(/【やり直し授業】/g, '')
+      .replace(/（再テスト）/g, '')
+      .replace(/復習/g, '')
+      .replace(/\s*-\s*単元確認テスト/g, '')
+      .replace(/\s*-\s*単元テスト/g, '')
+      .replace(/\s*-\s*確認テスト/g, '')
+      .replace(/単元確認テスト/g, '')
+      .replace(/単元テスト/g, '')
+      .replace(/確認テスト/g, '')
+      .trim() || '単元';
+    const testContent = `${subjectName}: ${cleanUnitName} - 単元確認テスト`;
+    const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
+    const existingMini = todayMini.find(m => (m.task_id === task.id) || (m.subject === subjectName && (m.test_content === testContent || m.unit_name === cleanUnitName)));
+    const stLevel = currentStudent.level || 'A';
+    const defaultPassScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+    const finalScore = passedScore !== undefined ? passedScore : (existingMini?.score !== null && existingMini?.score !== undefined ? existingMini.score : 100);
+
+    const miniResult: MiniTestResult = {
+      id: existingMini?.id || `mini-unit-${currentStudent.id}-${task.id}`,
+      student_id: currentStudent.id,
+      task_id: task.id,
+      date: currentDateStr,
+      subject: subjectName,
+      test_type: 'unit_test',
+      unit_name: cleanUnitName,
+      test_content: testContent,
+      score: finalScore,
+      passed: true,
+      status: 'passed',
+      completed_at: new Date().toISOString(),
+      passing_line: task.passing_line || `レベル${stLevel} (${defaultPassScore}点以上)`,
+      target_scope: 'individual',
+      students: {
+        id: currentStudent.id,
+        name: currentStudent.name,
+        grade: currentStudent.grade
+      },
+      created_at: existingMini?.created_at || new Date().toISOString()
+    };
+    await db.saveMiniTestResult(miniResult);
+    setMiniTestResults(prev => {
+      const idx = prev.findIndex(p => p.id === miniResult.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = miniResult;
+        return copy;
+      }
+      return [...prev, miniResult];
+    });
+
     // 合格時：他の教科の授業も完了していれば、次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
     const isUnitTestTask = task.custom_unit_name?.includes('確認テスト') || 
                            task.custom_unit_name?.includes('単元テスト') || 
@@ -1130,7 +1355,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       student_id: student.id,
       unit_id: task.unit_id,
       log_type: 'test_result',
-      score: 95,
+      score: passedScore !== undefined ? passedScore : 95,
       total_questions: 10,
       incorrect_genres: [],
       created_at: new Date().toISOString()
@@ -1637,8 +1862,46 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     task.custom_unit_name?.includes('まとめテスト') ||
                     task.custom_unit_name?.toLowerCase().includes('check test')
                   );
-                  const showCustomCompletion = isCustomTask || isReviewOrCheckTask;
+                  const isRemedialTask = Boolean(
+                    task.custom_unit_name?.includes('やり直し授業') ||
+                    task.start_lesson_name?.includes('やり直し授業') ||
+                    task.lesson_range?.includes('やり直し授業')
+                  );
+                  const isUnitTestTask = Boolean(
+                    !isReviewOrCheckTask &&
+                    !isRemedialTask && (
+                      task.start_lesson_name?.includes('単元テスト') ||
+                      task.start_lesson_name?.includes('確認テスト') ||
+                      task.start_lesson_name?.includes('単元確認テスト') ||
+                      task.start_lesson_name?.includes('再テスト') ||
+                      task.end_lesson_name?.includes('単元テスト') ||
+                      task.end_lesson_name?.includes('確認テスト') ||
+                      task.end_lesson_name?.includes('単元確認テスト') ||
+                      task.end_lesson_name?.includes('再テスト') ||
+                      task.lesson_range?.includes('単元テスト') ||
+                      task.lesson_range?.includes('確認テスト') ||
+                      task.lesson_range?.includes('単元確認テスト') ||
+                      task.lesson_range?.includes('再テスト') ||
+                      task.custom_unit_name?.includes('単元テスト') ||
+                      task.custom_unit_name?.includes('確認テスト') ||
+                      task.custom_unit_name?.includes('単元確認テスト') ||
+                      task.custom_unit_name?.includes('再テスト')
+                    )
+                  );
+                  const showCustomCompletion = !isUnitTestTask && (isCustomTask || isReviewOrCheckTask || isRemedialTask);
                   const isMainQuest = task.id === mainQuestTaskId && task.status !== 'completed';
+
+                  const stLevel = currentStudent.level || 'A';
+                  let passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+                  if (task.passing_line) {
+                    const matchNum = task.passing_line.match(/\d+/);
+                    if (matchNum) {
+                      const limit = parseInt(matchNum[0], 10);
+                      passScore = (task.passing_line.includes('%') || task.passing_line.includes('割'))
+                        ? (task.passing_line.includes('割') ? limit * 10 : limit)
+                        : limit;
+                    }
+                  }
 
                   const stepLessons = getTaskStepLessons(task);
                   const completedStepIds = new Set<string>();
@@ -1761,16 +2024,112 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                           </div>
                         )}
 
+                        {/* 📝 単元テスト結果入力エリア（各教科の下） */}
+                        {isUnitTestTask && (
+                          <div 
+                            className={styles.unitTestScoreSection}
+                            data-testid={`unit-test-score-section-${task.period}`}
+                            style={{
+                              marginTop: '12px',
+                              marginBottom: '8px',
+                              padding: '12px 14px',
+                              backgroundColor: '#f8fafc',
+                              borderRadius: '10px',
+                              border: '1.5px solid #cbd5e1',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '8px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
+                                  📝 単元テスト結果入力
+                                </span>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '6px', backgroundColor: '#e0e7ff', color: '#3730a3' }}>
+                                  {subjectName}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>
+                                目標: レベル{stLevel} ({passScore}点以上で合格)
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <label htmlFor={`task-score-input-${task.period}`} style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
+                                点数を入力:
+                              </label>
+                              <input
+                                id={`task-score-input-${task.period}`}
+                                type="number"
+                                min="0"
+                                max="100"
+                                placeholder="点数を入力"
+                                value={taskScores[task.id] !== undefined ? taskScores[task.id] : ''}
+                                onChange={e => setTaskScores(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                style={{
+                                  width: '120px',
+                                  padding: '6px 10px',
+                                  borderRadius: '6px',
+                                  border: '1.5px solid #cbd5e1',
+                                  fontSize: '0.9rem',
+                                  fontWeight: 700,
+                                  textAlign: 'center'
+                                }}
+                                data-testid={`task-score-input-${task.period}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveTaskUnitTestScore(task, taskScores[task.id])}
+                                className={styles.btn3dRed}
+                                style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                                data-testid={`task-score-submit-btn-${task.period}`}
+                              >
+                                結果を送信して判定 ⚔️
+                              </button>
+
+                              {task.status === 'completed' && (
+                                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#16a34a', backgroundColor: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>
+                                  ✅ 合格
+                                </span>
+                              )}
+                              {task.status === 'failed' && (
+                                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#dc2626', backgroundColor: '#fee2e2', padding: '3px 8px', borderRadius: '6px' }}>
+                                  ⚠️ 不合格 (やり直し授業へ)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Student Tasks Actions */}
                         <div className={styles.actions}>
-                          {showCustomCompletion ? (
+                          {isUnitTestTask ? (
+                            task.status !== 'completed' && (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <button 
+                                  onClick={() => handleSaveTaskUnitTestScore(task, taskScores[task.id] || '100')} 
+                                  className={`${styles.btn} ${styles.btnSuccess}`}
+                                  data-testid={`complete-task-btn-${task.period}`}
+                                >
+                                  単元テストを受ける (合格)
+                                </button>
+                                <button 
+                                  onClick={() => handleFailTest(task)} 
+                                  className={`${styles.btn} ${styles.btnSecondary}`}
+                                >
+                                  テストを受ける (不合格)
+                                </button>
+                              </div>
+                            )
+                          ) : showCustomCompletion ? (
                             task.status !== 'completed' && (
                               <button 
                                 onClick={() => handleCompleteCustomTask(task)} 
                                 className={isMainQuest ? styles.btn3dQuest : `${styles.btn} ${styles.btnSuccess}`}
                                 data-testid={`complete-task-btn-${task.period}`}
                               >
-                                {stepLessons.length > 1 ? 'このコマの全ステップを一括完了にする' : (isMainQuest ? '学習をスタート！ ▶' : 'この授業を完了にする')}
+                                {isRemedialTask ? 'この授業を完了にする' : (stepLessons.length > 1 ? 'このコマの全ステップを一括完了にする' : (isMainQuest ? '学習をスタート！ ▶' : 'この授業を完了にする'))}
                               </button>
                             )
                           ) : (

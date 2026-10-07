@@ -414,6 +414,7 @@ export interface TeacherCorrectionLog {
 export interface MiniTestResult {
   id: string;
   student_id: string;
+  task_id?: string; // 関連する学習タスクID
   date: string; // YYYY-MM-DD
   subject?: string; // 教科 (算数, 数学, 英語, etc.)
   test_content: string; // テスト内容
@@ -619,10 +620,12 @@ export function sanitizeMiniTestResult(test: Partial<MiniTestResult> & Record<st
   const status = test.status ? String(test.status).trim() : (passed === true ? 'passed' : passed === false ? 'failed' : null);
   const completed_at = test.completed_at ? String(test.completed_at).trim() : (score !== null ? created_at : null);
   const students = test.students && typeof test.students === 'object' ? test.students : null;
+  const task_id = test.task_id ? String(test.task_id).trim() : undefined;
 
   return {
     id,
     student_id,
+    ...(task_id ? { task_id } : {}),
     date,
     test_content,
     score,

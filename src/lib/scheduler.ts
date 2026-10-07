@@ -2154,21 +2154,36 @@ export function generateSlotsForSelectedSubjects(params: {
       subjectReachedUnitTest.add(sub);
     }
 
-    const startId = range.start_lesson_id || '';
-    const startName = range.start_lesson_name || '';
-    const endId = isStartUnitTest ? startId : (range.end_lesson_id || startId);
-    const endName = isStartUnitTest ? startName : (range.end_lesson_name || startName);
-    const rangeText = isStartUnitTest ? startName : (range.lesson_range || startName);
+    // 単元テストの同日連続受講禁止ルール:
+    // 同日の先行コマで当該教科の授業（まとめテスト3やCheck Test等）がすでに割り当てられている場合、
+    // 単元テストは同日に連続して行わず、必ず次回の授業日に実施する。
+    const hasPriorSlotTodayForSubject = Object.values(slots).some(s => s.subject === sub);
+    let finalStartId = range.start_lesson_id || '';
+    let finalEndId = isStartUnitTest ? finalStartId : (range.end_lesson_id || finalStartId);
+    let finalStartName = range.start_lesson_name || '';
+    let finalEndName = isStartUnitTest ? finalStartName : (range.end_lesson_name || finalStartName);
+    let finalRangeText = isStartUnitTest ? finalStartName : (range.lesson_range || finalStartName);
+
+    if (hasPriorSlotTodayForSubject && isUnitTest) {
+      const priorSlot = Object.values(slots).reverse().find(s => s.subject === sub);
+      if (priorSlot) {
+        finalStartId = priorSlot.endLessonId || priorSlot.startLessonId;
+        finalEndId = finalStartId;
+        finalStartName = priorSlot.endLessonName || priorSlot.startLessonName;
+        finalEndName = finalStartName;
+        finalRangeText = `【定着演習】${finalStartName}`;
+      }
+    }
 
     slots[p] = {
       subject: sub,
-      unitId: startId,
+      unitId: finalStartId,
       customTheme: '',
-      startLessonId: startId,
-      endLessonId: endId,
-      startLessonName: startName,
-      endLessonName: endName,
-      lessonRange: rangeText
+      startLessonId: finalStartId,
+      endLessonId: finalEndId,
+      startLessonName: finalStartName,
+      endLessonName: finalEndName,
+      lessonRange: finalRangeText
     };
   }
 
