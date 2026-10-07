@@ -542,15 +542,23 @@ export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string
   // Safe string conversion for scheduled_date (YYYY-MM-DD)
   let scheduled_date = task.scheduled_date ? String(task.scheduled_date).trim() : new Date().toISOString().split('T')[0];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduled_date)) {
-    try {
-      const parsed = new Date(scheduled_date);
-      if (!isNaN(parsed.getTime())) {
-        scheduled_date = parsed.toISOString().split('T')[0];
-      } else {
+    const slashMatch = scheduled_date.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    if (slashMatch) {
+      scheduled_date = `${slashMatch[1]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[3].padStart(2, '0')}`;
+    } else {
+      try {
+        const parsed = new Date(scheduled_date);
+        if (!isNaN(parsed.getTime())) {
+          const y = parsed.getFullYear();
+          const m = String(parsed.getMonth() + 1).padStart(2, '0');
+          const d = String(parsed.getDate()).padStart(2, '0');
+          scheduled_date = `${y}-${m}-${d}`;
+        } else {
+          scheduled_date = new Date().toISOString().split('T')[0];
+        }
+      } catch {
         scheduled_date = new Date().toISOString().split('T')[0];
       }
-    } catch {
-      scheduled_date = new Date().toISOString().split('T')[0];
     }
   }
 

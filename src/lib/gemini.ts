@@ -426,7 +426,7 @@ export async function parseInterviewTranscriptToFields(
 
     // 夢・目標
     const dreamMatch = text.match(/(?:将来の夢|夢|なりたい(?:もの|職業|像))[は:：が]?\s*([^\s,、。]+(?:になりたい|になる|先生|医師|プログラマー|公務員|デザイナー)?)/);
-    if (dreamMatch) res.dream_goal = dreamMatch[1].replace(/(になりたい|になる)$/, '').trim();
+    if (dreamMatch) res.dream_goal = dreamMatch[1].replace(/(?:になりたい|になる)?(?:です|だ)?$/, '').trim();
 
     // 部活
     const clubMatch = text.match(/(?:部活|クラブ|所属)[は:：が]?\s*([^\s,、。]+(?:部|クラブ|チーム)?)/);
