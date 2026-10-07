@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
-import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig } from '../lib/db';
+import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig, StudentLessonProgress } from '../lib/db';
 import { ensureMathEnglishUnitTests, normalizeGrade } from '../lib/scheduler';
 import SugorokuMap from './SugorokuMap';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
@@ -35,24 +35,50 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     return todayStr;
   };
 
-  const sanitizeCompletedLessonIds = (ids?: any[]): string[] => {
+  const extractIncompleteTaskKeys = (taskList: LearningTask[]): Set<string> => {
+    const keys = new Set<string>();
+    taskList
+      .filter(t => t.status !== 'completed' && !t.test_passed)
+      .forEach(t => {
+        const doneSet = new Set((t.completed_lesson_ids || []).map(String));
+        if (t.start_lesson_id && !doneSet.has(String(t.start_lesson_id))) keys.add(String(t.start_lesson_id));
+        if (t.end_lesson_id && !doneSet.has(String(t.end_lesson_id))) keys.add(String(t.end_lesson_id));
+        if (t.unit_id && !doneSet.has(String(t.unit_id))) keys.add(String(t.unit_id));
+        if (t.start_lesson_name && !doneSet.has(t.start_lesson_name)) keys.add(t.start_lesson_name);
+        if (t.end_lesson_name && !doneSet.has(t.end_lesson_name)) keys.add(t.end_lesson_name);
+        if (t.lesson_range && !doneSet.has(t.lesson_range)) keys.add(t.lesson_range);
+        if (t.custom_unit_name && !doneSet.has(t.custom_unit_name)) keys.add(t.custom_unit_name);
+      });
+    return keys;
+  };
+
+  const sanitizeCompletedLessonIds = (ids?: any[], excludeStepKeys?: Set<string>): string[] => {
     if (!Array.isArray(ids)) return [];
     return Array.from(new Set(
       ids
         .filter(Boolean)
         .map(String)
         .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.includes('単元確認テスト'))
+        .filter(s => {
+          if (!s || s.length === 0) return false;
+          if (s.includes('単元確認テスト')) return false;
+          if (excludeStepKeys && excludeStepKeys.has(s)) return false;
+          return true;
+        })
     ));
   };
 
-  const getLatestStudent = (): Student => {
+  const getLatestStudent = (excludeStepKeys?: Set<string>): Student => {
     const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
     const rawIds = dbSt?.completed_lesson_ids || student.completed_lesson_ids || [];
+    const activeExclude = excludeStepKeys || (() => {
+      const dbTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
+      return extractIncompleteTaskKeys(dbTasks);
+    })();
     return {
       ...(dbSt || {}),
       ...student,
-      completed_lesson_ids: sanitizeCompletedLessonIds(rawIds)
+      completed_lesson_ids: sanitizeCompletedLessonIds(rawIds, activeExclude)
     };
   };
 
@@ -74,18 +100,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   }, [initialDate]);
 
   useEffect(() => {
-    setCurrentStudent(prev => {
-      const latest = getLatestStudent();
-      const mergedCompleted = sanitizeCompletedLessonIds([
-        ...(prev?.completed_lesson_ids || []),
-        ...(latest?.completed_lesson_ids || []),
-        ...(student.completed_lesson_ids || [])
-      ]);
-      return {
-        ...latest,
-        ...student,
-        completed_lesson_ids: mergedCompleted
-      };
+    const dbTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
+    const uncompletedKeys = extractIncompleteTaskKeys(dbTasks);
+    const latest = getLatestStudent(uncompletedKeys);
+    setCurrentStudent({
+      ...latest,
+      ...student,
+      completed_lesson_ids: latest.completed_lesson_ids
     });
   }, [student.id, student.grade, student.name, student.status]);
 
@@ -113,11 +134,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
   const [activeMobileTab, setActiveMobileTab] = useState<'mission' | 'map'>('mission');
+  const [lessonProgressList, setLessonProgressList] = useState<StudentLessonProgress[]>(() => 
+    typeof db.getStudentLessonProgressList === 'function' ? db.getStudentLessonProgressList(student.id) : []
+  );
 
   const loadData = async () => {
-    const latestStudent = getLatestStudent();
-    setCurrentStudent(latestStudent);
-
     let studentTasks: LearningTask[] = [];
     try {
       studentTasks = await db.fetchLearningTasks(student.id);
@@ -131,6 +152,49 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     } catch {
       allMasters = db.getCurriculumMasters();
     }
+
+    let progressList: StudentLessonProgress[] = [];
+    try {
+      progressList = await db.fetchStudentLessonProgressList(student.id);
+    } catch {
+      progressList = typeof db.getStudentLessonProgressList === 'function' ? db.getStudentLessonProgressList(student.id) : [];
+    }
+    setLessonProgressList(progressList);
+
+    // 先行完了データの整合性チェックとサニタイズ（未受講コマのステップIDが誤混入していた場合にリセット）
+    const incompleteTasks = studentTasks.filter(t => t.status !== 'completed' && !t.test_passed);
+    const uncompletedStepKeys = extractIncompleteTaskKeys(incompleteTasks);
+    incompleteTasks.forEach(t => {
+      const steps = getTaskStepLessons(t, allMasters);
+      const doneSet = new Set((t.completed_lesson_ids || []).map(String));
+      steps.forEach(s => {
+        if (!doneSet.has(String(s.id))) {
+          uncompletedStepKeys.add(String(s.id));
+          if (s.name) uncompletedStepKeys.add(s.name);
+          if (s.fullTitle) uncompletedStepKeys.add(s.fullTitle);
+        }
+      });
+    });
+
+    const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
+    const originalRawIds = dbSt?.completed_lesson_ids || student.completed_lesson_ids || [];
+    const sanitizedIds = sanitizeCompletedLessonIds(originalRawIds, uncompletedStepKeys);
+
+    const latestStudent: Student = {
+      ...(dbSt || {}),
+      ...student,
+      completed_lesson_ids: sanitizedIds
+    };
+    setCurrentStudent(latestStudent);
+
+    if (sanitizedIds.length !== originalRawIds.length) {
+      try {
+        await db.saveStudent(latestStudent);
+      } catch (err) {
+        console.warn('サニタイズ生徒情報保存警告:', err);
+      }
+    }
+
     const config = db.getStudentScheduleConfig(student.id);
     setScheduleConfig(config);
     setTasks(studentTasks);
@@ -210,7 +274,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
   // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
-  const getTaskStepLessons = (task: LearningTask): Array<{ id: string; name: string; fullTitle: string }> => {
+  const getTaskStepLessons = (task: LearningTask, mastersOverride?: CurriculumMaster[]): Array<{ id: string; name: string; fullTitle: string }> => {
     const isElem = student.grade.startsWith('小') || student.grade === '園児';
     const isJhs = student.grade.startsWith('中');
     const isHs = student.grade.startsWith('高') || student.grade === '既卒';
@@ -221,8 +285,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return s.toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：]/g, '');
     };
 
+    const mastersSource = mastersOverride || (curriculumMasters.length > 0 ? curriculumMasters : (typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : []));
+
     // 1. 該当コマの教科のみに最優先で厳密絞り込み（他教科混入を完全遮断）
-    const candidateMasters = curriculumMasters.filter(m => {
+    const candidateMasters = mastersSource.filter(m => {
       if (m.subject === taskSubject) return true;
       if ((taskSubject === '算数' || taskSubject === '数学') && (m.subject === '算数' || m.subject === '数学')) return true;
       return false;
@@ -716,6 +782,21 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     setCurrentStudent(updatedStudent);
     setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
     setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setLessonProgressList(prev => [
+      ...prev.filter(p => !(p.student_id === student.id && p.lesson_id === stepIdStr)),
+      {
+        id: `slp-${student.id}-${stepIdStr}`,
+        student_id: student.id,
+        subject: task.subject || 'その他',
+        lesson_id: stepIdStr,
+        lesson_name: step.name || step.fullTitle,
+        task_id: task.id,
+        date: currentDateStr,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }
+    ]);
 
     if (isAllStepsCompleted) {
       showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
@@ -911,6 +992,21 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     setCurrentStudent(updatedStudent);
     setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
     setTodayTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setLessonProgressList(prev => [
+      ...prev.filter(p => !(p.student_id === student.id && stepIds.includes(p.lesson_id))),
+      ...stepLessons.map(step => ({
+        id: `slp-${student.id}-${String(step.id)}`,
+        student_id: student.id,
+        subject: task.subject || 'その他',
+        lesson_id: String(step.id),
+        lesson_name: step.name || step.fullTitle,
+        task_id: task.id,
+        date: currentDateStr,
+        status: 'completed' as const,
+        completed_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }))
+    ]);
     showToast(`🎉 【第${task.period}コマ 完了！】授業の全ステップを完了にしました！`);
 
     // 🌐 2. バックエンド保存（最優先フォールバック保存）
@@ -1297,10 +1393,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             todayTasks.forEach(task => {
               const stepLessons = getTaskStepLessons(task);
               const completedStepIds = new Set<string>();
-              (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
-              (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
               if (task.status === 'completed' || task.test_passed) {
                 stepLessons.forEach(s => completedStepIds.add(String(s.id)));
+                (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+              } else {
+                (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                lessonProgressList
+                  .filter(p => p.student_id === currentStudent.id && p.task_id === task.id && p.status === 'completed')
+                  .forEach(p => completedStepIds.add(String(p.lesson_id)));
               }
               stepLessons.forEach(s => {
                 totalMissions += 1;
@@ -1573,14 +1673,27 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                         : (task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : 'テーマ設定なし')));
                   const googleDriveUrl = unit?.google_drive_url;
                   const isCustomTask = !unit;
+                  const isReviewOrCheckTask = Boolean(
+                    task.start_lesson_name?.includes('まとめテスト') ||
+                    task.start_lesson_name?.toLowerCase().includes('check test') ||
+                    task.lesson_range?.includes('まとめテスト') ||
+                    task.lesson_range?.toLowerCase().includes('check test') ||
+                    task.custom_unit_name?.includes('まとめテスト') ||
+                    task.custom_unit_name?.toLowerCase().includes('check test')
+                  );
+                  const showCustomCompletion = isCustomTask || isReviewOrCheckTask;
                   const isMainQuest = task.id === mainQuestTaskId && task.status !== 'completed';
 
                   const stepLessons = getTaskStepLessons(task);
                   const completedStepIds = new Set<string>();
-                  (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
-                  (currentStudent.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
                   if (task.status === 'completed' || task.test_passed) {
                     stepLessons.forEach(s => completedStepIds.add(String(s.id)));
+                    (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                  } else {
+                    (task.completed_lesson_ids || []).forEach(id => completedStepIds.add(String(id)));
+                    lessonProgressList
+                      .filter(p => p.student_id === currentStudent.id && p.task_id === task.id && p.status === 'completed')
+                      .forEach(p => completedStepIds.add(String(p.lesson_id)));
                   }
 
                   const completedCount = stepLessons.filter(s => completedStepIds.has(String(s.id))).length;
@@ -1694,7 +1807,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
                         {/* Student Tasks Actions */}
                         <div className={styles.actions}>
-                          {isCustomTask ? (
+                          {showCustomCompletion ? (
                             task.status !== 'completed' && (
                               <button 
                                 onClick={() => handleCompleteCustomTask(task)} 

@@ -510,6 +510,42 @@ export function findNextUncompletedLessonForSubject(params: {
     if (t.end_lesson_name) completedIds.add(t.end_lesson_name);
   });
 
+  // 未完了タスクに現在割り振られているレッスンIDを保護（先行誤混入の除外）
+  const studentIncompleteTasks = tasks.filter(t => 
+    t.student_id === student.id && 
+    t.status !== 'completed' && 
+    !t.test_passed &&
+    (t.subject === subject || (!t.subject && (subject === '算数' || subject === '数学')))
+  );
+  studentIncompleteTasks.forEach(t => {
+    if (t.start_lesson_id) {
+      completedIds.delete(t.start_lesson_id);
+      completedIds.delete(String(t.start_lesson_id));
+    }
+    if (t.end_lesson_id) {
+      completedIds.delete(t.end_lesson_id);
+      completedIds.delete(String(t.end_lesson_id));
+    }
+    if (t.start_lesson_name) completedIds.delete(t.start_lesson_name);
+    if (t.end_lesson_name) completedIds.delete(t.end_lesson_name);
+
+    if (t.start_lesson_id && t.end_lesson_id) {
+      const sIdx = masterLessons.findIndex(m => m.id === t.start_lesson_id || String(m.id) === String(t.start_lesson_id));
+      const eIdx = masterLessons.findIndex(m => m.id === t.end_lesson_id || String(m.id) === String(t.end_lesson_id));
+      if (sIdx >= 0 && eIdx >= sIdx) {
+        for (let idx = sIdx; idx <= eIdx; idx++) {
+          const isDoneInTask = t.completed_lesson_ids?.includes(masterLessons[idx].id) ||
+                               t.completed_lesson_ids?.includes(String(masterLessons[idx].id));
+          if (!isDoneInTask) {
+            completedIds.delete(masterLessons[idx].id);
+            completedIds.delete(String(masterLessons[idx].id));
+            completedIds.delete(masterLessons[idx].name);
+          }
+        }
+      }
+    }
+  });
+
   // 3. 単元テスト合否判定（不合格時は新単元への進行をストップして再テスト・復習位置に固定）
   const unitTestStatus = getLatestUnitTestStatusForSubject({
     studentId: student.id,
