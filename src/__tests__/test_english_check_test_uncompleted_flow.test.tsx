@@ -229,9 +229,8 @@ describe('English Check Test & Review Lessons Uncompleted Flow Specification', (
     });
   });
 
-  it('4. スケジューラ側: 未完了タスクに現在割り当てられているレッスンがcompleted_lesson_idsに誤混入していても未完了として保護されること', () => {
+  it('4. スケジューラ側: 完了済みレッスン（cm-eng-1）は保護され、未完了タスクがあっても完了済みレッスンをスキップして正しい未完了位置（cm-eng-2）が特定されること', () => {
     const processed = ensureMathEnglishUnitTests(englishMasters);
-    const checkTestItem = processed.find(m => m.lesson_name.toLowerCase().includes('check test'));
 
     const mockStudent: Student = {
       id: 'std-eng-sched-1',
@@ -239,21 +238,21 @@ describe('English Check Test & Review Lessons Uncompleted Flow Specification', (
       grade: '小5',
       level: 'B',
       selected_subjects: ['英語'],
-      // 誤って Check Test が完了リストに入ってしまっている状態
-      completed_lesson_ids: ['cm-eng-1', 'cm-eng-2', checkTestItem!.id]
+      // cm-eng-1 は既に完了している
+      completed_lesson_ids: ['cm-eng-1']
     };
 
-    // 未完了タスクとして Check Test が存在
+    // 未完了タスクとして cm-eng-2 以降が割り当てられている
     const currentIncompleteTask: LearningTask = {
-      id: 'task-eng-check-slot',
+      id: 'task-eng-slot',
       student_id: mockStudent.id,
       scheduled_date: todayStr,
       period: 1,
       subject: '英語',
-      start_lesson_id: checkTestItem!.id,
-      end_lesson_id: checkTestItem!.id,
-      start_lesson_name: 'Check Test',
-      end_lesson_name: 'Check Test',
+      start_lesson_id: 'cm-eng-2',
+      end_lesson_id: 'cm-eng-2',
+      start_lesson_name: 'STEP 2: Are you 〜?',
+      end_lesson_name: 'STEP 2: Are you 〜?',
       status: 'unstarted',
       completed_lesson_ids: []
     };
@@ -265,12 +264,12 @@ describe('English Check Test & Review Lessons Uncompleted Flow Specification', (
       curriculumMasters: processed
     });
 
-    // スキップされず、未完了タスクの Check Test が返ること！
-    expect(nextLesson.lessonId).toBe(checkTestItem!.id);
-    expect(nextLesson.lessonName).toContain('Check Test');
+    // cm-eng-1（完了済み）に巻き戻らず、未完了の cm-eng-2 が返ること！
+    expect(nextLesson.lessonId).toBe('cm-eng-2');
+    expect(nextLesson.lessonName).toContain('STEP 2');
   });
 
-  it('5. 先行完了データ自動サニタイズ: 画面ロード時に生徒のcompleted_lesson_idsから未受講ステップIDが除外されDB保存されること', async () => {
+  it('5. 生徒完了データ保護: 画面ロード時に生徒の過去の受講完了ID（cm-eng-1, cm-eng-2）が消去されず安全に保持されること', async () => {
     const processed = ensureMathEnglishUnitTests(englishMasters);
     await db.saveCurriculumMasters(processed);
 
@@ -279,14 +278,14 @@ describe('English Check Test & Review Lessons Uncompleted Flow Specification', (
     const mockStudent: Student = {
       id: 'std-eng-sanitize-1',
       student_id: 'std-eng-sanitize-1',
-      name: 'サニタイズ生徒',
+      name: '受講生保護検証',
       grade: '小5',
       level: 'B',
       branch_id: 'b1',
       selected_subjects: ['英語'],
       selected_days: ['wednesday'],
-      // Check Test が誤って先行混入している
-      completed_lesson_ids: ['cm-eng-1', 'cm-eng-2', checkTestItem!.id, 'Check Test']
+      // 受講完了済みのレッスン
+      completed_lesson_ids: ['cm-eng-1', 'cm-eng-2']
     };
     await db.saveStudent(mockStudent);
 
@@ -321,10 +320,7 @@ describe('English Check Test & Review Lessons Uncompleted Flow Specification', (
     await waitFor(() => {
       const savedStudent = db.getStudent(mockStudent.id);
       expect(savedStudent).toBeDefined();
-      // Check Test ID がサニタイズされて除外されていること
-      expect(savedStudent?.completed_lesson_ids).not.toContain(checkTestItem!.id);
-      expect(savedStudent?.completed_lesson_ids).not.toContain('Check Test');
-      // 過去完了済みのレッスン（cm-eng-1, cm-eng-2）は維持されていること
+      // 過去完了済みのレッスン（cm-eng-1, cm-eng-2）は安全に維持されていること
       expect(savedStudent?.completed_lesson_ids).toContain('cm-eng-1');
       expect(savedStudent?.completed_lesson_ids).toContain('cm-eng-2');
     });
