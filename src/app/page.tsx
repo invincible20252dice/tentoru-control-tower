@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import styles from './page.module.css';
 import { db, Student, UserSession } from '../lib/db';
-import TeacherDashboard from '../components/TeacherDashboard';
+import TeacherDashboard, { DashboardTabType } from '../components/TeacherDashboard';
 import StudentDashboard from '../components/StudentDashboard';
 import LoginForm from '../components/LoginForm';
 import { LogOut, User, Building2, Moon, Sun, ArrowLeft, GraduationCap } from 'lucide-react';
@@ -14,6 +14,7 @@ export default function Home() {
   const [studentsList, setStudentsList] = useState<Student[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [selectedScheduleDate, setSelectedScheduleDate] = useState<string>('');
+  const [teacherTab, setTeacherTab] = useState<DashboardTabType | undefined>(undefined);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showTeacherTypeSelector, setShowTeacherTypeSelector] = useState(false);
   const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>(() => {
@@ -121,6 +122,7 @@ export default function Home() {
     setSession(null);
     setSelectedStudentId('');
     setSelectedScheduleDate('');
+    setTeacherTab(undefined);
     setShowTeacherTypeSelector(false);
     setCurrentView('login');
   };
@@ -146,6 +148,7 @@ export default function Home() {
     }
     setSelectedStudentId('');
     setSelectedScheduleDate('');
+    setTeacherTab(undefined);
     setShowTeacherTypeSelector(false);
   };
 
@@ -190,6 +193,9 @@ export default function Home() {
           teacherType={teacherType}
           initialRole={session?.user?.role || 'admin'}
           initialBranchId={session?.user?.branch_id || undefined}
+          initialStudentId={selectedStudentId || undefined}
+          initialDate={selectedScheduleDate || undefined}
+          initialTab={teacherTab}
         />
       </div>
     );
@@ -204,6 +210,12 @@ export default function Home() {
           onBackToPortal={handleBackToPortal} 
           theme={theme} 
           initialDate={selectedScheduleDate || undefined}
+          onGoToTeacherSchedule={(studentId, date) => {
+            setSelectedStudentId(studentId);
+            setSelectedScheduleDate(date);
+            setTeacherTab('schedule');
+            setCurrentView('teacher');
+          }}
         />
       </div>
     );

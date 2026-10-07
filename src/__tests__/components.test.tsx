@@ -167,7 +167,7 @@ describe('UI Components Render & Interaction Tests', () => {
     expect(screen.getByText(/佐藤 拓海 さんの学習画面/)).toBeInTheDocument();
 
     // Toggle schedule config modal in StudentDashboard
-    const configBtn = screen.getByText(/通塾設定/i);
+    const configBtn = screen.getByText(/(通塾設定|授業設定)/i);
     fireEvent.click(configBtn);
     fireEvent.click(configBtn);
 
@@ -5474,7 +5474,7 @@ describe('UI Components Render & Interaction Tests', () => {
     }
 
     // 3.4 Open & Close schedule config modal
-    const configBtn = screen.queryByText(/通塾設定/);
+    const configBtn = screen.queryByText(/(通塾設定|授業設定)/);
     if (configBtn) {
       await act(async () => {
         fireEvent.click(configBtn);

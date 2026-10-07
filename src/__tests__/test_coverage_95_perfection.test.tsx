@@ -203,7 +203,7 @@ describe('Coverage Perfection 95%+ Target Test Suite', () => {
     }
 
     // Toggle Schedule Config
-    const configBtn = screen.queryByRole('button', { name: /通塾設定/i });
+    const configBtn = screen.queryByRole('button', { name: /(通塾設定|授業設定)/i });
     if (configBtn) {
       await act(async () => {
         fireEvent.click(configBtn);

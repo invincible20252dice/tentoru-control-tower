@@ -186,7 +186,7 @@ describe("Comprehensive Coverage 95% Perfection Suite", () => {
       }
 
       // 3. Open schedule config modal
-      const configBtn = screen.queryByText(/通塾設定/i);
+      const configBtn = screen.queryByText(/(通塾設定|授業設定)/i);
       if (configBtn) {
         await act(async () => {
           fireEvent.click(configBtn);

@@ -10,9 +10,10 @@ interface StudentDashboardProps {
   onBackToPortal: () => void;
   theme?: 'light' | 'dark';
   initialDate?: string;
+  onGoToTeacherSchedule?: (studentId: string, date: string) => void;
 }
 
-export default function StudentDashboard({ student, onBackToPortal, theme = 'light', initialDate }: StudentDashboardProps) {
+export default function StudentDashboard({ student, onBackToPortal, theme = 'light', initialDate, onGoToTeacherSchedule }: StudentDashboardProps) {
   const getSystemTodayStr = () => new Date().toISOString().split('T')[0];
   const systemTodayStr = getSystemTodayStr();
 
@@ -1710,10 +1711,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         </div>
         <div className={styles.headerActions}>
           <button 
-            onClick={() => setShowScheduleConfig(!showScheduleConfig)} 
+            onClick={() => {
+              if (onGoToTeacherSchedule) {
+                onGoToTeacherSchedule(currentStudent.id, currentDateStr);
+              } else {
+                setShowScheduleConfig(!showScheduleConfig);
+              }
+            }} 
             className={styles.subtleBtn}
           >
-            ⚙️ 通塾設定
+            ⚙️ 授業設定
           </button>
           {onBackToPortal && (
             <button onClick={onBackToPortal} className={styles.backBtn}>

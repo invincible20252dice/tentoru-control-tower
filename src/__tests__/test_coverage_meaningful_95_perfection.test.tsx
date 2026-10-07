@@ -4185,7 +4185,7 @@ describe('Meaningful 95%+ Coverage Perfection Suite', () => {
       );
 
       // 1. 通塾設定モーダルの開閉トグル (L1096)
-      const scheduleConfigBtn = screen.getByRole('button', { name: /⚙️ 通塾設定/i });
+      const scheduleConfigBtn = screen.getByRole('button', { name: /⚙️ (通塾設定|授業設定)/i });
       await act(async () => {
         fireEvent.click(scheduleConfigBtn);
       });

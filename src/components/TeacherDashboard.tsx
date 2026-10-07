@@ -38,7 +38,10 @@ import {
   normalizeStandardGrade,
   isElementaryStudent,
   isJuniorHighStudent,
-  isHighSchoolStudent
+  isHighSchoolStudent,
+  StudentInterview2,
+  StudentInterview3,
+  StudentInterviewCustomField
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -66,9 +69,9 @@ import {
   ensureMathEnglishUnitTests
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
-import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage } from '../lib/gemini';
+import { getGeminiApiKey, saveGeminiApiKey, analyzeReportCardImage, generateInterview2CoachingAdvice, generateInterview3CoachingAdvice } from '../lib/gemini';
 
-export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import';
+export type DashboardTabType = 'schedule' | 'curriculum' | 'mini-tests' | 'homeworks' | 'tests' | 'ai-report' | 'milestones' | 'student-list' | 'create-student' | 'student-detail' | 'branches' | 'curriculum-import' | 'two-way-interview' | 'three-way-interview';
 
 interface TeacherDashboardProps {
   students?: Student[];
@@ -298,6 +301,331 @@ export default function TeacherDashboard({
   }, []);
 
   const [activeTab, setActiveTab] = useState<DashboardTabType>(initialTab || 'student-list');
+
+  // Sync props to state if props change
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (initialDate) {
+      setScheduleDate(initialDate);
+    }
+  }, [initialDate]);
+
+  useEffect(() => {
+    if (initialStudentId && students && students.length > 0) {
+      const found = students.find(s => s.id === initialStudentId);
+      if (found) {
+        setSelectedStudent(found);
+      }
+    }
+  }, [initialStudentId, students]);
+
+  // 二者面談用 State
+  const [interviews2, setInterviews2] = useState<StudentInterview2[]>([]);
+  const [selectedInterview2Id, setSelectedInterview2Id] = useState<string | null>(null);
+  const [interviewer2, setInterviewer2] = useState('');
+  const [interviewDate2, setInterviewDate2] = useState(new Date().toISOString().split('T')[0]);
+  const [dreamGoal2, setDreamGoal2] = useState('');
+  const [targetSchool2, setTargetSchool2] = useState('');
+  const [clubActivity2, setClubActivity2] = useState('');
+  const [clubMembersCount2, setClubMembersCount2] = useState('');
+  const [closeFriends2, setCloseFriends2] = useState('');
+  const [studyAnxiety2, setStudyAnxiety2] = useState('');
+  const [selfEvaluation2, setSelfEvaluation2] = useState('');
+  const [studentChallenges2, setStudentChallenges2] = useState('');
+  const [requiredActions2, setRequiredActions2] = useState('');
+  const [expectations2, setExpectations2] = useState('');
+  const [targetRank2, setTargetRank2] = useState('');
+  const [targetScore2, setTargetScore2] = useState('');
+  const [notes2, setNotes2] = useState('');
+  const [customFields2, setCustomFields2] = useState<StudentInterviewCustomField[]>([]);
+  const [aiCoachingAdvice2, setAiCoachingAdvice2] = useState('');
+  const [isGeneratingAdvice2, setIsGeneratingAdvice2] = useState(false);
+
+  // 三者面談用 State
+  const [interviews3, setInterviews3] = useState<StudentInterview3[]>([]);
+  const [selectedInterview3Id, setSelectedInterview3Id] = useState<string | null>(null);
+  const [interviewer3, setInterviewer3] = useState('');
+  const [interviewDate3, setInterviewDate3] = useState(new Date().toISOString().split('T')[0]);
+  const [parentType3, setParentType3] = useState<string>('mother');
+  const [parentAnxieties3, setParentAnxieties3] = useState('');
+  const [discussedContent3, setDiscussedContent3] = useState('');
+  const [futureDirectionAgreed3, setFutureDirectionAgreed3] = useState<string>('yes');
+  const [notes3, setNotes3] = useState('');
+  const [customFields3, setCustomFields3] = useState<StudentInterviewCustomField[]>([]);
+  const [aiCoachingAdvice3, setAiCoachingAdvice3] = useState('');
+  const [isGeneratingAdvice3, setIsGeneratingAdvice3] = useState(false);
+
+  const resetInterview2Form = () => {
+    setSelectedInterview2Id(null);
+    setInterviewer2(selectedStudent?.teacher_in_charge || '担当講師');
+    setInterviewDate2(new Date().toISOString().split('T')[0]);
+    setDreamGoal2('');
+    setTargetSchool2(selectedStudent?.target_school || '');
+    setClubActivity2(selectedStudent?.club_activities || '');
+    setClubMembersCount2('');
+    setCloseFriends2('');
+    setStudyAnxiety2('');
+    setSelfEvaluation2('');
+    setStudentChallenges2('');
+    setRequiredActions2('');
+    setExpectations2('');
+    setTargetRank2('');
+    setTargetScore2('');
+    setNotes2('');
+    setCustomFields2([]);
+    setAiCoachingAdvice2('');
+  };
+
+  const selectInterview2 = (item: StudentInterview2) => {
+    setSelectedInterview2Id(item.id);
+    setInterviewer2(item.interviewer || '');
+    setInterviewDate2(item.interview_date || '');
+    setDreamGoal2(item.dream_goal || '');
+    setTargetSchool2(item.target_school || '');
+    setClubActivity2(item.club_activity || '');
+    setClubMembersCount2(item.club_members_count || '');
+    setCloseFriends2(item.close_friends || '');
+    setStudyAnxiety2(item.study_anxiety || '');
+    setSelfEvaluation2(item.self_evaluation || '');
+    setStudentChallenges2(item.student_challenges || '');
+    setRequiredActions2(item.required_actions || '');
+    setExpectations2(item.expectations || '');
+    setTargetRank2(item.target_rank || '');
+    setTargetScore2(item.target_score || '');
+    setNotes2(item.notes || '');
+    setCustomFields2(item.custom_fields || []);
+    setAiCoachingAdvice2(item.ai_coaching_advice || '');
+  };
+
+  const handleSaveInterview2 = async () => {
+    if (!selectedStudent) {
+      alert('生徒を選択してください。');
+      return;
+    }
+    if (!interviewDate2) {
+      alert('実施日を入力してください。');
+      return;
+    }
+    const payload: StudentInterview2 = {
+      id: selectedInterview2Id || `interview2-${selectedStudent.id}-${Date.now()}`,
+      student_id: selectedStudent.id,
+      interviewer: interviewer2 || selectedStudent?.teacher_in_charge || '担当講師',
+      interview_date: interviewDate2,
+      dream_goal: dreamGoal2,
+      target_school: targetSchool2,
+      club_activity: clubActivity2,
+      club_members_count: clubMembersCount2,
+      close_friends: closeFriends2,
+      study_anxiety: studyAnxiety2,
+      self_evaluation: selfEvaluation2,
+      student_challenges: studentChallenges2,
+      required_actions: requiredActions2,
+      expectations: expectations2,
+      target_rank: targetRank2,
+      target_score: targetScore2,
+      notes: notes2,
+      custom_fields: customFields2,
+      ai_coaching_advice: aiCoachingAdvice2,
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudentInterview2(payload);
+    setSelectedInterview2Id(payload.id);
+    const updated = db.getStudentInterviews2(selectedStudent.id);
+    setInterviews2(updated);
+    alert('二者面談の記録を保存しました。');
+  };
+
+  const handleDeleteInterview2 = async (id: string) => {
+    if (typeof window !== 'undefined' && !window.confirm('この面談記録を削除してもよろしいですか？')) return;
+    await db.deleteStudentInterview2(id);
+    if (selectedStudent) {
+      const updated = db.getStudentInterviews2(selectedStudent.id);
+      setInterviews2(updated);
+      if (selectedInterview2Id === id) {
+        if (updated.length > 0) {
+          selectInterview2(updated[0]);
+        } else {
+          resetInterview2Form();
+        }
+      }
+    }
+    alert('面談記録を削除しました。');
+  };
+
+  const handleGenerateAdvice2 = async () => {
+    setIsGeneratingAdvice2(true);
+    try {
+      const draft: Partial<StudentInterview2> = {
+        interviewer: interviewer2 || selectedStudent?.teacher_in_charge || '担当講師',
+        interview_date: interviewDate2,
+        dream_goal: dreamGoal2,
+        target_school: targetSchool2,
+        club_activity: clubActivity2,
+        club_members_count: clubMembersCount2,
+        close_friends: closeFriends2,
+        study_anxiety: studyAnxiety2,
+        self_evaluation: selfEvaluation2,
+        student_challenges: studentChallenges2,
+        required_actions: requiredActions2,
+        expectations: expectations2,
+        target_rank: targetRank2,
+        target_score: targetScore2,
+        notes: notes2,
+        custom_fields: customFields2
+      };
+      const advice = await generateInterview2CoachingAdvice(draft, selectedStudent);
+      setAiCoachingAdvice2(advice);
+    } catch (e: any) {
+      alert(`AIアドバイス生成でエラーが発生しました: ${e?.message || e}`);
+    } finally {
+      setIsGeneratingAdvice2(false);
+    }
+  };
+
+  const handleAddCustomField2 = () => {
+    setCustomFields2(prev => [...prev, { id: `cf2-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, label: '', value: '' }]);
+  };
+  const handleUpdateCustomField2 = (id: string, field: 'label' | 'value', val: string) => {
+    setCustomFields2(prev => prev.map(f => f.id === id ? { ...f, [field]: val } : f));
+  };
+  const handleRemoveCustomField2 = (id: string) => {
+    setCustomFields2(prev => prev.filter(f => f.id !== id));
+  };
+
+  const resetInterview3Form = () => {
+    setSelectedInterview3Id(null);
+    setInterviewer3(selectedStudent?.teacher_in_charge || '担当講師');
+    setInterviewDate3(new Date().toISOString().split('T')[0]);
+    setParentType3('mother');
+    setParentAnxieties3('');
+    setDiscussedContent3('');
+    setFutureDirectionAgreed3('yes');
+    setNotes3('');
+    setCustomFields3([]);
+    setAiCoachingAdvice3('');
+  };
+
+  const selectInterview3 = (item: StudentInterview3) => {
+    setSelectedInterview3Id(item.id);
+    setInterviewer3(item.interviewer || '');
+    setInterviewDate3(item.interview_date || '');
+    setParentType3(item.parent_type || 'mother');
+    setParentAnxieties3(item.parent_anxieties || '');
+    setDiscussedContent3(item.discussed_content || '');
+    setFutureDirectionAgreed3(item.future_direction_agreed === false || item.future_direction_agreed === 'no' ? 'no' : 'yes');
+    setNotes3(item.notes || '');
+    setCustomFields3(item.custom_fields || []);
+    setAiCoachingAdvice3(item.ai_coaching_advice || '');
+  };
+
+  const handleSaveInterview3 = async () => {
+    if (!selectedStudent) {
+      alert('生徒を選択してください。');
+      return;
+    }
+    if (!interviewDate3) {
+      alert('実施日を入力してください。');
+      return;
+    }
+    const payload: StudentInterview3 = {
+      id: selectedInterview3Id || `interview3-${selectedStudent.id}-${Date.now()}`,
+      student_id: selectedStudent.id,
+      interviewer: interviewer3 || selectedStudent?.teacher_in_charge || '担当講師',
+      interview_date: interviewDate3,
+      parent_type: parentType3,
+      parent_anxieties: parentAnxieties3,
+      discussed_content: discussedContent3,
+      future_direction_agreed: futureDirectionAgreed3,
+      notes: notes3,
+      custom_fields: customFields3,
+      ai_coaching_advice: aiCoachingAdvice3,
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudentInterview3(payload);
+    setSelectedInterview3Id(payload.id);
+    const updated = db.getStudentInterviews3(selectedStudent.id);
+    setInterviews3(updated);
+    alert('三者面談の記録を保存しました。');
+  };
+
+  const handleDeleteInterview3 = async (id: string) => {
+    if (typeof window !== 'undefined' && !window.confirm('この面談記録を削除してもよろしいですか？')) return;
+    await db.deleteStudentInterview3(id);
+    if (selectedStudent) {
+      const updated = db.getStudentInterviews3(selectedStudent.id);
+      setInterviews3(updated);
+      if (selectedInterview3Id === id) {
+        if (updated.length > 0) {
+          selectInterview3(updated[0]);
+        } else {
+          resetInterview3Form();
+        }
+      }
+    }
+    alert('面談記録を削除しました。');
+  };
+
+  const handleGenerateAdvice3 = async () => {
+    setIsGeneratingAdvice3(true);
+    try {
+      const draft: Partial<StudentInterview3> = {
+        interviewer: interviewer3 || selectedStudent?.teacher_in_charge || '担当講師',
+        interview_date: interviewDate3,
+        parent_type: parentType3,
+        parent_anxieties: parentAnxieties3,
+        discussed_content: discussedContent3,
+        future_direction_agreed: futureDirectionAgreed3,
+        notes: notes3,
+        custom_fields: customFields3
+      };
+      const advice = await generateInterview3CoachingAdvice(draft, selectedStudent);
+      setAiCoachingAdvice3(advice);
+    } catch (e: any) {
+      alert(`AIアドバイス生成でエラーが発生しました: ${e?.message || e}`);
+    } finally {
+      setIsGeneratingAdvice3(false);
+    }
+  };
+
+  const handleAddCustomField3 = () => {
+    setCustomFields3(prev => [...prev, { id: `cf3-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, label: '', value: '' }]);
+  };
+  const handleUpdateCustomField3 = (id: string, field: 'label' | 'value', val: string) => {
+    setCustomFields3(prev => prev.map(f => f.id === id ? { ...f, [field]: val } : f));
+  };
+  const handleRemoveCustomField3 = (id: string) => {
+    setCustomFields3(prev => prev.filter(f => f.id !== id));
+  };
+
+  // Sync interviews on student change
+  useEffect(() => {
+    if (selectedStudent) {
+      const list2 = db.getStudentInterviews2(selectedStudent.id);
+      setInterviews2(list2);
+      if (list2.length > 0) {
+        selectInterview2(list2[0]);
+      } else {
+        resetInterview2Form();
+      }
+
+      const list3 = db.getStudentInterviews3(selectedStudent.id);
+      setInterviews3(list3);
+      if (list3.length > 0) {
+        selectInterview3(list3[0]);
+      } else {
+        resetInterview3Form();
+      }
+    } else {
+      setInterviews2([]);
+      setInterviews3([]);
+    }
+  }, [selectedStudent?.id]);
+
   const [milestonePlans, setMilestonePlans] = useState<MilestonePlan[]>([]);
 
   // 生徒詳細（生徒情報）画面用 State
@@ -4183,6 +4511,20 @@ export default function TeacherDashboard({
             >
               AI指導報告書
             </button>
+            <button
+              data-testid="menu-two-way-interview"
+              className={`${styles.menuItem} ${activeTab === 'two-way-interview' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('two-way-interview')}
+            >
+              💬 二者面談
+            </button>
+            <button
+              data-testid="menu-three-way-interview"
+              className={`${styles.menuItem} ${activeTab === 'three-way-interview' ? styles.menuItemActive : ''}`}
+              onClick={() => setActiveTab('three-way-interview')}
+            >
+              👨‍👩‍👦 三者面談
+            </button>
           </div>
 
           {/* Headquarters Group (Admin Only) */}
@@ -7002,6 +7344,819 @@ export default function TeacherDashboard({
                             © Individual Learning Management System - Tentoru Control Tower
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: 二者面談 */}
+              {activeTab === 'two-way-interview' && (
+                <div className={styles.card} data-testid="two-way-interview-view">
+                  <div className={styles.cardTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>💬 二者面談（生徒 × 講師）</span>
+                      <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                        生徒と個別にじっくり向き合い、夢や悩み、課題を把握して今後のコーチング・声かけ方針を策定します。
+                      </p>
+                    </div>
+                    {/* 生徒選択ドロップダウン */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>対象生徒:</label>
+                      <select
+                        data-testid="interview2-student-select"
+                        value={selectedStudent?.id || ''}
+                        onChange={(e) => {
+                          const st = students.find(s => s.id === e.target.value);
+                          if (st) setSelectedStudent(st);
+                        }}
+                        style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                      >
+                        {students.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', marginTop: '16px' }}>
+                    {/* 左側: 過去の面談履歴一覧 */}
+                    <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#334155' }}>📅 面談履歴 ({interviews2.length}件)</h4>
+                        <button
+                          type="button"
+                          data-testid="interview2-new-btn"
+                          onClick={resetInterview2Form}
+                          style={{
+                            padding: '4px 8px',
+                            background: '#4f46e5',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            fontWeight: 600
+                          }}
+                        >
+                          ➕ 新規作成
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '700px', overflowY: 'auto' }}>
+                        {interviews2.length === 0 ? (
+                          <div style={{ padding: '16px 8px', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                            保存された面談記録はありません。「新規作成」から入力してください。
+                          </div>
+                        ) : (
+                          interviews2.map(item => {
+                            const isSelected = selectedInterview2Id === item.id;
+                            return (
+                              <div
+                                key={item.id}
+                                data-testid={`interview2-item-${item.id}`}
+                                onClick={() => selectInterview2(item)}
+                                style={{
+                                  padding: '10px 12px',
+                                  borderRadius: '8px',
+                                  border: isSelected ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                                  background: isSelected ? '#eef2ff' : '#ffffff',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '0.88rem', color: isSelected ? '#4338ca' : '#1e293b' }}>
+                                    {item.interview_date || '日付未設定'}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    {item.interviewer}
+                                  </span>
+                                </div>
+                                {item.target_school && (
+                                  <div style={{ fontSize: '0.75rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    🎯 志望校: {item.target_school}
+                                  </div>
+                                )}
+                                {item.dream_goal && (
+                                  <div style={{ fontSize: '0.75rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    ✨ 夢: {item.dream_goal}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 右側: 入力フォーム & AIアドバイス */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <div style={{ background: '#ffffff', padding: '20px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#1e293b' }}>
+                            {selectedInterview2Id ? '📝 面談記録の編集' : '✨ 新規二者面談の入力'}
+                          </h3>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {selectedInterview2Id && (
+                              <button
+                                type="button"
+                                data-testid="interview2-delete-btn"
+                                onClick={() => handleDeleteInterview2(selectedInterview2Id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#fee2e2',
+                                  color: '#dc2626',
+                                  border: '1px solid #fca5a5',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                🗑️ 削除
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              data-testid="interview2-save-btn"
+                              onClick={handleSaveInterview2}
+                              style={{
+                                padding: '6px 16px',
+                                background: '#4f46e5',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: 'pointer',
+                                fontWeight: 700
+                              }}
+                            >
+                              💾 面談を保存
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 基本項目グリッド */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>面談担当者 *</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-interviewer"
+                              value={interviewer2}
+                              onChange={e => setInterviewer2(e.target.value)}
+                              placeholder="例: 佐藤講師"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>実施日 *</label>
+                            <input
+                              type="date"
+                              data-testid="interview2-date"
+                              value={interviewDate2}
+                              onChange={e => setInterviewDate2(e.target.value)}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>志望校</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-target-school"
+                              value={targetSchool2}
+                              onChange={e => setTargetSchool2(e.target.value)}
+                              placeholder="例: 県立第一高校 / 〇〇大学"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>将来の夢・なりたい像</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-dream-goal"
+                              value={dreamGoal2}
+                              onChange={e => setDreamGoal2(e.target.value)}
+                              placeholder="例: 医療関係の仕事、ゲームクリエイター"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>所属部活・クラブ</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-club-activity"
+                              value={clubActivity2}
+                              onChange={e => setClubActivity2(e.target.value)}
+                              placeholder="例: サッカー部、吹奏楽部"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>人数 (部活等)</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-club-members-count"
+                              value={clubMembersCount2}
+                              onChange={e => setClubMembersCount2(e.target.value)}
+                              placeholder="例: 30人、同学年8人"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>部活や日頃で仲良い人</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-close-friends"
+                              value={closeFriends2}
+                              onChange={e => setCloseFriends2(e.target.value)}
+                              placeholder="例: 同クラスのA君、部活のキャプテン"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>目標順位</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-target-rank"
+                              value={targetRank2}
+                              onChange={e => setTargetRank2(e.target.value)}
+                              placeholder="例: 学年20位以内、クラス5位以内"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>目標点数</label>
+                            <input
+                              type="text"
+                              data-testid="interview2-target-score"
+                              value={targetScore2}
+                              onChange={e => setTargetScore2(e.target.value)}
+                              placeholder="例: 5教科420点、数学85点"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* テキストエリア詳細項目 */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>勉強に関しての不安</label>
+                            <textarea
+                              data-testid="interview2-study-anxiety"
+                              value={studyAnxiety2}
+                              onChange={e => setStudyAnxiety2(e.target.value)}
+                              placeholder="例: 英語の長文が読めない、テスト前しかやる気が出ない"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>今の勉強状況への自己評価</label>
+                            <textarea
+                              data-testid="interview2-self-evaluation"
+                              value={selfEvaluation2}
+                              onChange={e => setSelfEvaluation2(e.target.value)}
+                              placeholder="例: 宿題はやるが、復習までは手が回っていない。10点満点中5点くらい"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>今の生徒の課題点</label>
+                            <textarea
+                              data-testid="interview2-student-challenges"
+                              value={studentChallenges2}
+                              onChange={e => setStudentChallenges2(e.target.value)}
+                              placeholder="例: 間違えた問題のやり直しを放置しがち。公式の丸暗記に頼っている"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>行動ベースで求めること</label>
+                            <textarea
+                              data-testid="interview2-required-actions"
+                              value={requiredActions2}
+                              onChange={e => setRequiredActions2(e.target.value)}
+                              placeholder="例: 授業翌日中に宿題を一度開き、わからない問題に印をつける"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>これから期待していること</label>
+                            <textarea
+                              data-testid="interview2-expectations"
+                              value={expectations2}
+                              onChange={e => setExpectations2(e.target.value)}
+                              placeholder="例: 粘り強く質問に来る姿勢、自分から自習室を活用する自立性"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>その他 (メモ・自由記入)</label>
+                            <textarea
+                              data-testid="interview2-notes"
+                              value={notes2}
+                              onChange={e => setNotes2(e.target.value)}
+                              placeholder="例: 次回模試の申込日をリマインドする"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* 動的カスタム項目セクション */}
+                        <div style={{ marginTop: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+                              ➕ 独自に追加する項目 ({customFields2.length}個)
+                            </span>
+                            <button
+                              type="button"
+                              data-testid="interview2-add-custom-field-btn"
+                              onClick={handleAddCustomField2}
+                              style={{
+                                padding: '4px 10px',
+                                background: '#3b82f6',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                              }}
+                            >
+                              ➕ 項目を追加
+                            </button>
+                          </div>
+                          {customFields2.length === 0 ? (
+                            <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8' }}>
+                              面談内容に応じて項目を自由に追加できます（例: スマホ利用時間、通学時間、習い事など）。
+                            </p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {customFields2.map((f, idx) => (
+                                <div key={f.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                  <input
+                                    type="text"
+                                    placeholder="項目名 (例: 睡眠時間)"
+                                    value={f.label}
+                                    data-testid={`interview2-custom-label-${idx}`}
+                                    onChange={e => handleUpdateCustomField2(f.id, 'label', e.target.value)}
+                                    style={{ width: '180px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="内容 (例: 7時間、平日23時就寝)"
+                                    value={f.value}
+                                    data-testid={`interview2-custom-value-${idx}`}
+                                    onChange={e => handleUpdateCustomField2(f.id, 'value', e.target.value)}
+                                    style={{ flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCustomField2(f.id)}
+                                    style={{
+                                      padding: '6px 8px',
+                                      background: '#fee2e2',
+                                      color: '#ef4444',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      fontSize: '0.75rem',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* AI コーチング・カウンセリングまとめセクション */}
+                      <div style={{ background: '#fdf4ff', padding: '20px', borderRadius: '10px', border: '1px solid #f0abfc', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#86198f' }}>
+                              🤖 AIコーチング・声かけアドバイス生成
+                            </h4>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#a21caf' }}>
+                              入力された面談内容をもとに、心理カウンセリング視点での今後の接し方や具体的な声かけフレーズをAIがまとめます。
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            data-testid="interview2-generate-ai-btn"
+                            onClick={handleGenerateAdvice2}
+                            disabled={isGeneratingAdvice2}
+                            style={{
+                              padding: '8px 16px',
+                              background: isGeneratingAdvice2 ? '#d8b4fe' : 'linear-gradient(135deg, #a855f7, #9333ea)',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '0.85rem',
+                              cursor: isGeneratingAdvice2 ? 'not-allowed' : 'pointer',
+                              fontWeight: 700,
+                              boxShadow: '0 2px 4px rgba(147, 51, 234, 0.2)'
+                            }}
+                          >
+                            {isGeneratingAdvice2 ? '⏳ 生成中...' : '✨ アドバイスを自動生成'}
+                          </button>
+                        </div>
+
+                        <textarea
+                          data-testid="interview2-ai-advice"
+                          value={aiCoachingAdvice2}
+                          onChange={e => setAiCoachingAdvice2(e.target.value)}
+                          placeholder="「✨ アドバイスを自動生成」ボタンを押すと、生徒の心理状況分析、今後の指導方針、具体的な声かけ例（授業前後・宿題確認時）が自動で構築されます。講師による追記・修正も可能です。"
+                          rows={10}
+                          style={{
+                            width: '100%',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid #e879f9',
+                            background: '#ffffff',
+                            fontSize: '0.85rem',
+                            lineHeight: 1.6,
+                            fontFamily: 'inherit'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: 三者面談 */}
+              {activeTab === 'three-way-interview' && (
+                <div className={styles.card} data-testid="three-way-interview-view">
+                  <div className={styles.cardTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>👨‍👩‍👦 三者面談（生徒 × 保護者 × 講師）</span>
+                      <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                        生徒・保護者・教室の三者で方針をすり合わせ、家庭連携と安心感を育むコーチング・カウンセリング方針を策定します。
+                      </p>
+                    </div>
+                    {/* 生徒選択ドロップダウン */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>対象生徒:</label>
+                      <select
+                        data-testid="interview3-student-select"
+                        value={selectedStudent?.id || ''}
+                        onChange={(e) => {
+                          const st = students.find(s => s.id === e.target.value);
+                          if (st) setSelectedStudent(st);
+                        }}
+                        style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                      >
+                        {students.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', marginTop: '16px' }}>
+                    {/* 左側: 過去の面談履歴一覧 */}
+                    <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#334155' }}>📅 面談履歴 ({interviews3.length}件)</h4>
+                        <button
+                          type="button"
+                          data-testid="interview3-new-btn"
+                          onClick={resetInterview3Form}
+                          style={{
+                            padding: '4px 8px',
+                            background: '#0d9488',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            fontWeight: 600
+                          }}
+                        >
+                          ➕ 新規作成
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '700px', overflowY: 'auto' }}>
+                        {interviews3.length === 0 ? (
+                          <div style={{ padding: '16px 8px', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                            保存された面談記録はありません。「新規作成」から入力してください。
+                          </div>
+                        ) : (
+                          interviews3.map(item => {
+                            const isSelected = selectedInterview3Id === item.id;
+                            const parentText = item.parent_type === 'mother' ? '母' : item.parent_type === 'father' ? '父' : item.parent_type === 'both' ? '両親' : item.parent_type || '保護者';
+                            return (
+                              <div
+                                key={item.id}
+                                data-testid={`interview3-item-${item.id}`}
+                                onClick={() => selectInterview3(item)}
+                                style={{
+                                  padding: '10px 12px',
+                                  borderRadius: '8px',
+                                  border: isSelected ? '2px solid #0d9488' : '1px solid #cbd5e1',
+                                  background: isSelected ? '#f0fdfa' : '#ffffff',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '0.88rem', color: isSelected ? '#0f766e' : '#1e293b' }}>
+                                    {item.interview_date || '日付未設定'}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    同席: {parentText}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#475569' }}>
+                                  方向性: {item.future_direction_agreed === true || item.future_direction_agreed === 'yes' ? '✅ 合意' : '⚠️ 継続検討'}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 右側: 入力フォーム & AIアドバイス */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <div style={{ background: '#ffffff', padding: '20px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#1e293b' }}>
+                            {selectedInterview3Id ? '📝 三者面談記録の編集' : '✨ 新規三者面談の入力'}
+                          </h3>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {selectedInterview3Id && (
+                              <button
+                                type="button"
+                                data-testid="interview3-delete-btn"
+                                onClick={() => handleDeleteInterview3(selectedInterview3Id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#fee2e2',
+                                  color: '#dc2626',
+                                  border: '1px solid #fca5a5',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                🗑️ 削除
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              data-testid="interview3-save-btn"
+                              onClick={handleSaveInterview3}
+                              style={{
+                                padding: '6px 16px',
+                                background: '#0d9488',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                cursor: 'pointer',
+                                fontWeight: 700
+                              }}
+                            >
+                              💾 面談を保存
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 基本項目グリッド */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>面談担当者 *</label>
+                            <input
+                              type="text"
+                              data-testid="interview3-interviewer"
+                              value={interviewer3}
+                              onChange={e => setInterviewer3(e.target.value)}
+                              placeholder="例: 佐藤講師"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>実施日 *</label>
+                            <input
+                              type="date"
+                              data-testid="interview3-date"
+                              value={interviewDate3}
+                              onChange={e => setInterviewDate3(e.target.value)}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>保護者 *</label>
+                            <select
+                              data-testid="interview3-parent-type"
+                              value={parentType3}
+                              onChange={e => setParentType3(e.target.value)}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            >
+                              <option value="mother">母</option>
+                              <option value="father">父</option>
+                              <option value="both">両親</option>
+                              <option value="other">その他</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>今後の方向性は話したか？ *</label>
+                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', height: '38px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', cursor: 'pointer' }}>
+                                <input
+                                  type="radio"
+                                  name="future_direction_agreed"
+                                  value="yes"
+                                  checked={futureDirectionAgreed3 === 'yes'}
+                                  onChange={() => setFutureDirectionAgreed3('yes')}
+                                  data-testid="interview3-direction-yes"
+                                />
+                                Yes (合意・共有済み)
+                              </label>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', cursor: 'pointer' }}>
+                                <input
+                                  type="radio"
+                                  name="future_direction_agreed"
+                                  value="no"
+                                  checked={futureDirectionAgreed3 === 'no'}
+                                  onChange={() => setFutureDirectionAgreed3('no')}
+                                  data-testid="interview3-direction-no"
+                                />
+                                No (次回へ持ち越し)
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* テキストエリア詳細項目 */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '14px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>保護者にとっての不安・疑問</label>
+                            <textarea
+                              data-testid="interview3-parent-anxieties"
+                              value={parentAnxieties3}
+                              onChange={e => setParentAnxieties3(e.target.value)}
+                              placeholder="例: 自宅で机に向かう時間が短く心配、志望校の推薦基準に届くか不安"
+                              rows={3}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>話した内容（志望校、コース選択など）</label>
+                            <textarea
+                              data-testid="interview3-discussed-content"
+                              value={discussedContent3}
+                              onChange={e => setDiscussedContent3(e.target.value)}
+                              placeholder="例: 県立トップ校の普通科を第一志望とする。秋以降は数学・英語の演習コマを週1追加する方針で合意。"
+                              rows={4}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>その他 (メモ・自由記入)</label>
+                            <textarea
+                              data-testid="interview3-notes"
+                              value={notes3}
+                              onChange={e => setNotes3(e.target.value)}
+                              placeholder="例: 次回面談は11月実施予定。来月電話にて中間進捗を報告する。"
+                              rows={2}
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* 動的カスタム項目セクション */}
+                        <div style={{ marginTop: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+                              ➕ 独自に追加する項目 ({customFields3.length}個)
+                            </span>
+                            <button
+                              type="button"
+                              data-testid="interview3-add-custom-field-btn"
+                              onClick={handleAddCustomField3}
+                              style={{
+                                padding: '4px 10px',
+                                background: '#0d9488',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                              }}
+                            >
+                              ➕ 項目を追加
+                            </button>
+                          </div>
+                          {customFields3.length === 0 ? (
+                            <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8' }}>
+                              面談内容に応じて項目を自由に追加できます（例: 季節講習の受講希望、家庭学習環境、学費面など）。
+                            </p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {customFields3.map((f, idx) => (
+                                <div key={f.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                  <input
+                                    type="text"
+                                    placeholder="項目名 (例: 季節講習)"
+                                    value={f.label}
+                                    data-testid={`interview3-custom-label-${idx}`}
+                                    onChange={e => handleUpdateCustomField3(f.id, 'label', e.target.value)}
+                                    style={{ width: '180px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="内容 (例: 夏期講習20コマ希望)"
+                                    value={f.value}
+                                    data-testid={`interview3-custom-value-${idx}`}
+                                    onChange={e => handleUpdateCustomField3(f.id, 'value', e.target.value)}
+                                    style={{ flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCustomField3(f.id)}
+                                    style={{
+                                      padding: '6px 8px',
+                                      background: '#fee2e2',
+                                      color: '#ef4444',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      fontSize: '0.75rem',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* AI コーチング・家庭連携まとめセクション */}
+                      <div style={{ background: '#f0fdfa', padding: '20px', borderRadius: '10px', border: '1px solid #99f6e4', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#115e59' }}>
+                              🤖 AIコーチング・家庭連携アドバイス生成
+                            </h4>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#0f766e' }}>
+                              面談内容を分析し、保護者の不安解消、家庭での安心基地づくり、塾と家庭の連携アクションプランをAIがまとめます。
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            data-testid="interview3-generate-ai-btn"
+                            onClick={handleGenerateAdvice3}
+                            disabled={isGeneratingAdvice3}
+                            style={{
+                              padding: '8px 16px',
+                              background: isGeneratingAdvice3 ? '#99f6e4' : 'linear-gradient(135deg, #0d9488, #0f766e)',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '0.85rem',
+                              cursor: isGeneratingAdvice3 ? 'not-allowed' : 'pointer',
+                              fontWeight: 700,
+                              boxShadow: '0 2px 4px rgba(13, 148, 136, 0.2)'
+                            }}
+                          >
+                            {isGeneratingAdvice3 ? '⏳ 生成中...' : '✨ アドバイスを自動生成'}
+                          </button>
+                        </div>
+
+                        <textarea
+                          data-testid="interview3-ai-advice"
+                          value={aiCoachingAdvice3}
+                          onChange={e => setAiCoachingAdvice3(e.target.value)}
+                          placeholder="「✨ アドバイスを自動生成」ボタンを押すと、三者面談の総括、塾・家庭での役割分担、生徒・保護者へのアプローチ指針、次回フォローへのアクションプランが自動で構築されます。講師による追記・修正も可能です。"
+                          rows={10}
+                          style={{
+                            width: '100%',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid #5eead4',
+                            background: '#ffffff',
+                            fontSize: '0.85rem',
+                            lineHeight: 1.6,
+                            fontFamily: 'inherit'
+                          }}
+                        />
                       </div>
                     </div>
                   </div>

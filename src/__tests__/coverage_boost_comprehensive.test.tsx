@@ -268,7 +268,7 @@ describe('Coverage Boost Comprehensive Suite (Targets 95%+ Coverage across DB, D
       });
 
       // Attendance Schedule Config Modal Toggle
-      const configBtn = screen.getByRole('button', { name: /通塾設定/i });
+      const configBtn = screen.getByRole('button', { name: /(通塾設定|授業設定)/i });
       await act(async () => {
         fireEvent.click(configBtn);
       });

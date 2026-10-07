@@ -149,6 +149,52 @@ export interface StudentScheduleConfig {
   updated_at?: string;
 }
 
+export interface StudentInterviewCustomField {
+  id: string;
+  label: string;
+  value: string;
+}
+
+export interface StudentInterview2 {
+  id: string;
+  student_id: string;
+  interviewer: string;          // 面談担当者
+  interview_date: string;       // 実施日 (YYYY-MM-DD)
+  dream_goal?: string;          // 将来の夢・なりたい像
+  target_school?: string;       // 志望校
+  club_activity?: string;       // 所属部活・クラブ
+  club_members_count?: string;  // 人数
+  close_friends?: string;       // 部活や日頃で仲良い人
+  study_anxiety?: string;       // 勉強に関しての不安
+  self_evaluation?: string;     // 今の勉強状況への自己評価
+  student_challenges?: string;  // 今の生徒の課題点
+  required_actions?: string;    // 行動ベースで求めること
+  expectations?: string;        // これから期待していること
+  target_rank?: string;         // 目標順位
+  target_score?: string;        // 目標点数
+  notes?: string;               // その他
+  custom_fields?: StudentInterviewCustomField[];
+  ai_coaching_advice?: string;  // AIコーチング・声かけアドバイス
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface StudentInterview3 {
+  id: string;
+  student_id: string;
+  interviewer: string;          // 面談担当者
+  interview_date: string;       // 実施日 (YYYY-MM-DD)
+  parent_type: string;          // 保護者（母、父、両親、その他）
+  parent_anxieties?: string;    // 保護者にとっての不安・疑問
+  discussed_content?: string;   // 話した内容（志望校、コース選択）
+  future_direction_agreed: boolean | 'yes' | 'no' | string; // 今後の方向性は話したか？（Yes / No）
+  notes?: string;               // その他
+  custom_fields?: StudentInterviewCustomField[];
+  ai_coaching_advice?: string;  // AIコーチング・家庭連携アドバイス
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface StudentInteraction {
   id: string;
   student_id: string;
@@ -4805,6 +4851,90 @@ class DatabaseService {
         console.error('Error saving session:', e);
       }
     }
+  }
+
+  // StudentInterviews (2者面談) CRUD
+  public getStudentInterviews2(studentId?: string): StudentInterview2[] {
+    const list = this.getMockData<StudentInterview2>('student_interviews_2', []);
+    if (studentId) {
+      return list.filter(i => i.student_id === studentId).sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+    }
+    return list.sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+  }
+
+  public async saveStudentInterview2(interview: StudentInterview2): Promise<StudentInterview2> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('student_interviews_2').upsert(interview).select().single();
+        if (!error && data) return data;
+      } catch (e) {
+        console.warn('Supabase saveStudentInterview2 warning:', e);
+      }
+    }
+    const list = this.getStudentInterviews2();
+    const idx = list.findIndex(i => i.id === interview.id);
+    if (idx >= 0) {
+      list[idx] = { ...interview, updated_at: new Date().toISOString() };
+    } else {
+      list.push({ ...interview, created_at: interview.created_at || new Date().toISOString() });
+    }
+    this.saveMockData('student_interviews_2', list);
+    return interview;
+  }
+
+  public async deleteStudentInterview2(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('student_interviews_2').delete().eq('id', id);
+      } catch (e) {
+        console.warn('Supabase deleteStudentInterview2 warning:', e);
+      }
+    }
+    const list = this.getStudentInterviews2();
+    const filtered = list.filter(i => i.id !== id);
+    this.saveMockData('student_interviews_2', filtered);
+  }
+
+  // StudentInterviews (3者面談) CRUD
+  public getStudentInterviews3(studentId?: string): StudentInterview3[] {
+    const list = this.getMockData<StudentInterview3>('student_interviews_3', []);
+    if (studentId) {
+      return list.filter(i => i.student_id === studentId).sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+    }
+    return list.sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+  }
+
+  public async saveStudentInterview3(interview: StudentInterview3): Promise<StudentInterview3> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('student_interviews_3').upsert(interview).select().single();
+        if (!error && data) return data;
+      } catch (e) {
+        console.warn('Supabase saveStudentInterview3 warning:', e);
+      }
+    }
+    const list = this.getStudentInterviews3();
+    const idx = list.findIndex(i => i.id === interview.id);
+    if (idx >= 0) {
+      list[idx] = { ...interview, updated_at: new Date().toISOString() };
+    } else {
+      list.push({ ...interview, created_at: interview.created_at || new Date().toISOString() });
+    }
+    this.saveMockData('student_interviews_3', list);
+    return interview;
+  }
+
+  public async deleteStudentInterview3(id: string): Promise<void> {
+    if (!this.isMockMode && this.supabase) {
+      try {
+        await this.supabase.from('student_interviews_3').delete().eq('id', id);
+      } catch (e) {
+        console.warn('Supabase deleteStudentInterview3 warning:', e);
+      }
+    }
+    const list = this.getStudentInterviews3();
+    const filtered = list.filter(i => i.id !== id);
+    this.saveMockData('student_interviews_3', filtered);
   }
 
   public async signOut(): Promise<void> {
