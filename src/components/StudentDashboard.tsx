@@ -189,7 +189,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     }
 
     // 今日のタスク (period があり、予定日が targetDate)
-    const today = studentTasks.filter(t => t.scheduled_date === targetDate && t.period !== null);
+    // 旧フォーマットの不要な【やり直し授業】タスクを除外
+    const today = studentTasks
+      .filter(t => t.scheduled_date === targetDate && t.period !== null)
+      .filter(t => 
+        !t.custom_unit_name?.includes('【やり直し授業】') &&
+        !t.start_lesson_name?.includes('【やり直し授業】') &&
+        !t.lesson_range?.includes('【やり直し授業】')
+      );
     today.sort((a, b) => (a.period || 0) - (b.period || 0));
     setTodayTasks(today);
 
@@ -635,16 +642,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .trim() || '単元';
     const reTestContent = `${subjectName}: ${cleanUnitName}（再テスト）`;
 
-    if (targetTask) {
-      const updatedTask: LearningTask = {
-        ...targetTask,
-        status: 'failed' as const,
-        test_passed: false
-      };
-      setTasks(prev => prev.map(t => t.id === targetTask.id ? updatedTask : t));
-      setTodayTasks(prev => prev.map(t => t.id === targetTask.id ? updatedTask : t));
-      await db.saveLearningTasks([updatedTask]);
-    }
+    const updatedTask: LearningTask | undefined = targetTask ? {
+      ...targetTask,
+      status: 'failed' as const,
+      test_passed: false
+    } : undefined;
 
     // 0. 本日の小テスト結果管理にも不合格結果を保存・更新（講師ダッシュボードとの完全連動）
     const failedScoreVal = targetTask && taskScores[targetTask.id] ? parseInt(taskScores[targetTask.id], 10) : 60;
@@ -686,11 +688,35 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       return [...prev, todayMiniFailed];
     });
 
-    // 1. 自動的に「単元確認テスト　ーやり直しー」が生徒の管理画面に追加され、完了するボタンも発生する
-    const currentDayTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
-    const maxPeriod = currentDayTasks.length > 0 ? Math.max(...currentDayTasks.map(t => t.period || 1)) : 1;
-    const remedialPeriod = maxPeriod + 1;
+    // 1. 直後のコマ（2コマ目）に「単元確認テスト　ーやり直しー」を挿入し、後続タスクをシフト＆旧やり直しタスクを排除
+    const currentDayAllTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
+
+    // クリーンアップ対象: 古い【やり直し授業】を含むタスク、または既存の重複やり直しタスク
+    const sanitizedDayTasks = currentDayAllTasks.filter(t => {
+      if (targetTask && t.id === targetTask.id) return false;
+      const isRemedial = t.custom_unit_name?.includes('【やり直し授業】') ||
+                         t.start_lesson_name?.includes('【やり直し授業】') ||
+                         t.lesson_range?.includes('【やり直し授業】') ||
+                         t.custom_unit_name?.includes('ーやり直しー') ||
+                         t.start_lesson_name?.includes('ーやり直しー') ||
+                         t.lesson_range?.includes('ーやり直しー');
+      return !isRemedial;
+    });
+
+    const targetPeriod = targetTask?.period || 1;
+    const remedialPeriod = targetPeriod + 1; // 1の不合格なら直後の2コマ目に挿入！
     const remedialTitle = '単元確認テスト　ーやり直しー';
+
+    // targetPeriod より後のタスク（元々のコマ2の英語、コマ3の国語など）の period を +1 シフト
+    const shiftedTasks = sanitizedDayTasks.map(t => {
+      if ((t.period || 0) >= remedialPeriod) {
+        return {
+          ...t,
+          period: (t.period || 0) + 1
+        };
+      }
+      return t;
+    });
 
     const remedialTask: LearningTask = {
       id: `task-remedial-${currentStudent.id}-${Date.now()}`,
@@ -711,10 +737,22 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       completed_lesson_ids: [],
       created_at: new Date().toISOString()
     };
-    
-    setTasks(prev => [...prev, remedialTask]);
-    setTodayTasks(prev => [...prev, remedialTask]);
-    await db.saveLearningTasks([remedialTask]);
+
+    const newDayTasks = [
+      ...(updatedTask ? [updatedTask] : []),
+      remedialTask,
+      ...shiftedTasks
+    ].sort((a, b) => (a.period || 0) - (b.period || 0));
+
+    // 当日のタスクを新構成で同期保存
+    await db.deleteLearningTasksForDate(currentStudent.id, currentDateStr);
+    await db.saveLearningTasks(newDayTasks);
+
+    setTasks(prev => {
+      const otherDateTasks = prev.filter(t => !(t.student_id === currentStudent.id && t.scheduled_date === currentDateStr));
+      return [...otherDateTasks, ...newDayTasks];
+    });
+    setTodayTasks(newDayTasks);
 
     // 2. 次回通塾予定日の計算 & 再テスト自動スケジュール
     const nextAttendanceDate = getNextAttendanceDate(currentDateStr, currentStudent);
@@ -801,20 +839,63 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
     studentCompletedIds.add(stepIdStr);
 
+    const isUnitTest = Boolean(
+      task.start_lesson_name?.includes('単元テスト') ||
+      task.start_lesson_name?.includes('確認テスト') ||
+      task.start_lesson_name?.includes('単元確認テスト') ||
+      task.start_lesson_name?.includes('再テスト') ||
+      task.end_lesson_name?.includes('単元テスト') ||
+      task.end_lesson_name?.includes('確認テスト') ||
+      task.end_lesson_name?.includes('単元確認テスト') ||
+      task.end_lesson_name?.includes('再テスト') ||
+      task.lesson_range?.includes('単元テスト') ||
+      task.lesson_range?.includes('確認テスト') ||
+      task.lesson_range?.includes('単元確認テスト') ||
+      task.lesson_range?.includes('再テスト') ||
+      task.custom_unit_name?.includes('単元テスト') ||
+      task.custom_unit_name?.includes('確認テスト') ||
+      task.custom_unit_name?.includes('単元確認テスト') ||
+      task.custom_unit_name?.includes('再テスト')
+    ) && !task.custom_unit_name?.includes('ーやり直しー') && !task.start_lesson_name?.includes('ーやり直しー') && !task.lesson_range?.includes('ーやり直しー');
+
     const isAllStepsCompleted = allSteps.length > 0 && allSteps.every(s => currentTaskCompletedIds.has(String(s.id)));
+
+    let newStatus: LearningTask['status'] = task.status;
+    let newTestPassed = task.test_passed || false;
+    let newActualCompletedDate = task.actual_completed_date;
+
+    if (isUnitTest) {
+      // 単元テストの場合: ステップ完了は「実施した」記録のみ。合否（status / test_passed）は点数判断でのみ決定する！
+      // 既に合格している場合を除き、勝手に completed や test_passed: true にしない！
+      // 既に failed の場合は failed を維持！
+      if (task.status === 'failed') {
+        newStatus = 'failed';
+        newTestPassed = false;
+      } else if (task.status === 'completed') {
+        newStatus = 'completed';
+        newTestPassed = true;
+      } else {
+        newStatus = 'unstarted';
+        newTestPassed = false;
+      }
+    } else {
+      // 通常授業タスクの場合: 全ステップ完了ならコマ完了（合格）
+      if (isAllStepsCompleted) {
+        newStatus = 'completed';
+        newTestPassed = true;
+        newActualCompletedDate = currentDateStr;
+      } else {
+        newStatus = task.status === 'completed' ? 'completed' : 'unstarted';
+      }
+    }
 
     const updatedTask: LearningTask = {
       ...task,
       completed_lesson_ids: Array.from(currentTaskCompletedIds),
       video_watched: true,
-      ...(isAllStepsCompleted ? {
-        status: 'completed' as const,
-        test_passed: true,
-        actual_completed_date: currentDateStr
-      } : {
-        status: task.status === 'completed' ? 'completed' : 'unstarted',
-        test_passed: task.test_passed || false
-      })
+      status: newStatus,
+      test_passed: newTestPassed,
+      actual_completed_date: newActualCompletedDate
     };
 
     const updatedStudent: Student = {
@@ -844,7 +925,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       }
     ]);
 
-    if (isAllStepsCompleted) {
+    if (isUnitTest) {
+      showToast(`📝 STEP ${stepIndex + 1}「${step.name || step.fullTitle}」を受講しました！テストの点数を入力して判定してください⚔️`);
+    } else if (isAllStepsCompleted) {
       showToast(`🎉 【第${task.period}コマ 完了！】全ステップを達成しました！右側の学習マップも進捗しました！`);
 
       // 他の教科の授業もすべて完了したか確認
@@ -903,7 +986,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         created_at: new Date().toISOString()
       });
 
-      if (isAllStepsCompleted) {
+      if (isAllStepsCompleted && !isUnitTest) {
         await db.addLearningLog({
           id: `log-pass-${Date.now()}`,
           student_id: student.id,
@@ -1856,6 +1939,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
               {(() => {
                 const uniqueTaskMap = new Map<string, LearningTask>();
                 todayTasks.forEach(task => {
+                  const isOldRemedial = task.custom_unit_name?.includes('【やり直し授業】') ||
+                                        task.start_lesson_name?.includes('【やり直し授業】') ||
+                                        task.lesson_range?.includes('【やり直し授業】');
+                  if (isOldRemedial) return;
                   const key = task.period != null ? `p-${task.period}` : task.id;
                   if (!uniqueTaskMap.has(key)) {
                     uniqueTaskMap.set(key, task);

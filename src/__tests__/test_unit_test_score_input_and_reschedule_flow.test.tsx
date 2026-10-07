@@ -474,4 +474,158 @@ describe('Unit Test Score Input, Teacher Dashboard Realtime Sync, Remedial Flow 
     expect(slots[1].lessonRange).toContain('単元確認テスト');
     expect(slots[2].lessonRange).toContain('【定着演習】');
   });
+
+  it('7. 単元テスト不合格時に直後（2コマ目）へやり直しが挿入され後続タスクがシフト、旧やり直しタスクが排除され、STEP 1完了でも合否が点数判定優先となる', async () => {
+    const testStudent: Student = {
+      id: 'std-remedial-shift-1',
+      student_id: 'std-remedial-shift-1',
+      name: 'シフト検証生徒',
+      grade: '小5',
+      classroom: '本校',
+      branch_id: 'b-1',
+      level: 'A', // 90点以上合格
+      selected_subjects: ['算数', '英語', '国語'],
+      selected_days: ['tuesday', 'friday'],
+      completed_lesson_ids: []
+    };
+
+    const todayDate = '2026-10-06';
+    // コマ1: 算数 単元テスト
+    const mathTestTask: LearningTask = {
+      id: 'task-math-ut-1',
+      student_id: testStudent.id,
+      unit_id: 'u-math-1',
+      scheduled_date: todayDate,
+      period: 1,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      custom_unit_name: '３つの　かずの　けいさん - 単元確認テスト',
+      start_lesson_name: '３つの　かずの　けいさん - 単元確認テスト',
+      end_lesson_name: '３つの　かずの　けいさん - 単元確認テスト',
+      lesson_range: '３つの　かずの　けいさん - 単元確認テスト',
+      passing_line: '90点以上'
+    };
+
+    // コマ2: 英語 Check Test
+    const engTask: LearningTask = {
+      id: 'task-eng-2',
+      student_id: testStudent.id,
+      unit_id: 'u-eng-1',
+      scheduled_date: todayDate,
+      period: 2,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '英語',
+      custom_unit_name: 'You are 〜 - Check Test',
+      start_lesson_name: 'Check Test',
+      end_lesson_name: 'Check Test',
+      lesson_range: 'You are 〜 - Check Test'
+    };
+
+    // コマ3: 国語 まとめテスト
+    const jpnTask: LearningTask = {
+      id: 'task-jpn-3',
+      student_id: testStudent.id,
+      unit_id: 'u-jpn-1',
+      scheduled_date: todayDate,
+      period: 3,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '国語',
+      custom_unit_name: 'ことば - まとめテスト',
+      start_lesson_name: 'まとめテスト（１）',
+      end_lesson_name: 'まとめテスト（１）',
+      lesson_range: 'ことば - まとめテスト'
+    };
+
+    // コマ4 & 5: 旧フォーマットの不要な【やり直し授業】
+    const oldRemedialTask1: LearningTask = {
+      id: 'task-old-rem-4',
+      student_id: testStudent.id,
+      unit_id: 'u-math-1',
+      scheduled_date: todayDate,
+      period: 4,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: '算数',
+      custom_unit_name: '【やり直し授業】３つの　かずの　けいさん 復習',
+      start_lesson_name: '【やり直し授業】３つの　かずの　けいさん 復習',
+      end_lesson_name: '【やり直し授業】３つの　かずの　けいさん 復習',
+      lesson_range: '【やり直し授業】３つの　かずの　けいさん 復習'
+    };
+
+    await db.saveStudent(testStudent);
+    await db.saveLearningTasks([mathTestTask, engTask, jpnTask, oldRemedialTask1]);
+
+    const { unmount } = render(
+      <StudentDashboard
+        student={testStudent}
+        onBackToPortal={vi.fn()}
+        initialDate={todayDate}
+      />
+    );
+
+    // 1. 旧フォーマットの【やり直し授業】が画面に表示されないこと
+    expect(screen.queryByText(/【やり直し授業】３つの　かずの　けいさん 復習/)).not.toBeInTheDocument();
+
+    // 2. コマ1の点数入力で80点（レベルAは90点未満不合格）を入力して送信
+    const scoreInput = await screen.findByTestId('task-score-input-1');
+    const submitBtn = screen.getByTestId('task-score-submit-btn-1');
+
+    fireEvent.change(scoreInput, { target: { value: '80' } });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    // コマ1に不合格バッジが表示されること
+    await waitFor(() => {
+      expect(screen.getByText('⚠️ 不合格 (やり直し授業へ)')).toBeInTheDocument();
+    });
+
+    // 3. 直後のコマ2に「単元確認テスト　ーやり直しー」が挿入されていること
+    await waitFor(() => {
+      const period2Row = screen.getByTestId('period-row-2');
+      expect(period2Row).toHaveTextContent(/単元確認テスト\s*ーやり直しー/);
+    });
+
+    // 4. 元々コマ2にあった英語がコマ3へ、国語がコマ4へシフトしていること
+    const period3Row = screen.getByTestId('period-row-3');
+    expect(period3Row).toHaveTextContent(/英語/);
+    expect(period3Row).toHaveTextContent(/Check Test/);
+
+    const period4Row = screen.getByTestId('period-row-4');
+    expect(period4Row).toHaveTextContent(/国語/);
+    expect(period4Row).toHaveTextContent(/まとめテスト/);
+
+    // 5. コマ1の「STEP 1: 単元確認テスト」で [🎯 完了にする] ボタンを押しても、合格に化けず不合格ステータスが維持されること
+    const step1Btn = await screen.findByTestId('step-complete-btn-1-0');
+    await act(async () => {
+      fireEvent.click(step1Btn);
+    });
+
+    // ステップ完了バッジ「✅ 受講完了」は出るが、コマのステータスは不合格のまま（合格完了！にはならない）
+    await waitFor(() => {
+      expect(screen.getByTestId('step-done-badge-1-0')).toHaveTextContent(/受講完了/);
+      expect(screen.queryByTestId('task-completed-badge-1')).not.toBeInTheDocument();
+      expect(screen.getByText('⚠️ 不合格 (やり直し授業へ)')).toBeInTheDocument();
+    });
+
+    // 6. コマ2のやり直し授業を完了させる
+    const remedialCompleteBtn = await screen.findByTestId('complete-task-btn-2');
+    expect(remedialCompleteBtn).toHaveTextContent('この授業を完了にする');
+    await act(async () => {
+      fireEvent.click(remedialCompleteBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-completed-badge-2')).toHaveTextContent('合格完了！');
+    });
+
+    unmount();
+  });
 });

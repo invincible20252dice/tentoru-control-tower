@@ -236,12 +236,23 @@ describe('TeacherDashboard Milestone & Sub-Features Suite', () => {
       expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 1 完了');
     });
 
-    // Complete the unit test step
+    // Complete the unit test step (ステップ完了は受講実施のみで、合否は点数判断で行う)
     const completeBtn = screen.getByTestId('step-complete-btn-1-0');
     fireEvent.click(completeBtn);
 
     await waitFor(() => {
       expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('1 / 1 完了');
+    });
+
+    // 点数判定で100点を送信して合格完了にする
+    const scoreInput = await screen.findByTestId('task-score-input-1');
+    const submitBtn = screen.getByTestId('task-score-submit-btn-1');
+    fireEvent.change(scoreInput, { target: { value: '100' } });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
       expect(screen.getByTestId('task-completed-badge-1')).toHaveTextContent('合格完了！');
     });
 
