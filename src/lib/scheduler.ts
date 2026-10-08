@@ -87,7 +87,7 @@ export function getLatestUnitTestStatusForSubject(params: {
   const studentResults = results
     .filter(r =>
       r.student_id === studentId &&
-      (r.test_type === 'unit_test' || r.test_content.includes('テスト') || r.test_content.includes('確認')) &&
+      (r.test_type === 'unit_test' || r.test_content.includes('テスト') || r.test_content.includes('確認') || r.test_content.toLowerCase().includes('check test')) &&
       (r.subject === targetSub || (!r.subject && (targetSub === '算数' || targetSub === '数学')) || (targetSub === '算数' && r.subject === '数学') || (targetSub === '数学' && r.subject === '算数'))
     )
     .sort((a, b) => new Date(b.date || b.created_at || 0).getTime() - new Date(a.date || a.created_at || 0).getTime());
@@ -97,8 +97,12 @@ export function getLatestUnitTestStatusForSubject(params: {
 
   const latestByContent = new Map<string, MiniTestResult>();
   studentResults.forEach(r => {
-    const rawKey = r.unit_name || r.test_content;
-    const normKey = normalizeUnitName(rawKey);
+    const isUnitTest = r.test_type === 'unit_test' || 
+                       r.test_content.includes('単元確認テスト') || 
+                       r.test_content.includes('単元テスト') || 
+                       (r.unit_name && (r.unit_name.includes('単元確認テスト') || r.unit_name.includes('単元テスト')));
+    const rawKey = (isUnitTest && r.unit_name) ? r.unit_name : r.test_content;
+    const normKey = isUnitTest ? normalizeUnitName(rawKey) : r.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
     const key = normKey || rawKey;
     if (!key) return;
 
@@ -114,7 +118,7 @@ export function getLatestUnitTestStatusForSubject(params: {
     }
   });
 
-  for (const [normKey, result] of latestByContent.entries()) {
+  for (const [key, result] of latestByContent.entries()) {
     let passScore = 80;
     if (result.passing_line) {
       const match = result.passing_line.match(/\d+/);
@@ -124,14 +128,23 @@ export function getLatestUnitTestStatusForSubject(params: {
     const isPassed = result.passed === true || result.status === 'passed' || (result.score !== null && result.score !== undefined && result.score >= passScore);
     const isFailed = result.passed === false || result.status === 'failed' || (result.score !== null && result.score !== undefined && result.score < passScore);
 
+    const isUnitTest = result.test_type === 'unit_test' || 
+                       result.test_content.includes('単元確認テスト') || 
+                       result.test_content.includes('単元テスト') || 
+                       (result.unit_name && (result.unit_name.includes('単元確認テスト') || result.unit_name.includes('単元テスト')));
+
     if (isPassed) {
-      completedUnitTestKeys.add(normKey);
-      if (result.unit_name) {
+      completedUnitTestKeys.add(key);
+      if (isUnitTest && result.unit_name) {
         completedUnitTestKeys.add(result.unit_name);
         completedUnitTestKeys.add(normalizeUnitName(result.unit_name));
+        const cleanUnit = result.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+        if (cleanUnit) completedUnitTestKeys.add(cleanUnit);
       }
       completedUnitTestKeys.add(result.test_content);
       completedUnitTestKeys.add(normalizeUnitName(result.test_content));
+      const cleanContent = result.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+      if (cleanContent) completedUnitTestKeys.add(cleanContent);
     } else if (isFailed) {
       if (!failedUnitTest) {
         failedUnitTest = result;
@@ -141,14 +154,22 @@ export function getLatestUnitTestStatusForSubject(params: {
 
   // もし最新不合格テストが存在する場合、その単元キーが過去合格にあっても安全のため合格キーから除外
   if (failedUnitTest) {
+    const isFailedUT = failedUnitTest.test_type === 'unit_test' || 
+                       failedUnitTest.test_content.includes('単元確認テスト') || 
+                       failedUnitTest.test_content.includes('単元テスト') || 
+                       (failedUnitTest.unit_name && (failedUnitTest.unit_name.includes('単元確認テスト') || failedUnitTest.unit_name.includes('単元テスト')));
     const fNorm = normalizeUnitName(failedUnitTest.unit_name || failedUnitTest.test_content);
     completedUnitTestKeys.delete(fNorm);
-    if (failedUnitTest.unit_name) {
+    if (isFailedUT && failedUnitTest.unit_name) {
       completedUnitTestKeys.delete(failedUnitTest.unit_name);
       completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.unit_name));
+      const cleanUnit = failedUnitTest.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+      if (cleanUnit) completedUnitTestKeys.delete(cleanUnit);
     }
     completedUnitTestKeys.delete(failedUnitTest.test_content);
     completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.test_content));
+    const cleanContent = failedUnitTest.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+    if (cleanContent) completedUnitTestKeys.delete(cleanContent);
   }
 
   return {
@@ -610,10 +631,22 @@ export function findNextUncompletedLessonForSubject(params: {
       masterLessons.forEach(m => {
         const mName = m.name || '';
         const mUnit = m.unit_name || '';
-        if (mName === k || mUnit === k || isMatchingUnitOrTest(mName, k) || isMatchingUnitOrTest(mUnit, k)) {
-          completedIds.add(m.id);
-          completedIds.add(String(m.id));
-          completedIds.add(mName);
+        const isTest = m.item_type === 'unit_test' || 
+          Boolean(mName && (mName.includes('単元確認テスト') || mName.includes('単元テスト') || mName.includes('確認テスト')));
+        const cleanLesson = mName.replace(/^[^-]+-\s*/, '').trim();
+
+        if (isTest) {
+          if (mName === k || cleanLesson === k || isMatchingUnitOrTest(mName, k) || mUnit === k || isMatchingUnitOrTest(mUnit, k)) {
+            completedIds.add(m.id);
+            completedIds.add(String(m.id));
+            completedIds.add(mName);
+          }
+        } else {
+          if (mName === k || cleanLesson === k || mUnit === k || (mUnit && isMatchingUnitOrTest(mUnit, k))) {
+            completedIds.add(m.id);
+            completedIds.add(String(m.id));
+            completedIds.add(mName);
+          }
         }
       });
     });
@@ -726,7 +759,19 @@ export function findNextUncompletedLessonForSubject(params: {
         };
       }
     } else {
-      const isLessonCompleted = completedIds.has(l.id) || completedIds.has(String(l.id)) || completedIds.has(l.name);
+      const cleanLessonName = l.name ? l.name.replace(/^[^-]+-\s*/, '').trim() : '';
+      const isLessonCompleted = Boolean(
+        completedIds.has(l.id) || 
+        completedIds.has(String(l.id)) || 
+        completedIds.has(l.name) ||
+        (cleanLessonName && completedIds.has(cleanLessonName)) ||
+        (unitTestStatus.completedUnitTestKeys && (
+          unitTestStatus.completedUnitTestKeys.has(l.id) ||
+          unitTestStatus.completedUnitTestKeys.has(String(l.id)) ||
+          unitTestStatus.completedUnitTestKeys.has(l.name) ||
+          (cleanLessonName && unitTestStatus.completedUnitTestKeys.has(cleanLessonName))
+        ))
+      );
       if (i >= startThresholdIdx && !isLessonCompleted) {
         return {
           lessonId: l.id,

@@ -8889,38 +8889,88 @@ export default function TeacherDashboard({
                     );
                   };
 
-                  // 単元テスト合格判定ヘルパー
+                  // まとめテストまたはCheck Test判定ヘルパー
+                  const isReviewOrCheckStep = (u: any) => {
+                    const uName = u.name || '';
+                    const uLessonName = u.lesson_name || '';
+                    return (
+                      uName.includes('まとめテスト') || 
+                      uLessonName.includes('まとめテスト') || 
+                      uName.toLowerCase().includes('check test') || 
+                      uLessonName.toLowerCase().includes('check test')
+                    );
+                  };
+
+                  // 単元テストおよび小テスト合格判定ヘルパー
                   const isUnitTestStepPassed = (u: any) => {
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
                     const uName = u.name || '';
                     const uLessonName = u.lesson_name || '';
                     const uUnitName = u.unit_name || '';
+                    const uNorm = normalizeUnitName(uName);
+                    const uLessonNorm = normalizeUnitName(uLessonName);
+                    const uUnitNorm = normalizeUnitName(uUnitName);
+                    const isUT = isUnitTestStep(u);
+                    const cleanLessonName = uName.replace(/^[^-]+-\s*/, '').trim();
 
                     // 1. completedUnitTestKeys で合格確認
                     if (
                       latestUnitTestStatus.completedUnitTestKeys.has(uid) ||
                       (uSort && latestUnitTestStatus.completedUnitTestKeys.has(uSort)) ||
                       latestUnitTestStatus.completedUnitTestKeys.has(uName) ||
+                      (cleanLessonName && latestUnitTestStatus.completedUnitTestKeys.has(cleanLessonName)) ||
                       (uLessonName && latestUnitTestStatus.completedUnitTestKeys.has(uLessonName)) ||
-                      (uUnitName && latestUnitTestStatus.completedUnitTestKeys.has(uUnitName))
+                      (isUT && (
+                        (uNorm && latestUnitTestStatus.completedUnitTestKeys.has(uNorm)) ||
+                        (uLessonNorm && latestUnitTestStatus.completedUnitTestKeys.has(uLessonNorm)) ||
+                        (uUnitName && latestUnitTestStatus.completedUnitTestKeys.has(uUnitName)) ||
+                        (uUnitNorm && latestUnitTestStatus.completedUnitTestKeys.has(uUnitNorm))
+                      ))
                     ) {
                       return true;
                     }
 
-                    // 2. miniTestResultsList から直接合格判定
-                    const cleanName = uName.replace(/^[^-]+-\s*/, '').trim();
+                    // 2. miniTestResultsList から直接合格判定（表記揺れ・教科プレフィックス吸収）
                     const foundPassed = (miniTestResultsList || []).some(r => {
                       if (r.student_id !== selectedStudent.id) return false;
                       const isPass = r.passed === true || r.status === 'passed' || (r.score !== null && r.score !== undefined && r.score >= (parseFloat(r.passing_line || '80') || 80));
                       if (!isPass) return false;
-                      return (
+
+                      // 教科プレフィックスを除去した生テスト内容
+                      const cleanTestContent = (r.test_content || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+                      const cleanUnitName = (r.unit_name || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+
+                      // テスト内容自体の直接一致（まとめテスト、Check Test、単元テスト共通）
+                      if (
                         r.test_content === uName ||
-                        r.test_content === cleanName ||
-                        r.unit_name === uUnitName ||
-                        (r.test_content && uName.includes(r.test_content)) ||
-                        (r.unit_name && uName.includes(r.unit_name))
-                      );
+                        cleanTestContent === uName ||
+                        r.test_content === cleanLessonName ||
+                        cleanTestContent === cleanLessonName ||
+                        r.test_content === uLessonName ||
+                        cleanTestContent === uLessonName ||
+                        isMatchingUnitOrTest(r.test_content, uName) ||
+                        isMatchingUnitOrTest(r.test_content, cleanLessonName) ||
+                        isMatchingUnitOrTest(r.test_content, uLessonName)
+                      ) {
+                        return true;
+                      }
+
+                      // 単元テスト自身の場合のみ、単元名一致を合否判定として認める
+                      if (isUT) {
+                        return (
+                          r.unit_name === uUnitName ||
+                          cleanUnitName === uUnitName ||
+                          (cleanUnitName && uName.includes(cleanUnitName)) ||
+                          (cleanUnitName && cleanUnitName.includes(uName)) ||
+                          isMatchingUnitOrTest(r.unit_name, uName) ||
+                          isMatchingUnitOrTest(r.unit_name, uUnitName) ||
+                          (uNorm && (normalizeUnitName(r.test_content) === uNorm || normalizeUnitName(r.unit_name) === uNorm)) ||
+                          (uUnitNorm && (normalizeUnitName(r.test_content) === uUnitNorm || normalizeUnitName(r.unit_name) === uUnitNorm))
+                        );
+                      }
+
+                      return false;
                     });
                     if (foundPassed) return true;
 
@@ -8931,17 +8981,25 @@ export default function TeacherDashboard({
                   const isUnitCompleted = (u: any, idx: number) => {
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+                    const uName = u.name || '';
+                    const uNorm = normalizeUnitName(uName);
 
                     // 単元テスト自身の場合: 不合格記録があれば未完了、合格・完了記録があれば完了
                     if (isUnitTestStep(u)) {
                       if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
                         const failedTest = latestUnitTestStatus.failedUnitTest;
                         const testKey = failedTest.unit_name || failedTest.test_content;
-                        if (u.name.includes(testKey) || (failedTest.unit_name && u.name.includes(failedTest.unit_name))) {
+                        if (isMatchingUnitOrTest(testKey, u.name) || isMatchingUnitOrTest(failedTest.unit_name, u.name)) {
                           return false;
                         }
                       }
                       return isUnitTestStepPassed(u);
+                    }
+
+                    // まとめテストまたはCheck Testの場合:
+                    // 生徒が受講完了している、または小テスト結果管理で合格・入力されている場合は完了
+                    if (isReviewOrCheckStep(u)) {
+                      if (isUnitTestStepPassed(u)) return true;
                     }
 
                     // 現在コマ割りで取り組み中のレッスンは完了としない
@@ -8949,10 +9007,10 @@ export default function TeacherDashboard({
                       return false;
                     }
 
-                    // 生徒が実際に完了したか
-                    if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort))) return true;
+                    // 生徒が実際に完了したか（ID、ソート順、名称、正規化名すべてで判定）
+                    if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort)) || studentCompletedIds.has(uName) || (uNorm && studentCompletedIds.has(uNorm))) return true;
                     if (lessonProgressMap.get(uid) === 'completed') return true;
-                    if (completedTaskLessonIds.has(uid)) return true;
+                    if (completedTaskLessonIds.has(uid) || completedTaskLessonIds.has(uName) || (uNorm && completedTaskLessonIds.has(uNorm))) return true;
                     
                     // スタートライン以前のレッスン（ただし現在アクティブでないもの）
                     if (startSeq > 0 && (idx + 1) <= startSeq) return true;

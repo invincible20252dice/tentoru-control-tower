@@ -1237,7 +1237,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const unit = units.find(u => u.id === task.unit_id);
     const subjectName = task.subject || (unit ? unit.subject : 'その他');
     const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const cleanUnitName = rawUnitName
+    const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
@@ -1488,7 +1488,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const unit = units.find(u => u.id === task.unit_id);
     const subjectName = task.subject || (unit ? unit.subject : 'その他');
     const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const cleanUnitName = rawUnitName
+    const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
@@ -1542,7 +1542,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     });
 
     // 合格時：他の教科の授業も完了していれば、次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
-    const isUnitTestTask = task.custom_unit_name?.includes('確認テスト') || 
+    const isUnitTestTask = passedScore !== undefined ||
+                           task.custom_unit_name?.includes('確認テスト') || 
                            task.custom_unit_name?.includes('単元テスト') || 
                            task.start_lesson_name?.includes('確認テスト') ||
                            task.start_lesson_name?.includes('単元テスト') ||
