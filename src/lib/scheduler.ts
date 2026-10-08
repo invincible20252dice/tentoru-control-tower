@@ -58,7 +58,46 @@ export function isMatchingUnitOrTest(source?: string | null, target?: string | n
   if (!source || !target) return false;
   const sRaw = source.replace(/[\s\u3000]+/g, ' ').trim();
   const tRaw = target.replace(/[\s\u3000]+/g, ' ').trim();
-  if (sRaw === tRaw || sRaw.includes(tRaw) || tRaw.includes(sRaw)) return true;
+  if (sRaw === tRaw) return true;
+
+  const sClean = sRaw.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+  const tClean = tRaw.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+  if (sClean === tClean) return true;
+
+  // まとめテストの判定: 番号（1, 2, 3）や有無のチェック
+  const sSummaryMatch = sClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i);
+  const tSummaryMatch = tClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i);
+
+  // 一方がまとめテストで他方がまとめテストでない場合、種別が異なるため一致しない
+  if ((sSummaryMatch && !tSummaryMatch) || (!sSummaryMatch && tSummaryMatch)) {
+    return false;
+  }
+  // 両方がまとめテストの場合、番号が異なれば一致しない
+  if (sSummaryMatch && tSummaryMatch) {
+    const sNum = sSummaryMatch[1].replace(/[１-３]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const tNum = tSummaryMatch[1].replace(/[１-３]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    if (sNum !== tNum) return false;
+    // 番号が一致する場合、単元名部分が一致するか検証
+    const sUnit = normalizeUnitName(sClean);
+    const tUnit = normalizeUnitName(tClean);
+    if (!sUnit || !tUnit) return true;
+    return sUnit === tUnit || sClean.includes(tClean) || tClean.includes(sClean);
+  }
+
+  // Check Testの判定
+  const sIsCheck = sClean.toLowerCase().includes('check test');
+  const tIsCheck = tClean.toLowerCase().includes('check test');
+  if ((sIsCheck && !tIsCheck) || (!sIsCheck && tIsCheck)) {
+    return false;
+  }
+  if (sIsCheck && tIsCheck) {
+    const sUnit = normalizeUnitName(sClean);
+    const tUnit = normalizeUnitName(tClean);
+    if (!sUnit || !tUnit) return true;
+    return sUnit === tUnit || sClean.includes(tClean) || tClean.includes(sClean);
+  }
+
+  if (sRaw.includes(tRaw) || tRaw.includes(sRaw)) return true;
 
   const sNorm = normalizeUnitName(source);
   const tNorm = normalizeUnitName(target);
@@ -77,6 +116,7 @@ export function getLatestUnitTestStatusForSubject(params: {
   hasFailedUnitTest: boolean;
   failedUnitTest: MiniTestResult | null;
   completedUnitTestKeys: Set<string>;
+  completedUnitKeys?: Set<string>;
 } {
   const { studentId, subject, miniTestResults } = params;
   const results = (miniTestResults && miniTestResults.length > 0) 
@@ -93,14 +133,21 @@ export function getLatestUnitTestStatusForSubject(params: {
     .sort((a, b) => new Date(b.date || b.created_at || 0).getTime() - new Date(a.date || a.created_at || 0).getTime());
 
   const completedUnitTestKeys = new Set<string>();
+  const completedUnitKeys = new Set<string>();
   let failedUnitTest: MiniTestResult | null = null;
 
   const latestByContent = new Map<string, MiniTestResult>();
   studentResults.forEach(r => {
-    const isUnitTest = r.test_type === 'unit_test' || 
-                       r.test_content.includes('単元確認テスト') || 
-                       r.test_content.includes('単元テスト') || 
-                       (r.unit_name && (r.unit_name.includes('単元確認テスト') || r.unit_name.includes('単元テスト')));
+    const isReviewOrCheck = r.test_content.includes('まとめテスト') || 
+                            (r.unit_name && r.unit_name.includes('まとめテスト')) || 
+                            r.test_content.toLowerCase().includes('check test') || 
+                            (r.unit_name && r.unit_name.toLowerCase().includes('check test'));
+    const isUnitTest = !isReviewOrCheck && (
+      r.test_type === 'unit_test' || 
+      r.test_content.includes('単元確認テスト') || 
+      r.test_content.includes('単元テスト') || 
+      (r.unit_name && (r.unit_name.includes('単元確認テスト') || r.unit_name.includes('単元テスト')))
+    );
     const rawKey = (isUnitTest && r.unit_name) ? r.unit_name : r.test_content;
     const normKey = isUnitTest ? normalizeUnitName(rawKey) : r.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
     const key = normKey || rawKey;
@@ -128,23 +175,39 @@ export function getLatestUnitTestStatusForSubject(params: {
     const isPassed = result.passed === true || result.status === 'passed' || (result.score !== null && result.score !== undefined && result.score >= passScore);
     const isFailed = result.passed === false || result.status === 'failed' || (result.score !== null && result.score !== undefined && result.score < passScore);
 
-    const isUnitTest = result.test_type === 'unit_test' || 
-                       result.test_content.includes('単元確認テスト') || 
-                       result.test_content.includes('単元テスト') || 
-                       (result.unit_name && (result.unit_name.includes('単元確認テスト') || result.unit_name.includes('単元テスト')));
+    const isReviewOrCheck = result.test_content.includes('まとめテスト') || 
+                            (result.unit_name && result.unit_name.includes('まとめテスト')) || 
+                            result.test_content.toLowerCase().includes('check test') || 
+                            (result.unit_name && result.unit_name.toLowerCase().includes('check test'));
+    const isUnitTest = !isReviewOrCheck && (
+      result.test_type === 'unit_test' || 
+      result.test_content.includes('単元確認テスト') || 
+      result.test_content.includes('単元テスト') || 
+      (result.unit_name && (result.unit_name.includes('単元確認テスト') || result.unit_name.includes('単元テスト')))
+    );
 
     if (isPassed) {
       completedUnitTestKeys.add(key);
-      if (isUnitTest && result.unit_name) {
-        completedUnitTestKeys.add(result.unit_name);
-        completedUnitTestKeys.add(normalizeUnitName(result.unit_name));
-        const cleanUnit = result.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
-        if (cleanUnit) completedUnitTestKeys.add(cleanUnit);
-      }
       completedUnitTestKeys.add(result.test_content);
-      completedUnitTestKeys.add(normalizeUnitName(result.test_content));
       const cleanContent = result.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
       if (cleanContent) completedUnitTestKeys.add(cleanContent);
+
+      // 単元確認テストの合格の場合のみ、単元全体を修了扱いとする単元キーを登録
+      if (isUnitTest) {
+        if (result.unit_name) {
+          completedUnitTestKeys.add(result.unit_name);
+          completedUnitTestKeys.add(normalizeUnitName(result.unit_name));
+          const cleanUnit = result.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+          if (cleanUnit) {
+            completedUnitTestKeys.add(cleanUnit);
+            completedUnitKeys.add(cleanUnit);
+          }
+          completedUnitKeys.add(result.unit_name);
+          completedUnitKeys.add(normalizeUnitName(result.unit_name));
+        }
+        completedUnitTestKeys.add(normalizeUnitName(result.test_content));
+        completedUnitKeys.add(normalizeUnitName(result.test_content));
+      }
     } else if (isFailed) {
       if (!failedUnitTest) {
         failedUnitTest = result;
@@ -154,20 +217,36 @@ export function getLatestUnitTestStatusForSubject(params: {
 
   // もし最新不合格テストが存在する場合、その単元キーが過去合格にあっても安全のため合格キーから除外
   if (failedUnitTest) {
-    const isFailedUT = failedUnitTest.test_type === 'unit_test' || 
-                       failedUnitTest.test_content.includes('単元確認テスト') || 
-                       failedUnitTest.test_content.includes('単元テスト') || 
-                       (failedUnitTest.unit_name && (failedUnitTest.unit_name.includes('単元確認テスト') || failedUnitTest.unit_name.includes('単元テスト')));
-    const fNorm = normalizeUnitName(failedUnitTest.unit_name || failedUnitTest.test_content);
-    completedUnitTestKeys.delete(fNorm);
-    if (isFailedUT && failedUnitTest.unit_name) {
-      completedUnitTestKeys.delete(failedUnitTest.unit_name);
-      completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.unit_name));
-      const cleanUnit = failedUnitTest.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
-      if (cleanUnit) completedUnitTestKeys.delete(cleanUnit);
+    const isFailedReviewOrCheck = failedUnitTest.test_content.includes('まとめテスト') || 
+                                  (failedUnitTest.unit_name && failedUnitTest.unit_name.includes('まとめテスト')) || 
+                                  failedUnitTest.test_content.toLowerCase().includes('check test') || 
+                                  (failedUnitTest.unit_name && failedUnitTest.unit_name.toLowerCase().includes('check test'));
+    const isFailedUT = !isFailedReviewOrCheck && (
+      failedUnitTest.test_type === 'unit_test' || 
+      failedUnitTest.test_content.includes('単元確認テスト') || 
+      failedUnitTest.test_content.includes('単元テスト') || 
+      (failedUnitTest.unit_name && (failedUnitTest.unit_name.includes('単元確認テスト') || failedUnitTest.unit_name.includes('単元テスト')))
+    );
+
+    if (isFailedUT) {
+      const fNorm = normalizeUnitName(failedUnitTest.unit_name || failedUnitTest.test_content);
+      completedUnitTestKeys.delete(fNorm);
+      completedUnitKeys.delete(fNorm);
+      if (failedUnitTest.unit_name) {
+        completedUnitTestKeys.delete(failedUnitTest.unit_name);
+        completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.unit_name));
+        completedUnitKeys.delete(failedUnitTest.unit_name);
+        completedUnitKeys.delete(normalizeUnitName(failedUnitTest.unit_name));
+        const cleanUnit = failedUnitTest.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+        if (cleanUnit) {
+          completedUnitTestKeys.delete(cleanUnit);
+          completedUnitKeys.delete(cleanUnit);
+        }
+      }
+      completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.test_content));
+      completedUnitKeys.delete(normalizeUnitName(failedUnitTest.test_content));
     }
     completedUnitTestKeys.delete(failedUnitTest.test_content);
-    completedUnitTestKeys.delete(normalizeUnitName(failedUnitTest.test_content));
     const cleanContent = failedUnitTest.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
     if (cleanContent) completedUnitTestKeys.delete(cleanContent);
   }
@@ -175,7 +254,8 @@ export function getLatestUnitTestStatusForSubject(params: {
   return {
     hasFailedUnitTest: Boolean(failedUnitTest),
     failedUnitTest,
-    completedUnitTestKeys
+    completedUnitTestKeys,
+    completedUnitKeys
   };
 }
 
@@ -642,7 +722,18 @@ export function findNextUncompletedLessonForSubject(params: {
             completedIds.add(mName);
           }
         } else {
-          if (mName === k || cleanLesson === k || mUnit === k || (mUnit && isMatchingUnitOrTest(mUnit, k))) {
+          // 通常レッスンやまとめテスト等の完了判定:
+          // 1) そのレッスン自身の名称と直接一致する場合（小テスト合格等）
+          // 2) 単元全体の単元確認テストが合格している場合（completedUnitKeys に単元名が存在）
+          const isUnitPassed = Boolean(
+            unitTestStatus.completedUnitKeys && (
+              unitTestStatus.completedUnitKeys.has(mUnit) ||
+              unitTestStatus.completedUnitKeys.has(normalizeUnitName(mUnit)) ||
+              (mUnit && isMatchingUnitOrTest(mUnit, k) && unitTestStatus.completedUnitKeys.has(k))
+            )
+          );
+
+          if (mName === k || cleanLesson === k || isMatchingUnitOrTest(mName, k) || isUnitPassed) {
             completedIds.add(m.id);
             completedIds.add(String(m.id));
             completedIds.add(mName);

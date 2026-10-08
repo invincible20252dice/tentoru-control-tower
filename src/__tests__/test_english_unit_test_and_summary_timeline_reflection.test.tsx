@@ -364,4 +364,138 @@ describe('English Unit Test and Summary Test Timeline Reflection Suite', () => {
 
     unmount();
   });
+
+  it('Math 0-addition and subtraction: summary (1) pass properly advances to summary (2), then (3), then unit test, without skipping', async () => {
+    const student: Student = {
+      id: 'std-math-zero-test',
+      name: '0の計算検証生',
+      grade: '小1',
+      grade_category: 'elementary',
+      school_name: 'テスト小',
+      period_count: 2,
+      day_of_week: ['tue', 'fri'],
+      selected_subjects: ['算数'],
+      completed_lesson_ids: ['cm-zero-l1', 'cm-zero-l2'],
+      created_at: new Date().toISOString()
+    };
+
+    const masters: CurriculumMaster[] = [
+      { id: 'cm-zero-l1', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の たしざん', sort_order: 82 },
+      { id: 'cm-zero-l2', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の ひきざん', sort_order: 83 },
+      { id: 'cm-zero-sum1', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の たしざんと ひきざん - まとめテスト（１）', sort_order: 84 },
+      { id: 'cm-zero-sum2', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の たしざんと ひきざん - まとめテスト（２）', sort_order: 85 },
+      { id: 'cm-zero-sum3', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の たしざんと ひきざん - まとめテスト（３）', sort_order: 86 },
+      { id: 'cm-zero-ut', grade: '小1', subject: '算数', unit_name: '0の たしざんと ひきざん', lesson_name: '0の たしざんと ひきざん - 単元確認テスト', sort_order: 87, item_type: 'unit_test' },
+      { id: 'cm-next-unit', grade: '小1', subject: '算数', unit_name: 'くりあがりのある たしざん', lesson_name: 'くりあがりの たしざん1', sort_order: 88 }
+    ];
+    await db.saveCurriculumMasters(masters);
+
+    // 1. まとめテスト（１）のみ合格
+    const miniResult1: MiniTestResult = {
+      id: 'mini-zero-sum1-pass',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '0の たしざんと ひきざん',
+      test_content: '算数: 0の たしざんと ひきざん - まとめテスト（１）',
+      score: 100,
+      passed: true,
+      status: 'passed',
+      date: '2026-10-08',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(miniResult1);
+    await db.saveStudent(student);
+
+    // 単元テスト状況チェック: 単元名自体は合格キー・単元完了キーに含まれないこと
+    const status1 = getLatestUnitTestStatusForSubject({
+      studentId: student.id,
+      subject: '算数',
+      miniTestResults: [miniResult1]
+    });
+    expect(status1.completedUnitTestKeys.has('0の たしざんと ひきざん - まとめテスト（１）')).toBe(true);
+    expect(status1.completedUnitTestKeys.has('0の たしざんと ひきざん')).toBe(false);
+    expect(status1.completedUnitKeys?.has('0の たしざんと ひきざん')).toBeFalsy();
+
+    // スケジューラー判定: 単元確認テストに飛ばず、まとめテスト（２）が次回開始授業になること！
+    const next1 = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      curriculumMasters: masters,
+      miniTestResults: [miniResult1]
+    });
+    expect(next1.lessonId).toBe('cm-zero-sum2');
+    expect(next1.lessonName).toContain('まとめテスト（２）');
+
+    // 2. まとめテスト（２）も合格
+    const miniResult2: MiniTestResult = {
+      id: 'mini-zero-sum2-pass',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '0の たしざんと ひきざん',
+      test_content: '算数: 0の たしざんと ひきざん - まとめテスト（２）',
+      score: 100,
+      passed: true,
+      status: 'passed',
+      date: '2026-10-08',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(miniResult2);
+
+    const next2 = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      curriculumMasters: masters,
+      miniTestResults: [miniResult1, miniResult2]
+    });
+    expect(next2.lessonId).toBe('cm-zero-sum3');
+    expect(next2.lessonName).toContain('まとめテスト（３）');
+
+    // 3. まとめテスト（３）も合格
+    const miniResult3: MiniTestResult = {
+      id: 'mini-zero-sum3-pass',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '0の たしざんと ひきざん',
+      test_content: '算数: 0の たしざんと ひきざん - まとめテスト（３）',
+      score: 100,
+      passed: true,
+      status: 'passed',
+      date: '2026-10-08',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(miniResult3);
+
+    const next3 = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      curriculumMasters: masters,
+      miniTestResults: [miniResult1, miniResult2, miniResult3]
+    });
+    expect(next3.lessonId).toBe('cm-zero-ut');
+    expect(next3.lessonName).toContain('単元確認テスト');
+
+    // 4. 単元確認テストも合格
+    const miniResultUT: MiniTestResult = {
+      id: 'mini-zero-ut-pass',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '0の たしざんと ひきざん',
+      test_content: '算数: 0の たしざんと ひきざん - 単元確認テスト',
+      score: 100,
+      passed: true,
+      status: 'passed',
+      date: '2026-10-08',
+      target_scope: 'individual'
+    };
+    await db.saveMiniTestResult(miniResultUT);
+
+    const next4 = findNextUncompletedLessonForSubject({
+      student,
+      subject: '算数',
+      curriculumMasters: masters,
+      miniTestResults: [miniResult1, miniResult2, miniResult3, miniResultUT]
+    });
+    expect(next4.lessonId).toBe('cm-next-unit');
+    expect(next4.lessonName).toContain('くりあがりのある たしざん');
+  });
 });
