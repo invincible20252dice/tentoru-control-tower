@@ -1250,7 +1250,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .replace(/単元テスト/g, '')
       .replace(/確認テスト/g, '')
       .trim() || '単元';
-    const testContent = `${subjectName}: ${cleanUnitName} - 単元確認テスト`;
+
+    let testSuffix = '単元確認テスト';
+    if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
+      testSuffix = 'まとめテスト（１）';
+    } else if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
+      testSuffix = 'まとめテスト（２）';
+    } else if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
+      testSuffix = 'まとめテスト（３）';
+    } else if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
+      testSuffix = 'Check Test';
+    } else if (rawUnitName.includes('再テスト')) {
+      testSuffix = '単元確認テスト（再テスト）';
+    }
+    const testContent = `${subjectName}: ${cleanUnitName} - ${testSuffix}`;
 
     // 講師ダッシュボードの「小テスト結果管理」と完全連動するMiniTestResultを作成・更新
     const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
@@ -1395,6 +1408,58 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       console.warn('addLearningLog error:', e);
     }
 
+    // まとめテストまたはテスト系タスクの場合、講師ダッシュボードの小テスト結果管理（MiniTestResult）にも合格を記録連動
+    const isTestLikeTask = Boolean(
+      task.start_lesson_name?.includes('まとめテスト') ||
+      task.start_lesson_name?.toLowerCase().includes('check test') ||
+      task.lesson_range?.includes('まとめテスト') ||
+      task.lesson_range?.toLowerCase().includes('check test') ||
+      task.custom_unit_name?.includes('まとめテスト') ||
+      task.custom_unit_name?.toLowerCase().includes('check test')
+    );
+    if (isTestLikeTask) {
+      const unit = units.find(u => u.id === task.unit_id);
+      const subjectName = task.subject || (unit ? unit.subject : 'その他');
+      const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
+      const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName.trim() || '単元';
+      let testSuffix = '単元確認テスト';
+      if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
+        testSuffix = 'まとめテスト（１）';
+      } else if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
+        testSuffix = 'まとめテスト（２）';
+      } else if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
+        testSuffix = 'まとめテスト（３）';
+      } else if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
+        testSuffix = 'Check Test';
+      }
+      const testContent = `${subjectName}: ${cleanUnitName} - ${testSuffix}`;
+
+      const miniResult: MiniTestResult = {
+        id: `mini-test-${student.id}-${task.id}`,
+        student_id: student.id,
+        task_id: task.id,
+        date: currentDateStr,
+        subject: subjectName,
+        test_type: 'unit_test',
+        unit_name: cleanUnitName,
+        test_content: testContent,
+        score: 100,
+        passed: true,
+        status: 'passed',
+        completed_at: new Date().toISOString(),
+        passing_line: '100%',
+        target_scope: 'individual',
+        students: {
+          id: student.id,
+          name: student.name,
+          grade: student.grade
+        },
+        created_at: new Date().toISOString()
+      };
+      await db.saveMiniTestResult(miniResult);
+      setMiniTestResults(prev => [...prev.filter(m => m.id !== miniResult.id), miniResult]);
+    }
+
     // 他の教科の授業もすべて完了したか確認
     const allCurrentTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
     const otherTasks = allCurrentTasks.filter(t => t.id !== task.id);
@@ -1501,7 +1566,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       .replace(/単元テスト/g, '')
       .replace(/確認テスト/g, '')
       .trim() || '単元';
-    const testContent = `${subjectName}: ${cleanUnitName} - 単元確認テスト`;
+
+    let testSuffix = '単元確認テスト';
+    if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
+      testSuffix = 'まとめテスト（１）';
+    } else if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
+      testSuffix = 'まとめテスト（２）';
+    } else if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
+      testSuffix = 'まとめテスト（３）';
+    } else if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
+      testSuffix = 'Check Test';
+    } else if (rawUnitName.includes('再テスト')) {
+      testSuffix = '単元確認テスト（再テスト）';
+    }
+    const testContent = `${subjectName}: ${cleanUnitName} - ${testSuffix}`;
     const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
     const existingMini = todayMini.find(m => (m.task_id === task.id) || (m.subject === subjectName && (m.test_content === testContent || m.unit_name === cleanUnitName)));
     const stLevel = currentStudent.level || 'A';

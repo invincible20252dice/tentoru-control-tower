@@ -1401,6 +1401,8 @@ export default function TeacherDashboard({
                 // 単元テスト合否状況に応じた自動補正：
                 // 1) 不合格の場合: 新単元進行をブロックし再テストへ自動補正
                 // 2) 合格の場合: 既存タスクが古い再テスト/単元確認テストのまま残っていれば、新単元（次のレッスン）へと自動更新
+                // 3) 既存タスクの授業がすでに生徒側で受講・合格完了している場合: 次の未受講レッスンへ自動更新
+                // 4) 既存タスクが単元確認テスト等を指しているが、手前に未受講レッスン（まとめテスト等）が残っている場合: スキップを防止し手前の未完了レッスンへ自動補正
                 const isTaskPassedUnitTest = isTaskUnitTest && Boolean(
                   (t.start_lesson_id && utStatus.completedUnitTestKeys.has(t.start_lesson_id)) ||
                   (t.start_lesson_name && utStatus.completedUnitTestKeys.has(normalizeUnitName(t.start_lesson_name))) ||
@@ -1409,7 +1411,38 @@ export default function TeacherDashboard({
                   (t.start_lesson_name && freshSt.completed_lesson_ids?.some(cid => isMatchingUnitOrTest(cid, t.start_lesson_name)))
                 );
 
-                if ((utStatus.hasFailedUnitTest && utStatus.failedUnitTest && !isTaskUnitTest) || isTaskPassedUnitTest) {
+                const isTaskAlreadyCompleted = Boolean(
+                  (t.start_lesson_id && (freshSt.completed_lesson_ids?.includes(t.start_lesson_id) || utStatus.completedUnitTestKeys.has(t.start_lesson_id))) ||
+                  (t.start_lesson_name && (freshSt.completed_lesson_ids?.some(cid => isMatchingUnitOrTest(cid, t.start_lesson_name)) || utStatus.completedUnitTestKeys.has(normalizeUnitName(t.start_lesson_name))))
+                );
+
+                const nextExpectedLesson = findNextUncompletedLessonForSubject({
+                  student: freshSt,
+                  subject: sub,
+                  tasks: freshTasks,
+                  curriculumMasters: listMasters,
+                  curriculumUnits: listUnits,
+                  schoolId: freshSt.school_id,
+                  lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
+                  miniTestResults: miniResultsAll
+                });
+
+                const taskUnitNorm = normalizeUnitName(t.start_lesson_name || t.custom_unit_name);
+                const nextLessonUnitNorm = normalizeUnitName(nextExpectedLesson.lessonName);
+                const isSameUnitPreceding = Boolean(
+                  taskUnitNorm && nextLessonUnitNorm &&
+                  isMatchingUnitOrTest(taskUnitNorm, nextLessonUnitNorm)
+                );
+
+                const hasUncompletedPrecedingLesson = Boolean(
+                  isTaskUnitTest && isSameUnitPreceding && nextExpectedLesson.lessonName && 
+                  !nextExpectedLesson.lessonName.includes('単元確認テスト') && 
+                  !nextExpectedLesson.lessonName.includes('単元テスト') && 
+                  !nextExpectedLesson.lessonName.includes('再テスト') && 
+                  nextExpectedLesson.lessonName !== t.start_lesson_name
+                );
+
+                if ((utStatus.hasFailedUnitTest && utStatus.failedUnitTest && !isTaskUnitTest) || isTaskPassedUnitTest || isTaskAlreadyCompleted || hasUncompletedPrecedingLesson) {
                   const branchRules = db.getBranchAIRules(freshSt.branch_id || (selectedBranchId !== 'all' ? selectedBranchId : 'branch-1'));
                   const correctedRange = calculateLessonRangeForSlot({
                     subject: sub,

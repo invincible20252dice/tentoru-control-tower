@@ -1038,15 +1038,27 @@ export function calculateLessonRangeForSlot(params: {
 
   // 1. 対象教科の授業リストを抽出 (小学生はカリキュラムマスター全学年ステップを優先)
   const filteredMasters = curriculumMasters.filter(m => {
-    if (subject === '算数' || subject === '数学') {
-      if (isElem) {
-        return m.subject === '算数' || (m.subject === '数学' && (m.grade?.startsWith('小') || m.grade?.includes('年')));
-      } else if (isJunior) {
-        return m.subject === '数学' && !m.grade?.startsWith('小') && !m.grade?.includes('年生');
-      } else if (isHigh) {
-        return m.subject === '数学' && (m.grade?.startsWith('高') || !m.grade?.startsWith('小'));
+    if (isElem) {
+      const isMasterElem = (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
+      if (!isMasterElem) return false;
+      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+        return m.subject === '算数' || m.subject === '数学';
       }
       return m.subject === subject;
+    } else if (isJunior) {
+      const isMasterJunior = (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
+      if (!isMasterJunior) return false;
+      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+        return m.subject === '数学' || m.subject === '算数';
+      }
+      return m.subject === subject;
+    } else if (isHigh) {
+      const isMasterHigh = (m.grade || '').startsWith('高') || m.grade === '既卒';
+      if (!isMasterHigh) return false;
+      return m.subject === subject;
+    }
+    if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+      return m.subject === '算数' || m.subject === '数学';
     }
     return m.subject === subject;
   });
