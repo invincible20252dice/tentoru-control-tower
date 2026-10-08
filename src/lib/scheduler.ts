@@ -28,6 +28,7 @@ export function normalizeUnitName(name?: string | null): string {
   let cleaned = name
     .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[〜～~]/g, '~')
     .replace(/[\s\u3000]+/g, ' ')
     .trim()
     .replace(/[-−ー―]/g, '-');
@@ -56,17 +57,17 @@ export function normalizeUnitName(name?: string | null): string {
  */
 export function isMatchingUnitOrTest(source?: string | null, target?: string | null): boolean {
   if (!source || !target) return false;
-  const sRaw = source.replace(/[\s\u3000]+/g, ' ').trim();
-  const tRaw = target.replace(/[\s\u3000]+/g, ' ').trim();
+  const sRaw = source.replace(/[〜～~]/g, '~').replace(/[\s\u3000]+/g, ' ').trim();
+  const tRaw = target.replace(/[〜～~]/g, '~').replace(/[\s\u3000]+/g, ' ').trim();
   if (sRaw === tRaw) return true;
 
   const sClean = sRaw.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
   const tClean = tRaw.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
   if (sClean === tClean) return true;
 
-  // まとめテストの判定: 番号（1, 2, 3）や有無のチェック
-  const sSummaryMatch = sClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i);
-  const tSummaryMatch = tClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i);
+  // まとめテストの判定: 番号（1, 2, 3）や有無のチェック（cm-auto-sum[1-3] も含む）
+  const sSummaryMatch = sClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i) || sRaw.match(/cm-auto-sum([1-3])/i);
+  const tSummaryMatch = tClean.match(/まとめテスト\s*[（(]?\s*([0-9１-３一二三]+)\s*[）)]?/i) || tRaw.match(/cm-auto-sum([1-3])/i);
 
   // 一方がまとめテストで他方がまとめテストでない場合、種別が異なるため一致しない
   if ((sSummaryMatch && !tSummaryMatch) || (!sSummaryMatch && tSummaryMatch)) {
@@ -84,9 +85,9 @@ export function isMatchingUnitOrTest(source?: string | null, target?: string | n
     return sUnit === tUnit || sClean.includes(tClean) || tClean.includes(sClean);
   }
 
-  // Check Testの判定
-  const sIsCheck = sClean.toLowerCase().includes('check test');
-  const tIsCheck = tClean.toLowerCase().includes('check test');
+  // Check Testの判定（cm-auto-check も含む）
+  const sIsCheck = sClean.toLowerCase().includes('check test') || sRaw.includes('cm-auto-check');
+  const tIsCheck = tClean.toLowerCase().includes('check test') || tRaw.includes('cm-auto-check');
   if ((sIsCheck && !tIsCheck) || (!sIsCheck && tIsCheck)) {
     return false;
   }
@@ -95,6 +96,18 @@ export function isMatchingUnitOrTest(source?: string | null, target?: string | n
     const tUnit = normalizeUnitName(tClean);
     if (!sUnit || !tUnit) return true;
     return sUnit === tUnit || sClean.includes(tClean) || tClean.includes(sClean);
+  }
+
+  // 単元確認テストの判定（cm-auto-ut も含む）
+  const sIsUnitTest = sClean.includes('単元確認テスト') || sClean.includes('単元テスト') || sRaw.includes('cm-auto-ut-');
+  const tIsUnitTest = tClean.includes('単元確認テスト') || tClean.includes('単元テスト') || tRaw.includes('cm-auto-ut-');
+  // 一方が単元確認テストで、他方がまとめテストやCheck Test等の別種別の場合は一致しない
+  if (sIsUnitTest !== tIsUnitTest) {
+    // 単元名そのものとのマッチング（例: unit_name === '0の たしざんと ひきざん' と cid === '...単元確認テスト'）は許容する場合があるが、
+    // 授業名（STEP 1, 0のたしざん等）との誤一致は防ぐ
+    const otherClean = sIsUnitTest ? tClean : sClean;
+    const isOtherLesson = otherClean.includes('STEP') || otherClean.includes('たしざん') || otherClean.includes('ひきざん') || otherClean.includes('かず');
+    if (isOtherLesson) return false;
   }
 
   if (sRaw.includes(tRaw) || tRaw.includes(sRaw)) return true;
@@ -703,7 +716,33 @@ export function findNextUncompletedLessonForSubject(params: {
     miniTestResults
   });
 
-  // 合格済みの単元テストを completedIds に追加（合格時の次単元解禁）
+  // 合格・完了済みの単元テストから単元名を収集（次単元解禁 & 先行レッスン完了保証）
+  const completedUnitNames = new Set<string>(unitTestStatus.completedUnitKeys || []);
+  completedIds.forEach(cid => {
+    if (cid.includes('単元確認テスト') || cid.includes('単元テスト') || cid.includes('cm-auto-ut-')) {
+      const uNorm = normalizeUnitName(cid);
+      if (uNorm) completedUnitNames.add(uNorm);
+    }
+  });
+
+  // 単元確認テストが合格・完了している単元内の先行レッスン（Check Test、まとめテスト、授業）を completedIds に追加
+  if (completedUnitNames.size > 0) {
+    masterLessons.forEach(m => {
+      const mUnit = m.unit_name || '';
+      const mName = m.name || '';
+      const isUnitPassed = Boolean(
+        completedUnitNames.has(mUnit) ||
+        completedUnitNames.has(normalizeUnitName(mUnit)) ||
+        (mUnit && Array.from(completedUnitNames).some(un => isMatchingUnitOrTest(mUnit, un)))
+      );
+      if (isUnitPassed) {
+        completedIds.add(m.id);
+        completedIds.add(String(m.id));
+        completedIds.add(mName);
+      }
+    });
+  }
+
   if (unitTestStatus.completedUnitTestKeys) {
     unitTestStatus.completedUnitTestKeys.forEach(k => {
       completedIds.add(k);
@@ -722,18 +761,9 @@ export function findNextUncompletedLessonForSubject(params: {
             completedIds.add(mName);
           }
         } else {
-          // 通常レッスンやまとめテスト等の完了判定:
-          // 1) そのレッスン自身の名称と直接一致する場合（小テスト合格等）
-          // 2) 単元全体の単元確認テストが合格している場合（completedUnitKeys に単元名が存在）
-          const isUnitPassed = Boolean(
-            unitTestStatus.completedUnitKeys && (
-              unitTestStatus.completedUnitKeys.has(mUnit) ||
-              unitTestStatus.completedUnitKeys.has(normalizeUnitName(mUnit)) ||
-              (mUnit && isMatchingUnitOrTest(mUnit, k) && unitTestStatus.completedUnitKeys.has(k))
-            )
-          );
-
-          if (mName === k || cleanLesson === k || isMatchingUnitOrTest(mName, k) || isUnitPassed) {
+          const isReviewOrCheck = mName.includes('まとめテスト') || mName.toLowerCase().includes('check test');
+          const isDirectMatch = (!isReviewOrCheck && cleanLesson === k) || mName === k || isMatchingUnitOrTest(mName, k);
+          if (isDirectMatch) {
             completedIds.add(m.id);
             completedIds.add(String(m.id));
             completedIds.add(mName);
@@ -835,7 +865,14 @@ export function findNextUncompletedLessonForSubject(params: {
         (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name)) ||
         completedIds.has(l.id) ||
         completedIds.has(String(l.id)) ||
-        completedIds.has(l.name)
+        completedIds.has(l.name) ||
+        Array.from(completedIds).some(cid => {
+          const isCidUnitTest = cid.includes('単元確認テスト') || cid.includes('単元テスト') || cid.includes('確認テスト') || cid.includes('cm-auto-ut-');
+          if (isCidUnitTest) {
+            return isMatchingUnitOrTest(cid, l.name) || isMatchingUnitOrTest(cid, l.id) || (l.unit_name && isMatchingUnitOrTest(cid, l.unit_name));
+          }
+          return false;
+        })
       );
 
       // 単元テストが未合格（未受験または不合格）の場合、合否ゲート発動！
@@ -851,16 +888,26 @@ export function findNextUncompletedLessonForSubject(params: {
       }
     } else {
       const cleanLessonName = l.name ? l.name.replace(/^[^-]+-\s*/, '').trim() : '';
+      const isReviewOrCheckStep = Boolean(
+        (l.name || '').includes('まとめテスト') || 
+        (l.name || '').toLowerCase().includes('check test') ||
+        (cleanLessonName || '').includes('まとめテスト') ||
+        (cleanLessonName || '').toLowerCase().includes('check test')
+      );
+
+      // まとめテストや Check Test は全単元共通名称のため、単元名を含まない短い cleanLessonName 単体でのマッチングを厳格に禁止！
+      // 必ず該当単元の一致（l.id または l.name または isMatchingUnitOrTest）で判定する。
       const isLessonCompleted = Boolean(
         completedIds.has(l.id) || 
         completedIds.has(String(l.id)) || 
         completedIds.has(l.name) ||
-        (cleanLessonName && completedIds.has(cleanLessonName)) ||
+        (!isReviewOrCheckStep && cleanLessonName && completedIds.has(cleanLessonName)) ||
+        Array.from(completedIds).some(cid => isMatchingUnitOrTest(cid, l.name)) ||
         (unitTestStatus.completedUnitTestKeys && (
           unitTestStatus.completedUnitTestKeys.has(l.id) ||
           unitTestStatus.completedUnitTestKeys.has(String(l.id)) ||
           unitTestStatus.completedUnitTestKeys.has(l.name) ||
-          (cleanLessonName && unitTestStatus.completedUnitTestKeys.has(cleanLessonName))
+          (!isReviewOrCheckStep && cleanLessonName && unitTestStatus.completedUnitTestKeys.has(cleanLessonName))
         ))
       );
       if (i >= startThresholdIdx && !isLessonCompleted) {

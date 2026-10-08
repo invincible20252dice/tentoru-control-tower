@@ -1421,7 +1421,10 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       const unit = units.find(u => u.id === task.unit_id);
       const subjectName = task.subject || (unit ? unit.subject : 'その他');
       const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-      const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName.trim() || '単元';
+      const cleanUnitName = rawUnitName
+        .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
+        .replace(/\s*-\s*(単元確認テスト|単元テスト|確認テスト|テスト|やり直し|再テスト|まとめテスト).*$/i, '')
+        .trim() || '単元';
       let testSuffix = '単元確認テスト';
       if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
         testSuffix = 'まとめテスト（１）';
@@ -1553,7 +1556,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const unit = units.find(u => u.id === task.unit_id);
     const subjectName = task.subject || (unit ? unit.subject : 'その他');
     const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName
+    const cleanUnitName = rawUnitName
+      .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
