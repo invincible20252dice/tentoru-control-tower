@@ -9055,23 +9055,12 @@ export default function TeacherDashboard({
 
                   if (selectedStudent.last_completed_lesson_id) {
                     completedLessonIdSet.add(String(selectedStudent.last_completed_lesson_id).trim());
-                    const lastIdx = timelineUnits.findIndex(m => 
-                      String(m.id) === String(selectedStudent.last_completed_lesson_id) || 
-                      ((m as any).sort_order !== undefined && String((m as any).sort_order) === String(selectedStudent.last_completed_lesson_id)) || 
-                      m.name === selectedStudent.last_completed_lesson_id ||
-                      m.lesson_name === selectedStudent.last_completed_lesson_id
-                    );
-                    if (lastIdx >= 0) {
-                      for (let i = 0; i <= lastIdx; i++) {
-                        completedLessonIdSet.add(String(timelineUnits[i].id));
-                      }
-                    }
                   }
 
                   let startSeq = 0;
                   const subjectStartUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
                   if (selectedStudent && subjectStartUnitId) {
-                    const su = timelineUnits.find(u => {
+                    const suIdx = timelineUnits.findIndex(u => {
                       const au = u as any;
                       return (
                         String(au.id) === String(subjectStartUnitId) || 
@@ -9081,25 +9070,12 @@ export default function TeacherDashboard({
                         au.name === subjectStartUnitId
                       );
                     });
-                    if (su) {
-                      startSeq = su.sequence_order - 1;
-                      for (let i = 0; i < startSeq; i++) {
-                        completedLessonIdSet.add(String(timelineUnits[i].id));
-                      }
+                    if (suIdx >= 0) {
+                      startSeq = suIdx;
                     }
                   }
 
-                  // 過去に完了済みの最大インデックスを特定
-                  let maxCompletedIdx = -1;
-                  timelineUnits.forEach((u, i) => {
-                    if (completedLessonIdSet.has(String(u.id)) || ((u as any).sort_order !== undefined && completedLessonIdSet.has(String((u as any).sort_order)))) {
-                      if (i > maxCompletedIdx) {
-                        maxCompletedIdx = i;
-                      }
-                    }
-                  });
-
-                  // 不合格記録のある単元テストがあるか確認
+                  // 不合格記録のある単元テストがあるか確認（合否ゲート）
                   let failedUnitTestIdx = -1;
                   if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
                     const fut = latestUnitTestStatus.failedUnitTest;
@@ -9113,22 +9089,31 @@ export default function TeacherDashboard({
                     });
                   }
 
-                  // 不合格単元テストがある場合は、それ以降のステップは完了扱いにしない
-                  if (failedUnitTestIdx >= 0 && maxCompletedIdx >= failedUnitTestIdx) {
-                    maxCompletedIdx = failedUnitTestIdx - 1;
-                  }
-
-                  // 完了済み最大インデックスまでの過去ステップを完了セットに反映
-                  if (maxCompletedIdx >= 0) {
-                    for (let i = 0; i <= maxCompletedIdx; i++) {
-                      completedLessonIdSet.add(String(timelineUnits[i].id));
+                  // 完了済み最大インデックス
+                  let maxCompletedIdx = -1;
+                  timelineUnits.forEach((u, i) => {
+                    if (completedLessonIdSet.has(String(u.id)) || ((u as any).sort_order !== undefined && completedLessonIdSet.has(String((u as any).sort_order)))) {
+                      if (i > maxCompletedIdx) {
+                        maxCompletedIdx = i;
+                      }
                     }
-                  }
+                  });
 
-                  // カリキュラム順で最初の未合格単元テストのインデックスを特定（合否ゲート）
+                  // 現在地（アクティブレッスン）の先頭インデックス
+                  let firstActiveIdx = -1;
+                  timelineUnits.forEach((u, i) => {
+                    if (todayActiveLessonIds.has(String(u.id))) {
+                      if (firstActiveIdx === -1 || i < firstActiveIdx) {
+                        firstActiveIdx = i;
+                      }
+                    }
+                  });
+
+                  // カリキュラム順で未合格単元テストのインデックスを特定（合否ゲート）
                   let gateUnitTestIdx = failedUnitTestIdx >= 0 ? failedUnitTestIdx : -1;
                   if (gateUnitTestIdx < 0) {
-                    for (let i = 0; i < timelineUnits.length; i++) {
+                    const searchStart = Math.max(0, maxCompletedIdx);
+                    for (let i = searchStart; i < timelineUnits.length; i++) {
                       const u = timelineUnits[i];
                       const isUT = (u as any).item_type === 'unit_test' || 
                         u.name.includes('単元確認テスト') || u.name.includes('単元テスト') ||
@@ -9191,38 +9176,24 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  // 現在地の最小インデックス（最前線）より手前の過去ステップを完了済みセットに追加
-                  let minActiveIdx = -1;
-                  timelineUnits.forEach((u, i) => {
-                    if (todayActiveLessonIds.has(String(u.id))) {
-                      if (minActiveIdx === -1 || i < minActiveIdx) {
-                        minActiveIdx = i;
-                      }
-                    }
-                  });
-                  if (minActiveIdx > 0 && !hasFailedUnitTest) {
-                    for (let i = 0; i < minActiveIdx; i++) {
-                      completedLessonIdSet.add(String(timelineUnits[i].id));
-                    }
-                  }
-
                   // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定
+                  // 当日コマ割りに設定されているレッスンID配列（todayActiveLessonIds）に含まれる場合は「📍 現在地（取り組み中）」最優先
+                  // 生徒が実際に受講完了したID配列（DBの実データ completedLessonIdSet）に含まれる場合は「✓ 完了」
+                  // それ以外は「○ 予定」
                   const stepStatusMap = new Map<string, 'completed' | 'current' | 'planned'>();
 
                   timelineUnits.forEach(step => {
                     const stepId = String(step.id);
-                    if (completedLessonIdSet.has(stepId)) {
-                      stepStatusMap.set(stepId, 'completed');
-                    } else if (todayActiveLessonIds.has(stepId)) {
-                      stepStatusMap.set(stepId, 'current');
-                    } else {
-                      stepStatusMap.set(stepId, 'planned');
-                    }
+                    const isCompleted = completedLessonIdSet.has(stepId) ||
+                      ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
+                    const isCurrent = !isCompleted && todayActiveLessonIds.has(stepId);
+                    const status: 'completed' | 'current' | 'planned' = isCompleted ? 'completed' : isCurrent ? 'current' : 'planned';
+                    stepStatusMap.set(stepId, status);
                   });
 
                   const completedUnitsList = timelineUnits.filter(u => stepStatusMap.get(String(u.id)) === 'completed');
                   const completedCount = completedUnitsList.length;
-                  const progressPercent = Math.min(100, Math.round((completedCount / totalCount) * 100));
+                  const progressPercent = totalCount > 0 ? Math.min(100, Math.round((completedCount / totalCount) * 100)) : 0;
                   
                   const studentDays = (selectedStudent.selected_days?.length || 2);
                   const studentSlots = (selectedStudent.default_slots || selectedStudent.period_count || 2);

@@ -4755,8 +4755,9 @@ describe('UI Components Render & Interaction Tests', () => {
 
     // Verify that the start unit step is displayed as 📍 現在地（取り組み中）
     expect(screen.getAllByText('📍 現在地（取り組み中）').length).toBeGreaterThan(0);
-    // Verify earlier steps show ✓ 完了
-    expect(screen.getAllByText('✓ 完了').length).toBeGreaterThan(0);
+    // Verify that other uncompleted steps are displayed as ○ 予定 (not prematurely marked as completed)
+    expect(screen.getAllByText('○ 予定').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('✓ 完了').length).toBe(0);
 
     unmount();
   });

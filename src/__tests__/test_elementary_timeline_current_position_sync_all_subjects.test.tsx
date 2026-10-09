@@ -722,9 +722,10 @@ describe('Elementary Timeline Current Position Synchronization Across All Subjec
       expect(step3).toHaveTextContent('📍 現在地（取り組み中）');
       expect(step3).toHaveStyle({ borderLeft: '4px solid #2563eb' });
 
-      // 最前線手前の過去ステップ STEP 2 は受講通過済みとして完了
+      // DBのcompleted_lesson_idsに存在しない未受講の過去ステップ STEP 2 は勝手に完了化されず「○ 予定」
       const step2 = screen.getByTestId('timeline-item-cm-gate-2');
-      expect(step2).toHaveTextContent('✓ 完了');
+      expect(step2).toHaveTextContent('○ 予定');
+      expect(step2).not.toHaveTextContent('✓ 完了');
 
       // 未割当の未来ステップ STEP 4 は ○ 予定
       const step4 = screen.getByTestId('timeline-item-cm-gate-4');
