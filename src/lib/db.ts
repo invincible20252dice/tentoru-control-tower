@@ -729,6 +729,107 @@ export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<stri
   };
 }
 
+/**
+ * 過去のテスト実行等で混入した未来の誤完了テストIDを除外するサニタイズ関数
+ */
+export function sanitizeCorruptedCompletedLessonIds(
+  completedLessonIds: string[] | undefined,
+  options?: {
+    timelineUnits?: Array<{ id: string | number; name?: string; lesson_name?: string; unit_name?: string }>;
+    activeLessonIds?: Set<string> | string[];
+    subject?: string;
+  }
+): { cleanedIds: string[]; removedCount: number } {
+  if (!Array.isArray(completedLessonIds) || completedLessonIds.length === 0) {
+    return { cleanedIds: [], removedCount: 0 };
+  }
+
+  const activeSet = new Set<string>(
+    options?.activeLessonIds ? Array.from(options.activeLessonIds).map(String) : []
+  );
+
+  let lastActiveIdx = -1;
+  let firstActiveIdx = -1;
+  const timelineIdToIdx = new Map<string, number>();
+
+  if (options?.timelineUnits) {
+    options.timelineUnits.forEach((u, idx) => {
+      const uId = String(u.id);
+      timelineIdToIdx.set(uId, idx);
+      if ((u as any).sort_order !== undefined) {
+        timelineIdToIdx.set(String((u as any).sort_order), idx);
+      }
+      if (activeSet.has(uId)) {
+        if (firstActiveIdx === -1) firstActiveIdx = idx;
+        lastActiveIdx = idx;
+      }
+    });
+  }
+
+  const cleanedIds = completedLessonIds.filter(id => {
+    const sId = String(id).trim();
+    if (!sId) return false;
+
+    // 1. 算数: 2年生の全まとめテストIDを除外
+    if (sId.startsWith('cm-auto-sum') && sId.includes('算数') && (sId.includes('小2') || sId.includes('2年'))) {
+      return false;
+    }
+
+    // 2. 算数: STEP 99「大きい かず - まとめテスト(1)」以降の全まとめテストIDを除外
+    if (sId.startsWith('cm-auto-sum') && sId.includes('算数')) {
+      if (
+        sId.includes('大きいかず') ||
+        sId.includes('大きい かず') ||
+        sId.includes('とけい') ||
+        sId.includes('時計') ||
+        sId.includes('ひろさ') ||
+        sId.includes('広さ') ||
+        sId.includes('かたちづくり')
+      ) {
+        return false;
+      }
+    }
+
+    // 3. 国語: STEP 15「まとめテスト(2)」およびそれ以降の全まとめテストIDを除外
+    if (sId.startsWith('cm-auto-sum') && sId.includes('国語')) {
+      // カタカナでかく言葉のまとめテスト(2), (3)
+      if (sId.includes('カタカナ') && (sId.startsWith('cm-auto-sum2') || sId.startsWith('cm-auto-sum3'))) {
+        return false;
+      }
+      // カタカナでかく言葉以降の単元まとめテスト
+      const isEarlyUnit =
+        sId.includes('かずとすうじ') ||
+        sId.includes('ひらがな') ||
+        sId.includes('あいうえお') ||
+        sId.includes('ことばをみつけよう') ||
+        sId.includes('はなしてつたえよう') ||
+        sId.includes('ぶんをつくろう');
+      if (!isEarlyUnit) {
+        if (sId.includes('カタカナ')) {
+          if (!sId.startsWith('cm-auto-sum1')) return false;
+        } else {
+          return false;
+        }
+      }
+    }
+
+    // 4. タイムラインの現在地より後ろにある未来のステップIDを除外
+    if (firstActiveIdx >= 0) {
+      const idx = timelineIdToIdx.get(sId);
+      if (idx !== undefined && idx > lastActiveIdx) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  return {
+    cleanedIds,
+    removedCount: completedLessonIds.length - cleanedIds.length
+  };
+}
+
 // -------------------------------------------------------------
 // Hybrid DB Access Class
 // -------------------------------------------------------------
@@ -1921,7 +2022,35 @@ class DatabaseService {
   }
 
   // 2. Students CRUD
+  public async cleanupStudentCorruptedCompletedLessonIds(
+    studentId: string,
+    options?: {
+      timelineUnits?: Array<{ id: string | number; name?: string; lesson_name?: string; unit_name?: string }>;
+      activeLessonIds?: Set<string> | string[];
+      subject?: string;
+    }
+  ): Promise<Student | null> {
+    const student = this.getStudents().find(s => s.id === studentId);
+    if (!student || !Array.isArray(student.completed_lesson_ids)) return null;
+
+    const { cleanedIds, removedCount } = sanitizeCorruptedCompletedLessonIds(student.completed_lesson_ids, options);
+    if (removedCount > 0) {
+      const updated = {
+        ...student,
+        completed_lesson_ids: cleanedIds
+      };
+      return await this.saveStudent(updated);
+    }
+    return student;
+  }
+
   public async saveStudent(student: Student): Promise<Student> {
+    // 誤完了まとめテストID・未来テストIDの自動サニタイズ（生徒データのID汚染を根本防止）
+    if (Array.isArray(student.completed_lesson_ids) && student.completed_lesson_ids.length > 0) {
+      const { cleanedIds } = sanitizeCorruptedCompletedLessonIds(student.completed_lesson_ids);
+      student = { ...student, completed_lesson_ids: cleanedIds };
+    }
+
     const curYear = getSchoolYear();
     const assignedTeachers = student.assigned_teachers && Array.isArray(student.assigned_teachers) && student.assigned_teachers.length > 0
       ? student.assigned_teachers

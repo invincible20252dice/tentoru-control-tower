@@ -41,7 +41,8 @@ import {
   isHighSchoolStudent,
   StudentInterview2,
   StudentInterview3,
-  StudentInterviewCustomField
+  StudentInterviewCustomField,
+  sanitizeCorruptedCompletedLessonIds
 } from '../lib/db';
 import { 
   rescheduleDelayedTasks, 
@@ -8900,6 +8901,20 @@ export default function TeacherDashboard({
                     }
                   }
 
+                  // タイムライン内ユニットとの表記揺れ吸収マッチング関数
+                  const matchesTimelineUnit = (u: any, query: string, queryId?: string): boolean => {
+                    if (!query && !queryId) return false;
+                    if (queryId && (String(u.id) === String(queryId) || (u.sort_order !== undefined && String(u.sort_order) === String(queryId)))) {
+                      return true;
+                    }
+                    if (!query) return false;
+                    if (u.lesson_name === query || u.name === query) return true;
+                    if (isMatchingUnitOrTest(u.name, query) || isMatchingUnitOrTest(u.lesson_name, query)) return true;
+                    if (u.name && (u.name.includes(query) || query.includes(u.name))) return true;
+                    if (u.lesson_name && (u.lesson_name.includes(query) || query.includes(u.lesson_name))) return true;
+                    return false;
+                  };
+
                   // コマ割りスロットから受講対象レッスンID群を抽出する汎用関数
                   const extractLessonIdsFromSlot = (slot: any): string[] => {
                     const ids: string[] = [];
@@ -8911,23 +8926,44 @@ export default function TeacherDashboard({
 
                     const startId = slot.start_lesson_id || slot.startLessonId;
                     const endId = slot.end_lesson_id || slot.endLessonId;
-                    const fromStr = slot.start_lesson_name || '';
-                    const toStr = slot.end_lesson_name || '';
+                    let fromStr = slot.start_lesson_name || '';
+                    let toStr = slot.end_lesson_name || '';
                     const rangeText = slot.lesson_range || slot.custom_unit_name || '';
+
+                    // rangeText からのスマート分割
+                    if ((!fromStr || !toStr) && rangeText) {
+                      if (/\s+[〜~～]\s+/.test(rangeText)) {
+                        const parts = rangeText.split(/\s+[〜~～]\s+/);
+                        if (parts.length >= 2) {
+                          if (!fromStr) fromStr = parts[0].trim();
+                          if (!toStr) toStr = parts[1].trim();
+                        }
+                      } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
+                        const parts = rangeText.split(/〜|~|～/);
+                        if (parts.length >= 2) {
+                          if (!fromStr) fromStr = parts[0].trim();
+                          if (!toStr) toStr = parts[1].trim();
+                        }
+                      } else if (!fromStr) {
+                        fromStr = rangeText.trim();
+                      }
+                    }
 
                     let sIdx = -1;
                     let eIdx = -1;
 
                     if (startId) {
                       sIdx = timelineUnits.findIndex(u => String(u.id) === String(startId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(startId)));
-                    } else if (fromStr) {
-                      sIdx = timelineUnits.findIndex(u => u.lesson_name === fromStr || u.name === fromStr || (u.lesson_name && fromStr.includes(u.lesson_name)));
+                    }
+                    if (sIdx < 0 && fromStr) {
+                      sIdx = timelineUnits.findIndex(u => matchesTimelineUnit(u, fromStr, startId));
                     }
 
                     if (endId) {
                       eIdx = timelineUnits.findIndex(u => String(u.id) === String(endId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(endId)));
-                    } else if (toStr) {
-                      eIdx = timelineUnits.findIndex(u => u.lesson_name === toStr || u.name === toStr || (u.lesson_name && toStr.includes(u.lesson_name)));
+                    }
+                    if (eIdx < 0 && toStr) {
+                      eIdx = timelineUnits.findIndex(u => matchesTimelineUnit(u, toStr, endId));
                     }
 
                     if (sIdx >= 0 && eIdx >= 0) {
@@ -8938,23 +8974,21 @@ export default function TeacherDashboard({
                       }
                     } else if (sIdx >= 0) {
                       ids.push(String(timelineUnits[sIdx].id));
-                      if (toStr || rangeText) {
+                      if (toStr) {
                         const startUnit = timelineUnits[sIdx] as any;
-                        if (startUnit?.unit_name) {
-                          timelineUnits.forEach((u: any, i) => {
-                            if (i > sIdx && u.unit_name === startUnit.unit_name) {
-                              if (u.lesson_name === toStr || u.name === toStr || (rangeText && (rangeText.includes(u.lesson_name) || rangeText.includes(u.name)))) {
-                                ids.push(String(u.id));
-                              }
+                        timelineUnits.forEach((u: any, i) => {
+                          if (i > sIdx && (u.unit_name === startUnit.unit_name || !startUnit.unit_name)) {
+                            if (matchesTimelineUnit(u, toStr)) {
+                              ids.push(String(u.id));
                             }
-                          });
-                        }
+                          }
+                        });
                       }
                     } else if (eIdx >= 0) {
                       ids.push(String(timelineUnits[eIdx].id));
                     } else if (rangeText) {
                       timelineUnits.forEach((u: any) => {
-                        if (rangeText.includes(u.name) || (u.lesson_name && rangeText.includes(u.lesson_name))) {
+                        if (matchesTimelineUnit(u, rangeText)) {
                           ids.push(String(u.id));
                         }
                       });
@@ -8974,9 +9008,30 @@ export default function TeacherDashboard({
                     }
                   });
 
-                  // 2. 生徒の受講完了済みレッスンID群（Set化で高速・完全一致照合）
+                  // 2. 生徒の受講完了済みレッスンID群（サニタイズ適用で未来テスト汚染を根絶）
+                  const rawStudentCompletedIds = selectedStudent.completed_lesson_ids || [];
+                  const { cleanedIds: sanitizedCompletedIds, removedCount } = sanitizeCorruptedCompletedLessonIds(
+                    rawStudentCompletedIds,
+                    {
+                      timelineUnits,
+                      activeLessonIds: todayActiveLessonIds,
+                      subject: selectedSubject
+                    }
+                  );
+
+                  // 生徒データに誤完了未来テストIDが含まれていた場合は自動クリーンアップ保存
+                  if (removedCount > 0 && selectedStudent.id) {
+                    const cleanedStudent: Student = {
+                      ...selectedStudent,
+                      completed_lesson_ids: sanitizedCompletedIds
+                    };
+                    db.saveStudent(cleanedStudent).catch(err => {
+                      console.warn('Auto cleanup student completed_lesson_ids error:', err);
+                    });
+                  }
+
                   const completedLessonIdSet = new Set<string>(
-                    (selectedStudent.completed_lesson_ids || []).map(id => String(id).trim())
+                    sanitizedCompletedIds.map(id => String(id).trim())
                   );
 
                   db.getStudentLessonProgressList(selectedStudent.id).forEach(p => {
@@ -9002,6 +9057,8 @@ export default function TeacherDashboard({
                     miniTestResults: miniTestResultsList
                   });
 
+                  const miniTestPassedIdSet = new Set<string>();
+
                   timelineUnits.forEach(u => {
                     const uId = String(u.id);
                     const uName = u.name || '';
@@ -9021,6 +9078,7 @@ export default function TeacherDashboard({
                       (isUT && uUnitName && (latestUnitTestStatus.completedUnitTestKeys.has(uUnitName) || latestUnitTestStatus.completedUnitKeys?.has(uUnitName)))
                     ) {
                       completedLessonIdSet.add(uId);
+                      miniTestPassedIdSet.add(uId);
                     }
 
                     const hasPassedMini = (miniTestResultsList || []).some(r => {
@@ -9050,6 +9108,7 @@ export default function TeacherDashboard({
 
                     if (hasPassedMini) {
                       completedLessonIdSet.add(uId);
+                      miniTestPassedIdSet.add(uId);
                     }
                   });
 
@@ -9159,7 +9218,8 @@ export default function TeacherDashboard({
                         subject: selectedSubject,
                         tasks: studentTasks,
                         curriculumMasters: masterUnits,
-                        curriculumUnits: subjectUnits
+                        curriculumUnits: subjectUnits,
+                        miniTestResults: miniTestResultsList
                       });
                       if (next && next.lessonId) {
                         const targetUnit = timelineUnits.find(u => String(u.id) === String(next.lessonId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(next.lessonId)));
@@ -9176,18 +9236,52 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定
-                  // 当日コマ割りに設定されているレッスンID配列（todayActiveLessonIds）に含まれる場合は「📍 現在地（取り組み中）」最優先
-                  // 生徒が実際に受講完了したID配列（DBの実データ completedLessonIdSet）に含まれる場合は「✓ 完了」
-                  // それ以外は「○ 予定」
+                  // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定（飛び石完了ガード整合性チェック実装）
+                  // - 当日コマ割りに設定されているレッスンID配列（todayActiveLessonIds）に含まれる場合は「📍 現在地（取り組み中）」最優先
+                  // - 現在地（firstActiveIdx）が存在する場合、現在地より後ろのステップ（idx > lastActiveIdx）は過去の誤完了IDがあっても強制的に「○ 予定」
+                  // - 単元内の通常授業（導入・練習）が未受講であるテストは飛び石完了と判定し「○ 予定」
+                  // - それ以外の現在地より前のステップで、生徒が実際に受講完了したIDのみ「✓ 完了」
+
+                  firstActiveIdx = -1;
+                  let lastActiveIdx = -1;
+                  timelineUnits.forEach((u, i) => {
+                    if (todayActiveLessonIds.has(String(u.id))) {
+                      if (firstActiveIdx === -1) firstActiveIdx = i;
+                      lastActiveIdx = i;
+                    }
+                  });
+
                   const stepStatusMap = new Map<string, 'completed' | 'current' | 'planned'>();
 
-                  timelineUnits.forEach(step => {
+                  timelineUnits.forEach((step, idx) => {
                     const stepId = String(step.id);
-                    const isCompleted = completedLessonIdSet.has(stepId) ||
+                    const isDirectlyCompleted = completedLessonIdSet.has(stepId) ||
                       ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
-                    const isCurrent = !isCompleted && todayActiveLessonIds.has(stepId);
-                    const status: 'completed' | 'current' | 'planned' = isCompleted ? 'completed' : isCurrent ? 'current' : 'planned';
+                    const isActive = todayActiveLessonIds.has(stepId);
+
+                    const isSummaryTest = step.name.includes('まとめテスト') || 
+                      (step.lesson_name && step.lesson_name.includes('まとめテスト')) ||
+                      stepId.startsWith('cm-auto-sum');
+
+                    let status: 'completed' | 'current' | 'planned' = 'planned';
+
+                    if (isActive) {
+                      // 当日アクティブ範囲のうち、受講完了済みのものは「✓ 完了」、未完了のものが「📍 現在地（取り組み中）」
+                      status = isDirectlyCompleted ? 'completed' : 'current';
+                    } else if (isDirectlyCompleted) {
+                      // 飛び石完了ガード: 現在地より後ろの未来区間にあるまとめテストは、過去の汚染IDがあっても強制的に「○ 予定」
+                      // ただし、小テスト・単元テストの正規合格実績（miniTestPassedIdSet）があるものは保護
+                      const hasActualMiniPass = miniTestPassedIdSet.has(stepId);
+                      const isFutureSummaryTest = firstActiveIdx >= 0 && idx > lastActiveIdx && isSummaryTest && !hasActualMiniPass;
+                      if (isFutureSummaryTest) {
+                        status = 'planned';
+                      } else {
+                        status = 'completed';
+                      }
+                    } else {
+                      status = 'planned';
+                    }
+
                     stepStatusMap.set(stepId, status);
                   });
 
