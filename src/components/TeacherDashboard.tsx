@@ -2821,20 +2821,7 @@ export default function TeacherDashboard({
     const currentStatus = tempHomeworkStatuses[result.id] || result.status || 'incomplete';
     const isSubmitted = currentStatus === 'completed' || (currentStatus as string) === 'submitted';
     const nextStatus = isSubmitted ? 'incomplete' : 'completed';
-
-    // 楽観的UI更新 (Optimistic UI)
-    setTempHomeworkStatuses(prev => ({
-      ...prev,
-      [result.id]: nextStatus
-    }));
-    const updated: HomeworkResult = {
-      ...result,
-      status: nextStatus
-    };
-    setHomeworkResultsList(prev => prev.map(h => h.id === result.id ? updated : h));
-
-    // 即時DB永続保存
-    await db.saveHomeworkResult(updated);
+    await handleAutoSaveHomeworkStatus(result, nextStatus);
   };
 
   // 宿題提出状況の自動保存
