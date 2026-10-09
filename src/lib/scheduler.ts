@@ -204,6 +204,10 @@ export function getLatestUnitTestStatusForSubject(params: {
       completedUnitTestKeys.add(result.test_content);
       const cleanContent = result.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
       if (cleanContent) completedUnitTestKeys.add(cleanContent);
+      if (result.unit_name) {
+        completedUnitTestKeys.add(`${result.unit_name} - ${cleanContent}`);
+        completedUnitTestKeys.add(`${result.unit_name} - ${result.test_content}`);
+      }
 
       // 単元確認テストの合格の場合のみ、単元全体を修了扱いとする単元キーを登録
       if (isUnitTest) {
@@ -829,6 +833,17 @@ export function findNextUncompletedLessonForSubject(params: {
     }
 
     if (sIdx >= 0) startThresholdIdx = sIdx;
+  } else if (isElem && student.grade) {
+    const studentGradeNorm = normalizeGrade(student.grade);
+    if (studentGradeNorm) {
+      const gradeStartIdx = masterLessons.findIndex(m => {
+        const rawM = (ensuredMasters || []).find(em => em.id === m.id);
+        return rawM && normalizeGrade(rawM.grade) === studentGradeNorm;
+      });
+      if (gradeStartIdx >= 0) {
+        startThresholdIdx = gradeStartIdx;
+      }
+    }
   }
 
   for (let i = 0; i < masterLessons.length; i++) {

@@ -120,6 +120,174 @@ function normalizeGrade(g?: string): string {
   return trimmed;
 }
 
+export function determineActiveGradeForSubject(
+  targetSubj: string,
+  targetStudent: Student | null | undefined,
+  tasks?: LearningTask[],
+  slots?: Record<number, any>,
+  dateStr?: string,
+  masters?: CurriculumMaster[]
+): string {
+  if (!targetStudent) return 'all';
+
+  const isElem = isElementaryStudent(targetStudent.grade, targetStudent.grade_category) ||
+    (targetStudent.grade || '').startsWith('小') ||
+    /^[1-6]年生?$/.test(targetStudent.grade || '') ||
+    targetStudent.grade === '園児';
+  if (!isElem) return 'all';
+
+  const normalizeSubject = (s: string) => {
+    if (s === '数学' && targetSubj === '算数') return '算数';
+    if (s === '算数' && targetSubj === '数学') return '数学';
+    return s;
+  };
+
+  const getGradeFilterValue = (rawGrade: string | undefined): string | null => {
+    if (!rawGrade) return null;
+    const match = rawGrade.match(/^[小]?([1-6])/);
+    if (match) return `小${match[1]}`;
+    const numMatch = rawGrade.match(/([1-6])年生?/);
+    if (numMatch) return `小${numMatch[1]}`;
+    if (rawGrade === '園児') return '小1';
+    return null;
+  };
+
+  const allMasters = (masters && masters.length > 0) ? masters : db.getCurriculumMasters();
+
+  // 1. 本日（選択日）のコマ割りに割り振られているステップが属している学年を最優先で特定
+  const sysToday = new Date().toISOString().split('T')[0];
+  const targetDate = dateStr || sysToday;
+
+  // 対象生徒に属するタスクのみを対象とする
+  const studentTasksOnly = (tasks || db.getLearningTasks()).filter(t => !targetStudent || t.student_id === targetStudent.id);
+
+  // 本日のコマ（todaySlots）に含まれる該当教科のタスクを抽出（テスト等で日付不一致の場合も考慮しアクティブタスクへフォールバック）
+  const todayTasks = studentTasksOnly.filter(t => {
+    const isSub = t.subject === targetSubj || normalizeSubject(t.subject || '') === targetSubj;
+    if (!isSub) return false;
+    if (t.period === null || t.period === undefined) return false;
+    return t.scheduled_date === targetDate || t.scheduled_date === sysToday;
+  });
+
+  const activeTasksForSubj = todayTasks.length > 0
+    ? todayTasks
+    : studentTasksOnly.filter(t => {
+        const isSub = t.subject === targetSubj || normalizeSubject(t.subject || '') === targetSubj;
+        return isSub && t.period !== null && t.period !== undefined;
+      });
+
+  for (const t of activeTasksForSubj) {
+    const targetId = t.unit_id || t.start_lesson_id || (Array.isArray((t as any).lesson_ids) && (t as any).lesson_ids[0]);
+    if (targetId) {
+      const foundMaster = allMasters.find(m => String(m.id) === String(targetId) || (m.sort_order !== undefined && String(m.sort_order) === String(targetId)));
+      if (foundMaster?.grade) {
+        const gFilter = getGradeFilterValue(foundMaster.grade);
+        if (gFilter) return gFilter;
+      }
+    }
+    const titleToFind = (t as any).unit_name || t.start_lesson_name || (t as any).title;
+    if (titleToFind) {
+      const foundMaster = allMasters.find(m => {
+        const isSub = m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj;
+        return isSub && (
+          m.unit_name === titleToFind ||
+          m.lesson_name === titleToFind ||
+          isMatchingUnitOrTest(m.unit_name, titleToFind) ||
+          isMatchingUnitOrTest(m.lesson_name, titleToFind)
+        );
+      });
+      if (foundMaster?.grade) {
+        const gFilter = getGradeFilterValue(foundMaster.grade);
+        if (gFilter) return gFilter;
+      }
+    }
+  }
+
+  // periodSelections からも確認
+  if (slots) {
+    const slotList = Object.values(slots).filter(s => s && (s.subject === targetSubj || normalizeSubject(s.subject) === targetSubj));
+    for (const s of slotList) {
+      const targetId = s.unit_id || s.unitId || s.start_lesson_id || s.startLessonId || (Array.isArray(s.lesson_ids) && s.lesson_ids[0]);
+      if (targetId) {
+        const foundMaster = allMasters.find(m => String(m.id) === String(targetId) || (m.sort_order !== undefined && String(m.sort_order) === String(targetId)));
+        if (foundMaster?.grade) {
+          const gFilter = getGradeFilterValue(foundMaster.grade);
+          if (gFilter) return gFilter;
+        }
+      }
+      const titleToFind = s.custom_unit_name || s.unit_name || s.start_lesson_name;
+      if (titleToFind) {
+        const foundMaster = allMasters.find(m => {
+          const isSub = m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj;
+          return isSub && (
+            m.unit_name === titleToFind ||
+            m.lesson_name === titleToFind ||
+            isMatchingUnitOrTest(m.unit_name, titleToFind) ||
+            isMatchingUnitOrTest(m.lesson_name, titleToFind)
+          );
+        });
+        if (foundMaster?.grade) {
+          const gFilter = getGradeFilterValue(foundMaster.grade);
+          if (gFilter) return gFilter;
+        }
+      }
+    }
+  }
+
+  // 2. 本日のコマにその教科が存在しない場合:
+  // 生徒の登録学年と同じ学年のマスターから直近の「未完了の先頭ステップ」を最優先検索
+  const completedSet = new Set((targetStudent.completed_lesson_ids || []).map(id => String(id).trim()));
+  const studentGradeNorm = getGradeFilterValue(targetStudent.grade);
+
+  if (studentGradeNorm) {
+    const gradeMasters = allMasters
+      .filter(m => {
+        const isSub = m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj;
+        return isSub && getGradeFilterValue(m.grade) === studentGradeNorm;
+      })
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+    const firstInGrade = gradeMasters.find(m => !completedSet.has(String(m.id)) && (!m.sort_order || !completedSet.has(String(m.sort_order))));
+    if (firstInGrade?.grade) {
+      const gFilter = getGradeFilterValue(firstInGrade.grade);
+      if (gFilter) return gFilter;
+    }
+  }
+
+  // 生徒の登録学年に未完了がない場合（全完了・先取り等）、全体の未完了先頭ステップを検索
+  const nextLesson = findNextUncompletedLessonForSubject({
+    student: targetStudent,
+    subject: targetSubj,
+    tasks: tasks || [],
+    curriculumMasters: allMasters
+  });
+
+  if (nextLesson && nextLesson.lessonId) {
+    const foundMaster = allMasters.find(m => String(m.id) === String(nextLesson.lessonId) || (m.sort_order !== undefined && String(m.sort_order) === String(nextLesson.lessonId)));
+    if (foundMaster?.grade) {
+      const gFilter = getGradeFilterValue(foundMaster.grade);
+      if (gFilter) return gFilter;
+    }
+  }
+
+  const subjectMasters = allMasters
+    .filter(m => m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const firstUncompleted = subjectMasters.find(m => !completedSet.has(String(m.id)) && (!m.sort_order || !completedSet.has(String(m.sort_order))));
+  if (firstUncompleted?.grade) {
+    const gFilter = getGradeFilterValue(firstUncompleted.grade);
+    if (gFilter) return gFilter;
+  }
+
+  // 3. フォールバック: 生徒の基本登録学年または小1
+  if (targetStudent.grade) {
+    const gFilter = getGradeFilterValue(targetStudent.grade);
+    if (gFilter) return gFilter;
+  }
+  return '小1';
+}
+
 export default function TeacherDashboard({
   students: propStudents,
   schools: propSchools,
@@ -990,13 +1158,16 @@ export default function TeacherDashboard({
   const [elementaryTimelineGradeFilter, setElementaryTimelineGradeFilter] = useState<string>(() => {
     const allSt = propStudents || db.getStudents();
     const targetSt = initialStudentId ? allSt.find(s => s.id === initialStudentId) : allSt[0];
-    if (targetSt?.grade) {
-      const match = targetSt.grade.match(/^[小]?([1-6])/);
-      if (match) return `小${match[1]}`;
-      if (targetSt.grade === '園児') return '小1';
+    if (targetSt) {
+      const allTasks = propTasks || db.getLearningTasks();
+      const stTasks = allTasks.filter(t => t.student_id === targetSt.id);
+      const initSubj = targetSt.selected_subjects?.[0] || '算数';
+      return determineActiveGradeForSubject(initSubj, targetSt, stTasks, undefined, initialDate, propCurriculumMasters);
     }
     return 'all';
   });
+  // ユーザーが明示的に学年タブをクリックした場合はその学年を維持するためのフラグ
+  const [isManualGradeFilterSelected, setIsManualGradeFilterSelected] = useState<boolean>(false);
 
   // 校舎別 AI授業自動設定ルール State
   const [isBranchAIRulesModalOpen, setIsBranchAIRulesModalOpen] = useState(false);
@@ -1666,6 +1837,7 @@ export default function TeacherDashboard({
 
   useEffect(() => {
     if (selectedStudent) {
+      setIsManualGradeFilterSelected(false);
       // 生徒の所属学校と連動
       const currentSchools = schools.length > 0 ? schools : db.getSchools();
       const matchedSchool = currentSchools.find(s => 
@@ -1705,16 +1877,16 @@ export default function TeacherDashboard({
           setSelectedSubject('算数');
         }
 
-        if (selectedStudent.grade) {
-          const match = selectedStudent.grade.match(/^[小]?([1-6])/);
-          if (match) {
-            setElementaryTimelineGradeFilter(`小${match[1]}`);
-          } else if (selectedStudent.grade === '園児') {
-            setElementaryTimelineGradeFilter('小1');
-          } else {
-            setElementaryTimelineGradeFilter('all');
-          }
-        }
+        const targetSub = pref || selectedSubject || '算数';
+        const autoGrade = determineActiveGradeForSubject(
+          targetSub,
+          selectedStudent,
+          studentTasks,
+          undefined,
+          scheduleDate,
+          curriculumMastersList
+        );
+        setElementaryTimelineGradeFilter(autoGrade);
       } else {
         const highSubjects = ['数学', '英語', '国語', '理科', '社会'];
         const pref = selectedStudent.selected_subjects?.find(sub => highSubjects.includes(sub));
@@ -9097,7 +9269,18 @@ export default function TeacherDashboard({
                           if (cleanUnit === uUnitName || isMatchingUnitOrTest(r.unit_name, uUnitName) || isMatchingUnitOrTest(r.unit_name, uName)) return true;
                         }
                       } else if (isReviewOrCheck) {
-                        if (r.test_content === uName || cleanContent === uName || isMatchingUnitOrTest(r.test_content, uName) || isMatchingUnitOrTest(r.test_content, uLessonName)) return true;
+                        const combinedTestName = cleanUnit ? `${cleanUnit} - ${cleanContent}` : cleanContent;
+                        if (
+                          r.test_content === uName ||
+                          cleanContent === uName ||
+                          combinedTestName === uName ||
+                          combinedTestName === uLessonName ||
+                          isMatchingUnitOrTest(r.test_content, uName) ||
+                          isMatchingUnitOrTest(r.test_content, uLessonName) ||
+                          isMatchingUnitOrTest(combinedTestName, uName) ||
+                          isMatchingUnitOrTest(combinedTestName, uLessonName) ||
+                          (cleanUnit && (uName.includes(cleanUnit) || uLessonName.includes(cleanUnit)) && (uName.includes(cleanContent) || uLessonName.includes(cleanContent)))
+                        ) return true;
                       } else {
                         if (r.test_type === 'unit_test' && cleanUnit && (cleanUnit === uUnitName || isMatchingUnitOrTest(r.unit_name, uUnitName))) {
                           return true;
@@ -9236,53 +9419,72 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定（飛び石完了ガード整合性チェック実装）
-                  // - 当日コマ割りに設定されているレッスンID配列（todayActiveLessonIds）に含まれる場合は「📍 現在地（取り組み中）」最優先
-                  // - 現在地（firstActiveIdx）が存在する場合、現在地より後ろのステップ（idx > lastActiveIdx）は過去の誤完了IDがあっても強制的に「○ 予定」
-                  // - 単元内の通常授業（導入・練習）が未受講であるテストは飛び石完了と判定し「○ 予定」
-                  // - それ以外の現在地より前のステップで、生徒が実際に受講完了したIDのみ「✓ 完了」
+                  // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定（ユーザー確定仕様クリーン走査ロジック）
+                  // （ハードコード、特定文字列マッチ(includes)、例外分岐を一切排除し、現在地インデックスで未来の飛び石完了を徹底ガード）
+                  let currentRangeStartIdx = -1;
+                  let currentRangeEndIdx = -1;
 
-                  firstActiveIdx = -1;
-                  let lastActiveIdx = -1;
-                  timelineUnits.forEach((u, i) => {
-                    if (todayActiveLessonIds.has(String(u.id))) {
-                      if (firstActiveIdx === -1) firstActiveIdx = i;
-                      lastActiveIdx = i;
+                  timelineUnits.forEach((step: any, idx: number) => {
+                    const stepIdStr = String(step.id);
+                    const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
+                      ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
+                    if (todayActiveLessonIds.has(stepIdStr) && !isRecordedCompleted) {
+                      if (currentRangeStartIdx === -1) currentRangeStartIdx = idx;
+                      currentRangeEndIdx = idx;
                     }
                   });
 
+                  const hasTodayActive = currentRangeStartIdx !== -1;
+                  let firstIncompleteIdx = -1;
+                  if (!hasTodayActive) {
+                    firstIncompleteIdx = timelineUnits.findIndex((step: any) => {
+                      const stepIdStr = String(step.id);
+                      const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
+                        ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
+                      return !isRecordedCompleted;
+                    });
+                  }
+
                   const stepStatusMap = new Map<string, 'completed' | 'current' | 'planned'>();
 
-                  timelineUnits.forEach((step, idx) => {
-                    const stepId = String(step.id);
-                    const isDirectlyCompleted = completedLessonIdSet.has(stepId) ||
+                  timelineUnits.forEach((step: any, idx: number) => {
+                    const stepIdStr = String(step.id);
+                    const isTodayActive = todayActiveLessonIds.has(stepIdStr);
+                    const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
                       ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
-                    const isActive = todayActiveLessonIds.has(stepId);
-
-                    const isSummaryTest = step.name.includes('まとめテスト') || 
-                      (step.lesson_name && step.lesson_name.includes('まとめテスト')) ||
-                      stepId.startsWith('cm-auto-sum');
 
                     let status: 'completed' | 'current' | 'planned' = 'planned';
 
-                    if (isActive) {
-                      // 当日アクティブ範囲のうち、受講完了済みのものは「✓ 完了」、未完了のものが「📍 現在地（取り組み中）」
-                      status = isDirectlyCompleted ? 'completed' : 'current';
-                    } else if (isDirectlyCompleted) {
-                      // 飛び石完了ガード: 現在地より後ろの未来区間にあるまとめテストは、過去の汚染IDがあっても強制的に「○ 予定」
-                      // ただし、小テスト・単元テストの正規合格実績（miniTestPassedIdSet）があるものは保護
-                      const hasActualMiniPass = miniTestPassedIdSet.has(stepId);
-                      const isFutureSummaryTest = firstActiveIdx >= 0 && idx > lastActiveIdx && isSummaryTest && !hasActualMiniPass;
-                      if (isFutureSummaryTest) {
-                        status = 'planned';
+                    if (hasTodayActive) {
+                      if (idx < currentRangeStartIdx) {
+                        // 現在地より手前
+                        status = isRecordedCompleted ? 'completed' : 'planned';
+                      } else if (idx <= currentRangeEndIdx) {
+                        // 現在地（今日のコマ割りに含まれる未完了ステップ）
+                        status = (isTodayActive && !isRecordedCompleted) ? 'current' : (isRecordedCompleted ? 'completed' : 'planned');
                       } else {
-                        status = 'completed';
+                        // 現在地に到達した以降（未来の全ステップ、および未受講のまとめテスト）
+                        // ただし、小テスト・単元確認テストの正規合格実績（miniTestPassedIdSet）があるものは保護
+                        status = miniTestPassedIdSet.has(stepIdStr) ? 'completed' : 'planned';
                       }
                     } else {
-                      status = 'planned';
+                      // 今日のコマに未完了ステップがない場合（仕様4）:
+                      if (firstIncompleteIdx === -1) {
+                        // 全ステップ完了
+                        status = 'completed';
+                      } else if (idx < firstIncompleteIdx) {
+                        // 未完了の先頭ステップより手前
+                        status = isRecordedCompleted ? 'completed' : 'planned';
+                      } else if (idx === firstIncompleteIdx) {
+                        // 未完了の先頭ステップを「現在地」とする
+                        status = 'current';
+                      } else {
+                        // それ以降の全ステップ: 正規合格実績があるものは保護、それ以外は「○ 予定」（飛び石完了完全防止）
+                        status = miniTestPassedIdSet.has(stepIdStr) ? 'completed' : 'planned';
+                      }
                     }
 
-                    stepStatusMap.set(stepId, status);
+                    stepStatusMap.set(stepIdStr, status);
                   });
 
                   const completedUnitsList = timelineUnits.filter(u => stepStatusMap.get(String(u.id)) === 'completed');
@@ -9366,7 +9568,20 @@ export default function TeacherDashboard({
                                           key={sub}
                                           type="button"
                                           data-testid={`milestone-subject-btn-${sub}`}
-                                          onClick={() => setSelectedSubject(sub)}
+                                          onClick={() => {
+                                            setSelectedSubject(sub);
+                                            if (isElementary && !isManualGradeFilterSelected) {
+                                              const autoGrade = determineActiveGradeForSubject(
+                                                sub,
+                                                selectedStudent,
+                                                studentTasks,
+                                                periodSelections,
+                                                scheduleDate,
+                                                curriculumMastersList
+                                              );
+                                              setElementaryTimelineGradeFilter(autoGrade);
+                                            }
+                                          }}
                                           style={{
                                             display: 'inline-flex',
                                             alignItems: 'center',
@@ -9422,7 +9637,10 @@ export default function TeacherDashboard({
                                             key={item.value}
                                             type="button"
                                             data-testid={`elementary-timeline-grade-btn-${item.label}`}
-                                            onClick={() => setElementaryTimelineGradeFilter(item.value)}
+                                            onClick={() => {
+                                              setIsManualGradeFilterSelected(true);
+                                              setElementaryTimelineGradeFilter(item.value);
+                                            }}
                                             style={{
                                               display: 'inline-flex',
                                               alignItems: 'center',
