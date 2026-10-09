@@ -8864,51 +8864,100 @@ export default function TeacherDashboard({
                   // 未完了タスク
                   const uncompletedTasks = targetSubjectTasks.filter(t => t.status !== 'completed' && !t.test_passed);
 
-                  // 生徒が現在学習画面で取り組むべき直近のアクティブタスク日を特定（今日、または直近の未完了日）
-                  const todayStr = scheduleDate || new Date().toISOString().split('T')[0];
+                  // 生徒学習画面で開かれる日付（今日の授業日）を確実に特定
+                  const sysTodayStr = new Date().toISOString().split('T')[0];
                   let activeScheduledDate = '';
-                  const todayTasksList = uncompletedTasks.filter(t => t.scheduled_date === todayStr);
-                  if (todayTasksList.length > 0) {
-                    activeScheduledDate = todayStr;
+                  
+                  // 1) 今日のタスクがあれば今日
+                  const hasSysToday = uncompletedTasks.some(t => t.scheduled_date === sysTodayStr && t.period !== null);
+                  if (hasSysToday) {
+                    activeScheduledDate = sysTodayStr;
+                  } else if (scheduleDate && uncompletedTasks.some(t => t.scheduled_date === scheduleDate && t.period !== null)) {
+                    // 2) 講師が選択中の日付にタスクがあればその日
+                    activeScheduledDate = scheduleDate;
                   } else {
+                    // 3) 直近の未来のタスク日
                     const upcomingTasksList = uncompletedTasks
-                      .filter(t => t.scheduled_date >= todayStr)
+                      .filter(t => t.scheduled_date >= sysTodayStr && t.period !== null)
                       .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
                     if (upcomingTasksList.length > 0) {
                       activeScheduledDate = upcomingTasksList[0].scheduled_date;
                     } else if (uncompletedTasks.length > 0) {
-                      const sortedTasks = [...uncompletedTasks].sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
-                      activeScheduledDate = sortedTasks[0].scheduled_date;
+                      // 4) 直近の過去のタスク日
+                      const sortedTasks = [...uncompletedTasks]
+                        .filter(t => t.period !== null)
+                        .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+                      if (sortedTasks.length > 0) {
+                        activeScheduledDate = sortedTasks[0].scheduled_date;
+                      }
                     }
                   }
 
-                  // 学習画面に現在並んでいるアクティブなタスク
-                  const activeTasks = activeScheduledDate 
-                    ? uncompletedTasks.filter(t => t.scheduled_date === activeScheduledDate)
-                    : uncompletedTasks;
+                  // 学習画面に現在並んでいるアクティブなタスク（生徒の学習画面に表示される日のタスク、および今日・選択日のタスク）
+                  const activeTaskDateSet = new Set<string>();
+                  if (activeScheduledDate) activeTaskDateSet.add(activeScheduledDate);
+                  if (scheduleDate) activeTaskDateSet.add(scheduleDate);
+                  if (sysTodayStr) activeTaskDateSet.add(sysTodayStr);
+
+                  const activeTasks = uncompletedTasks.filter(t => activeTaskDateSet.has(t.scheduled_date));
 
                   const currentActiveLessonIds = new Set<string>();
                   const activeStepIndicesFromTasks = new Set<number>();
 
+                  const isUnitMatchingItem = (u: any, targetStr?: string | null, targetId?: string | null): boolean => {
+                    if (!targetStr && !targetId) return false;
+                    const uid = String(u.id);
+                    const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
+                    const strId = targetId ? String(targetId) : '';
+                    if (strId && (uid === strId || uSort === strId)) return true;
+                    if (!targetStr) return false;
+
+                    const uName = u.name || '';
+                    const uLesson = u.lesson_name || '';
+                    const uUnit = u.unit_name || '';
+                    const cleanTarget = targetStr.replace(/^[^-]+-\s*/, '').trim();
+
+                    if (uName === targetStr || uLesson === targetStr) return true;
+                    if (cleanTarget && (uLesson === cleanTarget || uName.replace(/^[^-]+-\s*/, '').trim() === cleanTarget)) return true;
+
+                    // まとめテストやCheck Test等の照合
+                    if (isMatchingUnitOrTest(uName, targetStr) || isMatchingUnitOrTest(uLesson, targetStr)) return true;
+
+                    // 単元名＋レッスン名の一致
+                    if (uUnit && targetStr.includes(uUnit) && cleanTarget && (uLesson === cleanTarget || uName.includes(cleanTarget))) return true;
+
+                    return false;
+                  };
+
                   // アクティブタスクの範囲（start 〜 end）に含まれるすべてのレッスンを収集
                   activeTasks.forEach(t => {
-                    if (t.unit_id) currentActiveLessonIds.add(String(t.unit_id));
-                    if (t.start_lesson_id) currentActiveLessonIds.add(String(t.start_lesson_id));
-                    if (t.end_lesson_id) currentActiveLessonIds.add(String(t.end_lesson_id));
+                    let fromStr = t.start_lesson_name || '';
+                    let toStr = t.end_lesson_name || '';
+
+                    const rangeText = t.lesson_range || t.custom_unit_name || '';
+                    if ((!fromStr || !toStr) && rangeText) {
+                      if (/\s+[〜~～]\s+/.test(rangeText)) {
+                        const parts = rangeText.split(/\s+[〜~～]\s+/);
+                        if (parts.length >= 2) {
+                          if (!fromStr) fromStr = parts[0].trim();
+                          if (!toStr) toStr = parts[1].trim();
+                        }
+                      } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
+                        const parts = rangeText.split(/〜|~|～/);
+                        if (parts.length >= 2) {
+                          if (!fromStr) fromStr = parts[0].trim();
+                          if (!toStr) toStr = parts[1].trim();
+                        }
+                      }
+                    }
 
                     let sIdx = -1;
                     let eIdx = -1;
-                    if (t.start_lesson_id || t.start_lesson_name) {
-                      sIdx = timelineUnits.findIndex((u: any) => 
-                        (t.start_lesson_id && (String(u.id) === String(t.start_lesson_id) || String(u.sort_order) === String(t.start_lesson_id))) ||
-                        (t.start_lesson_name && (u.name === t.start_lesson_name || isMatchingUnitOrTest(u.name, t.start_lesson_name)))
-                      );
+                    if (t.start_lesson_id || fromStr) {
+                      sIdx = timelineUnits.findIndex((u: any) => isUnitMatchingItem(u, fromStr, t.start_lesson_id));
                     }
-                    if (t.end_lesson_id || t.end_lesson_name) {
-                      eIdx = timelineUnits.findIndex((u: any) => 
-                        (t.end_lesson_id && (String(u.id) === String(t.end_lesson_id) || String(u.sort_order) === String(t.end_lesson_id))) ||
-                        (t.end_lesson_name && (u.name === t.end_lesson_name || isMatchingUnitOrTest(u.name, t.end_lesson_name)))
-                      );
+                    if (t.end_lesson_id || toStr) {
+                      eIdx = timelineUnits.findIndex((u: any) => isUnitMatchingItem(u, toStr, t.end_lesson_id));
                     }
 
                     if (sIdx >= 0 && eIdx >= sIdx) {
@@ -8917,21 +8966,67 @@ export default function TeacherDashboard({
                         const rId = String(ru.id);
                         const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
                           t.completed_lesson_ids.includes(rId) ||
-                          t.completed_lesson_ids.includes(ru.name)
+                          t.completed_lesson_ids.includes(ru.name) ||
+                          (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
                         );
                         if (!isIndividuallyCompleted) {
                           currentActiveLessonIds.add(rId);
                           if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
                           if (ru.name) currentActiveLessonIds.add(ru.name);
+                          if (ru.lesson_name) currentActiveLessonIds.add(ru.lesson_name);
                           activeStepIndicesFromTasks.add(i);
                         }
                       }
                     } else if (sIdx >= 0) {
                       const ru = timelineUnits[sIdx] as any;
-                      currentActiveLessonIds.add(String(ru.id));
-                      if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
-                      if (ru.name) currentActiveLessonIds.add(ru.name);
-                      activeStepIndicesFromTasks.add(sIdx);
+                      const rId = String(ru.id);
+                      const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
+                        t.completed_lesson_ids.includes(rId) ||
+                        t.completed_lesson_ids.includes(ru.name) ||
+                        (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
+                      );
+                      if (!isIndividuallyCompleted) {
+                        currentActiveLessonIds.add(rId);
+                        if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                        if (ru.name) currentActiveLessonIds.add(ru.name);
+                        if (ru.lesson_name) currentActiveLessonIds.add(ru.lesson_name);
+                        activeStepIndicesFromTasks.add(sIdx);
+                      }
+                    } else if (eIdx >= 0) {
+                      const ru = timelineUnits[eIdx] as any;
+                      const rId = String(ru.id);
+                      const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
+                        t.completed_lesson_ids.includes(rId) ||
+                        t.completed_lesson_ids.includes(ru.name) ||
+                        (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
+                      );
+                      if (!isIndividuallyCompleted) {
+                        currentActiveLessonIds.add(rId);
+                        if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                        if (ru.name) currentActiveLessonIds.add(ru.name);
+                        if (ru.lesson_name) currentActiveLessonIds.add(ru.lesson_name);
+                        activeStepIndicesFromTasks.add(eIdx);
+                      }
+                    } else {
+                      timelineUnits.forEach((u: any, i) => {
+                        const uName = u.name || '';
+                        const uLesson = u.lesson_name || '';
+                        const rId = String(u.id);
+                        const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
+                          t.completed_lesson_ids.includes(rId) ||
+                          t.completed_lesson_ids.includes(uName) ||
+                          (uLesson && t.completed_lesson_ids.includes(uLesson))
+                        );
+                        if (!isIndividuallyCompleted && (
+                          (t.unit_id && String(u.id) === String(t.unit_id)) ||
+                          (t.custom_unit_name && (uName.includes(t.custom_unit_name) || t.custom_unit_name.includes(uName) || isMatchingUnitOrTest(uName, t.custom_unit_name))) ||
+                          (rangeText && (rangeText.includes(uName) || (uLesson && rangeText.includes(uLesson))))
+                        )) {
+                          currentActiveLessonIds.add(String(u.id));
+                          if (u.name) currentActiveLessonIds.add(u.name);
+                          activeStepIndicesFromTasks.add(i);
+                        }
+                      });
                     }
                   });
 
@@ -9150,7 +9245,13 @@ export default function TeacherDashboard({
                     }
 
                     // 現在コマ割りで取り組み中のレッスンは完了としない
-                    if (activeStepIndicesFromTasks.has(idx) || currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                    if (
+                      activeStepIndicesFromTasks.has(idx) || 
+                      currentActiveLessonIds.has(uid) || 
+                      (uSort && currentActiveLessonIds.has(uSort)) || 
+                      currentActiveLessonIds.has(u.name) ||
+                      (u.lesson_name && currentActiveLessonIds.has(u.lesson_name))
+                    ) {
                       return false;
                     }
 
@@ -9185,19 +9286,27 @@ export default function TeacherDashboard({
 
                   // 現在地（取り組み中）ステップの判定
                   const currentStepIndices = new Set<number>();
+
+                  // 1. 生徒の学習画面にある授業の全ステップを最優先で現在地として登録！
+                  activeStepIndicesFromTasks.forEach(idx => {
+                    currentStepIndices.add(idx);
+                  });
+
+                  // 2. ID / ソート順 / 名称でのアクティブ判定も追加
                   timelineUnits.forEach((u: any, idx) => {
-                    // 合否ゲート: 未合格単元テストより後の授業を「現在地（取り組み中）」に設定することを厳格に禁止！
-                    if (gateUnitTestIdx >= 0 && idx > gateUnitTestIdx) {
-                      return;
-                    }
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
-                    if (activeStepIndicesFromTasks.has(idx) || currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                    if (
+                      currentActiveLessonIds.has(uid) || 
+                      (uSort && currentActiveLessonIds.has(uSort)) || 
+                      currentActiveLessonIds.has(u.name) ||
+                      (u.lesson_name && currentActiveLessonIds.has(u.lesson_name))
+                    ) {
                       currentStepIndices.add(idx);
                     }
                   });
 
-                  // コマ割りに現在地タスクがない場合、または未合格テストで停止している場合は、最初の未完了ステップを現在地とする
+                  // 3. コマ割りに現在地タスクがない場合のみ、最初の未完了ステップを現在地とするフォールバック
                   if (currentStepIndices.size === 0) {
                     if (firstIncompleteIdx >= 0) {
                       if (gateUnitTestIdx >= 0 && firstIncompleteIdx > gateUnitTestIdx) {

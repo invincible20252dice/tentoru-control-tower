@@ -723,6 +723,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
         students={[refreshedStudent]} 
         initialStudentId={refreshedStudent.id}
         initialTab="milestones"
+        teacherType="elementary"
       />
     );
 
@@ -748,6 +749,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
         initialStudentId={refreshedStudent.id}
         initialTab="schedule"
         initialDate="2026-08-21"
+        teacherType="elementary"
       />
     );
 
