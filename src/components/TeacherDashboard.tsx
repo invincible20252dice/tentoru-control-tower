@@ -8854,25 +8854,118 @@ export default function TeacherDashboard({
                   });
 
                   // 「学習計画・コマ割り」に現在割り当てられている（未完了の）レッスン範囲を収集
-                  const currentActiveLessonIds = new Set<string>();
-                  const uncompletedTasks = studentTasks.filter(t => {
-                    const isTargetSub = t.subject === targetSubject || (targetSubject === '算数' && t.subject === '数学') || (targetSubject === '数学' && t.subject === '算数');
-                    return isTargetSub && t.status !== 'completed' && !t.test_passed;
+                  // 生徒の学習画面（StudentDashboard）に並ぶ有効なタスクを基準とする
+                  const targetSubjectTasks = studentTasks.filter(t => {
+                    return t.subject === targetSubject || 
+                      (targetSubject === '算数' && t.subject === '数学') || 
+                      (targetSubject === '数学' && t.subject === '算数');
                   });
 
-                  uncompletedTasks.forEach(t => {
+                  // 未完了タスク
+                  const uncompletedTasks = targetSubjectTasks.filter(t => t.status !== 'completed' && !t.test_passed);
+
+                  // 生徒が現在学習画面で取り組むべき直近のアクティブタスク日を特定（今日、または直近の未完了日）
+                  const todayStr = scheduleDate || new Date().toISOString().split('T')[0];
+                  let activeScheduledDate = '';
+                  const todayTasksList = uncompletedTasks.filter(t => t.scheduled_date === todayStr);
+                  if (todayTasksList.length > 0) {
+                    activeScheduledDate = todayStr;
+                  } else {
+                    const upcomingTasksList = uncompletedTasks
+                      .filter(t => t.scheduled_date >= todayStr)
+                      .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+                    if (upcomingTasksList.length > 0) {
+                      activeScheduledDate = upcomingTasksList[0].scheduled_date;
+                    } else if (uncompletedTasks.length > 0) {
+                      const sortedTasks = [...uncompletedTasks].sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+                      activeScheduledDate = sortedTasks[0].scheduled_date;
+                    }
+                  }
+
+                  // 学習画面に現在並んでいるアクティブなタスク
+                  const activeTasks = activeScheduledDate 
+                    ? uncompletedTasks.filter(t => t.scheduled_date === activeScheduledDate)
+                    : uncompletedTasks;
+
+                  const currentActiveLessonIds = new Set<string>();
+                  const activeStepIndicesFromTasks = new Set<number>();
+
+                  // アクティブタスクの範囲（start 〜 end）に含まれるすべてのレッスンを収集
+                  activeTasks.forEach(t => {
                     if (t.unit_id) currentActiveLessonIds.add(String(t.unit_id));
                     if (t.start_lesson_id) currentActiveLessonIds.add(String(t.start_lesson_id));
                     if (t.end_lesson_id) currentActiveLessonIds.add(String(t.end_lesson_id));
+
+                    let sIdx = -1;
+                    let eIdx = -1;
+                    if (t.start_lesson_id || t.start_lesson_name) {
+                      sIdx = timelineUnits.findIndex((u: any) => 
+                        (t.start_lesson_id && (String(u.id) === String(t.start_lesson_id) || String(u.sort_order) === String(t.start_lesson_id))) ||
+                        (t.start_lesson_name && (u.name === t.start_lesson_name || isMatchingUnitOrTest(u.name, t.start_lesson_name)))
+                      );
+                    }
+                    if (t.end_lesson_id || t.end_lesson_name) {
+                      eIdx = timelineUnits.findIndex((u: any) => 
+                        (t.end_lesson_id && (String(u.id) === String(t.end_lesson_id) || String(u.sort_order) === String(t.end_lesson_id))) ||
+                        (t.end_lesson_name && (u.name === t.end_lesson_name || isMatchingUnitOrTest(u.name, t.end_lesson_name)))
+                      );
+                    }
+
+                    if (sIdx >= 0 && eIdx >= sIdx) {
+                      for (let i = sIdx; i <= eIdx; i++) {
+                        const ru = timelineUnits[i] as any;
+                        const rId = String(ru.id);
+                        const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
+                          t.completed_lesson_ids.includes(rId) ||
+                          t.completed_lesson_ids.includes(ru.name)
+                        );
+                        if (!isIndividuallyCompleted) {
+                          currentActiveLessonIds.add(rId);
+                          if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                          if (ru.name) currentActiveLessonIds.add(ru.name);
+                          activeStepIndicesFromTasks.add(i);
+                        }
+                      }
+                    } else if (sIdx >= 0) {
+                      const ru = timelineUnits[sIdx] as any;
+                      currentActiveLessonIds.add(String(ru.id));
+                      if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                      if (ru.name) currentActiveLessonIds.add(ru.name);
+                      activeStepIndicesFromTasks.add(sIdx);
+                    }
                   });
 
-                  // 当日編集中の periodSelections に入っているレッスンも現在地として扱う
+                  // 当日編集中の periodSelections に入っているレッスン範囲も同様に収集
                   Object.values(periodSelections).forEach(p => {
                     const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
                     if (isTargetSub) {
                       if (p.unitId) currentActiveLessonIds.add(String(p.unitId));
                       if (p.startLessonId) currentActiveLessonIds.add(String(p.startLessonId));
                       if (p.endLessonId) currentActiveLessonIds.add(String(p.endLessonId));
+
+                      let sIdx = -1;
+                      let eIdx = -1;
+                      if (p.startLessonId) {
+                        sIdx = timelineUnits.findIndex((u: any) => String(u.id) === String(p.startLessonId) || String(u.sort_order) === String(p.startLessonId));
+                      }
+                      if (p.endLessonId) {
+                        eIdx = timelineUnits.findIndex((u: any) => String(u.id) === String(p.endLessonId) || String(u.sort_order) === String(p.endLessonId));
+                      }
+                      if (sIdx >= 0 && eIdx >= sIdx) {
+                        for (let i = sIdx; i <= eIdx; i++) {
+                          const ru = timelineUnits[i] as any;
+                          currentActiveLessonIds.add(String(ru.id));
+                          if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                          if (ru.name) currentActiveLessonIds.add(ru.name);
+                          activeStepIndicesFromTasks.add(i);
+                        }
+                      } else if (sIdx >= 0) {
+                        const ru = timelineUnits[sIdx] as any;
+                        currentActiveLessonIds.add(String(ru.id));
+                        if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                        if (ru.name) currentActiveLessonIds.add(ru.name);
+                        activeStepIndicesFromTasks.add(sIdx);
+                      }
                     }
                   });
 
@@ -8942,21 +9035,29 @@ export default function TeacherDashboard({
                     const uLessonName = u.lesson_name || '';
                     const uUnitName = u.unit_name || '';
                     const uNorm = normalizeUnitName(uName);
-                    const uLessonNorm = normalizeUnitName(uLessonName);
                     const uUnitNorm = normalizeUnitName(uUnitName);
                     const isUT = isUnitTestStep(u);
                     const cleanLessonName = uName.replace(/^[^-]+-\s*/, '').trim();
 
+                    // 「単元確認テスト」「単元テスト」「確認テスト」等の汎用名称単体かどうかの判定
+                    const isGenericTestName = 
+                      cleanLessonName === '単元確認テスト' || 
+                      cleanLessonName === '単元テスト' || 
+                      cleanLessonName === '確認テスト' ||
+                      cleanLessonName === 'テスト' ||
+                      cleanLessonName.startsWith('まとめテスト') ||
+                      cleanLessonName.toLowerCase().startsWith('check test');
+
                     // 1. completedUnitTestKeys で合格確認
+                    // 単元名を含まない短い汎用名称（cleanLessonName / uLessonName）単体での照合は厳格に禁止！
                     if (
                       latestUnitTestStatus.completedUnitTestKeys.has(uid) ||
                       (uSort && latestUnitTestStatus.completedUnitTestKeys.has(uSort)) ||
                       latestUnitTestStatus.completedUnitTestKeys.has(uName) ||
-                      (cleanLessonName && latestUnitTestStatus.completedUnitTestKeys.has(cleanLessonName)) ||
-                      (uLessonName && latestUnitTestStatus.completedUnitTestKeys.has(uLessonName)) ||
+                      (!isGenericTestName && cleanLessonName && latestUnitTestStatus.completedUnitTestKeys.has(cleanLessonName)) ||
+                      (!isGenericTestName && uLessonName && latestUnitTestStatus.completedUnitTestKeys.has(uLessonName)) ||
                       (isUT && (
                         (uNorm && latestUnitTestStatus.completedUnitTestKeys.has(uNorm)) ||
-                        (uLessonNorm && latestUnitTestStatus.completedUnitTestKeys.has(uLessonNorm)) ||
                         (uUnitName && latestUnitTestStatus.completedUnitTestKeys.has(uUnitName)) ||
                         (uUnitNorm && latestUnitTestStatus.completedUnitTestKeys.has(uUnitNorm))
                       ))
@@ -8974,33 +9075,41 @@ export default function TeacherDashboard({
                       const cleanTestContent = (r.test_content || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
                       const cleanUnitName = (r.unit_name || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
 
-                      // テスト内容自体の直接一致（まとめテスト、Check Test、単元テスト共通）
+                      // 単元テスト自身の場合:
+                      if (isUT) {
+                        // テスト内容が該当テストの完全名称と一致
+                        if (
+                          r.test_content === uName ||
+                          cleanTestContent === uName ||
+                          isMatchingUnitOrTest(r.test_content, uName)
+                        ) {
+                          return true;
+                        }
+                        // 単元名の一致による判定:
+                        // cleanUnitName が空や汎用でなく、かつ該当単元名（uUnitName / uNorm）と厳密に一致する場合
+                        if (cleanUnitName && cleanUnitName !== '単元' && cleanUnitName.length >= 2) {
+                          const rUnitNorm = normalizeUnitName(cleanUnitName);
+                          if (
+                            cleanUnitName === uUnitName ||
+                            (uUnitNorm && rUnitNorm === uUnitNorm) ||
+                            (uNorm && rUnitNorm === uNorm) ||
+                            isMatchingUnitOrTest(r.unit_name, uUnitName) ||
+                            isMatchingUnitOrTest(r.unit_name, uName)
+                          ) {
+                            return true;
+                          }
+                        }
+                        return false;
+                      }
+
+                      // まとめテストまたは Check Test の場合:
                       if (
                         r.test_content === uName ||
                         cleanTestContent === uName ||
-                        r.test_content === cleanLessonName ||
-                        cleanTestContent === cleanLessonName ||
-                        r.test_content === uLessonName ||
-                        cleanTestContent === uLessonName ||
                         isMatchingUnitOrTest(r.test_content, uName) ||
-                        isMatchingUnitOrTest(r.test_content, cleanLessonName) ||
-                        isMatchingUnitOrTest(r.test_content, uLessonName)
+                        (!isGenericTestName && (r.test_content === cleanLessonName || cleanTestContent === cleanLessonName))
                       ) {
                         return true;
-                      }
-
-                      // 単元テスト自身の場合のみ、単元名一致を合否判定として認める
-                      if (isUT) {
-                        return (
-                          r.unit_name === uUnitName ||
-                          cleanUnitName === uUnitName ||
-                          (cleanUnitName && uName.includes(cleanUnitName)) ||
-                          (cleanUnitName && cleanUnitName.includes(uName)) ||
-                          isMatchingUnitOrTest(r.unit_name, uName) ||
-                          isMatchingUnitOrTest(r.unit_name, uUnitName) ||
-                          (uNorm && (normalizeUnitName(r.test_content) === uNorm || normalizeUnitName(r.unit_name) === uNorm)) ||
-                          (uUnitNorm && (normalizeUnitName(r.test_content) === uUnitNorm || normalizeUnitName(r.unit_name) === uUnitNorm))
-                        );
                       }
 
                       return false;
@@ -9009,6 +9118,11 @@ export default function TeacherDashboard({
 
                     return false;
                   };
+
+                  // 最前線の暫定インデックス（タスクまたはスタート位置から特定）
+                  const initialMinActiveIdx = activeStepIndicesFromTasks.size > 0 
+                    ? Math.min(...Array.from(activeStepIndicesFromTasks)) 
+                    : (startSeq > 0 ? startSeq : -1);
 
                   // 各単元が実際に完了しているかどうかの判定
                   const isUnitCompleted = (u: any, idx: number) => {
@@ -9036,8 +9150,13 @@ export default function TeacherDashboard({
                     }
 
                     // 現在コマ割りで取り組み中のレッスンは完了としない
-                    if (currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                    if (activeStepIndicesFromTasks.has(idx) || currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
                       return false;
+                    }
+
+                    // 生徒の現在の最前線（initialMinActiveIdx）より手前にある過去のレッスンは、学習画面を通過した過去ステップとして確実に「✓ 完了」とする！
+                    if (initialMinActiveIdx >= 0 && idx < initialMinActiveIdx) {
+                      return true;
                     }
 
                     // 生徒が実際に完了したか（ID、ソート順、名称、正規化名すべてで判定）
@@ -9073,7 +9192,7 @@ export default function TeacherDashboard({
                     }
                     const uid = String(u.id);
                     const uSort = u.sort_order !== undefined ? String(u.sort_order) : '';
-                    if (currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
+                    if (activeStepIndicesFromTasks.has(idx) || currentActiveLessonIds.has(uid) || (uSort && currentActiveLessonIds.has(uSort)) || currentActiveLessonIds.has(u.name)) {
                       currentStepIndices.add(idx);
                     }
                   });
