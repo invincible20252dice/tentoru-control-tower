@@ -223,4 +223,77 @@ describe('Coverage Deep Dive v35 - TeacherDashboard Complete UI & Tabs Suite', (
 
     expect(true).toBe(true);
   });
+
+  it('covers two-way-interview tab form validations, speech transcript parsing, and CRUD lifecycle', async () => {
+    window.alert = vi.fn();
+    window.confirm = vi.fn(() => true);
+
+    const { container, unmount } = render(<TeacherDashboard initialStudentId="st-jhs-v35" />);
+    await waitFor(() => {
+      expect(screen.getByTestId('menu-two-way-interview')).toBeInTheDocument();
+    });
+    const menuBtn = screen.getByTestId('menu-two-way-interview');
+    await act(async () => {
+      fireEvent.click(menuBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('two-way-interview-view')).toBeInTheDocument();
+    });
+
+    // 1. Validation when saving without interview date
+    const dateInput = screen.getByTestId('interview2-date');
+    fireEvent.change(dateInput, { target: { value: '' } });
+    const saveBtn = screen.getByTestId('interview2-save-btn');
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+    expect(window.alert).toHaveBeenCalledWith('実施日を入力してください。');
+
+    // 2. Set interview date and details
+    fireEvent.change(dateInput, { target: { value: '2026-10-09' } });
+
+    const interviewerInput = screen.getByTestId('interview2-interviewer');
+    fireEvent.change(interviewerInput, { target: { value: '佐藤講師' } });
+
+    const targetSchoolInput = screen.getByTestId('interview2-target-school');
+    fireEvent.change(targetSchoolInput, { target: { value: '日比谷高校' } });
+
+    const dreamGoalInput = screen.getByTestId('interview2-dream-goal');
+    fireEvent.change(dreamGoalInput, { target: { value: '宇宙飛行士' } });
+
+    const clubActivityInput = screen.getByTestId('interview2-club-activity');
+    fireEvent.change(clubActivityInput, { target: { value: 'バスケットボール部' } });
+
+    // 3. Test SpeechRecognition unsupported fallback
+    const recordBtn = screen.getByTestId('interview2-record-btn');
+    await act(async () => {
+      fireEvent.click(recordBtn);
+    });
+
+    // 4. Test Transcript parsing
+    const transcriptTextarea = screen.getByTestId('interview2-transcript');
+    fireEvent.change(transcriptTextarea, { target: { value: '志望校は日比谷高校です。部活はバスケ部。将来の夢は宇宙飛行士です。' } });
+
+    const parseBtn = screen.getByTestId('interview2-parse-transcript-btn');
+    await act(async () => {
+      fireEvent.click(parseBtn);
+    });
+
+    // 5. Save the interview
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    // 6. Test delete if delete button is available
+    const deleteBtn = screen.queryByTestId('interview2-delete-btn');
+    if (deleteBtn) {
+      await act(async () => {
+        fireEvent.click(deleteBtn);
+      });
+    }
+
+    unmount();
+  });
 });
+

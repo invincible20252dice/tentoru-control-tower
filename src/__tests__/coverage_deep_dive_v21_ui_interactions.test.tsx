@@ -153,6 +153,9 @@ describe('Deep Dive UI Interactions & Branch Coverage Suite', () => {
         <WeeklyScheduleViewer
           tasks={[]}
           currentDateStr="2026-09-17"
+          scheduleConfig={{
+            selected_days: ['invalid_day_key']
+          }}
         />
       );
     });
@@ -160,6 +163,7 @@ describe('Deep Dive UI Interactions & Branch Coverage Suite', () => {
   });
 
   it('should test CurriculumCsvImport preview, parse, and upload workflows deeply', async () => {
+    vi.useFakeTimers();
     let csvResult: any;
     await act(async () => {
       csvResult = render(
@@ -170,10 +174,24 @@ describe('Deep Dive UI Interactions & Branch Coverage Suite', () => {
     });
     expect(csvResult.container).toBeDefined();
 
+    // Trigger handleExecuteImport with parsedRows.length === 0 (lines 264-265)
+    const importButtons = screen.getAllByRole('button');
+    const executeImportBtn = importButtons.find(b => b.textContent?.includes('インポートを実行') || b.textContent?.includes('確定して保存'));
+    if (executeImportBtn) {
+      await act(async () => {
+        fireEvent.click(executeImportBtn);
+      });
+      // Fast-forward toast timer (line 68)
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+    }
+
     const fileInput = csvResult.container.querySelector('input[type="file"]');
     if (fileInput) {
+      // Include empty lines to cover line 117: if (!line) continue;
       const file = new File(
-        ['学年,教科,単元名,レッスン名,目安時間(分),並び順\n中1,数学,正負の数,加法,30,1'],
+        ['学年,教科,単元名,レッスン名,目安時間(分),並び順\n\n中1,数学,正負の数,加法,30,1\n\n'],
         'curriculum.csv',
         { type: 'text/csv' }
       );
@@ -181,5 +199,6 @@ describe('Deep Dive UI Interactions & Branch Coverage Suite', () => {
         fireEvent.change(fileInput, { target: { files: [file] } });
       });
     }
+    vi.useRealTimers();
   });
 });
