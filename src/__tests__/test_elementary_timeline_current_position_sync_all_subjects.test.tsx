@@ -459,4 +459,278 @@ describe('Elementary Timeline Current Position Synchronization Across All Subjec
 
     unmount();
   });
+
+  it('should strictly highlight user exact scenario: Math STEP 97-99, English STEP 42-44, Japanese, with blue border and current position badges', async () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // カリキュラムマスタの準備
+    const sampleMasters: CurriculumMaster[] = [
+      // 算数 (STEP 94〜102)
+      { id: 'cm-m-94', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: '1~100のかず (2)', sort_order: 94 },
+      { id: 'cm-m-95', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: 'かずのしくみ', sort_order: 95 },
+      { id: 'cm-m-96', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: '100のかずの大きさ', sort_order: 96 },
+      { id: 'cm-m-97', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: 'けいさんもんだい', sort_order: 97 },
+      { id: 'cm-m-98', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: '100をこえるかず', sort_order: 98 },
+      { id: 'cm-m-99', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: 'まとめテスト（１）', sort_order: 99 },
+      { id: 'cm-m-100', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: 'まとめテスト（２）', sort_order: 100 },
+      { id: 'cm-m-101', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: 'まとめテスト（３）', sort_order: 101 },
+      { id: 'cm-m-102', grade: '1年生', subject: '算数', unit_name: '大きい かず', lesson_name: '単元確認テスト', sort_order: 102, item_type: 'unit_test' },
+
+      // 英語 (STEP 40〜45)
+      { id: 'cm-e-40', grade: '1年生', subject: '英語', unit_name: 'Action Verbs', lesson_name: 'I run fast.', sort_order: 40 },
+      { id: 'cm-e-41', grade: '1年生', subject: '英語', unit_name: 'Action Verbs', lesson_name: 'I jump high.', sort_order: 41 },
+      { id: 'cm-e-42', grade: '1年生', subject: '英語', unit_name: 'I play ○○○.', lesson_name: 'I play ○○○. わたしは○○○をする。', sort_order: 42 },
+      { id: 'cm-e-43', grade: '1年生', subject: '英語', unit_name: 'I play ○○○.', lesson_name: 'Do you play ○○○? あなたは○○○をしますか？', sort_order: 43 },
+      { id: 'cm-e-44', grade: '1年生', subject: '英語', unit_name: 'I play ○○○.', lesson_name: "I don't play ○○○. わたしは○○○をしません。", sort_order: 44 },
+      { id: 'cm-e-45', grade: '1年生', subject: '英語', unit_name: 'Daily Routines', lesson_name: 'I wash my hands.', sort_order: 45 },
+
+      // 国語 (STEP 10〜12)
+      { id: 'cm-j-10', grade: '1年生', subject: '国語', unit_name: '漢字の広場', lesson_name: '漢字の広場(1)', sort_order: 10 },
+      { id: 'cm-j-11', grade: '1年生', subject: '国語', unit_name: '漢字の広場', lesson_name: '漢字の広場(2)', sort_order: 11 },
+      { id: 'cm-j-12', grade: '1年生', subject: '国語', unit_name: 'おはなし', lesson_name: 'おおきなかぶ', sort_order: 12 },
+    ];
+    (db as any).saveMockData('curriculum_masters', sampleMasters);
+
+    const student: Student = {
+      id: 'student-user-exact-scenario',
+      name: '本番仕様確認生徒',
+      grade: '小1',
+      grade_category: 'elementary',
+      school_name: 'てんとる小学校',
+      period_count: 3,
+      day_of_week: ['mon', 'thu'],
+      selected_subjects: ['算数', '英語', '国語'],
+      completed_lesson_ids: ['cm-m-94', 'cm-m-95', 'cm-m-96', 'cm-e-40', 'cm-e-41'],
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(student);
+
+    // コマ1: 算数 STEP 97〜99 (けいさんもんだい 〜 まとめテスト（１）)
+    const mathTask: LearningTask = {
+      id: 'task-math-exact',
+      student_id: student.id,
+      scheduled_date: todayStr,
+      subject: '算数',
+      period: 1,
+      unit_id: 'cm-m-97',
+      start_lesson_name: '大きい かず - けいさんもんだい',
+      end_lesson_name: '大きい かず - まとめテスト（１）',
+      lesson_range: '大きい かず - けいさんもんだい 〜 大きい かず - まとめテスト（１）',
+      title: '大きい かず - けいさんもんだい 〜 大きい かず - まとめテスト（１）',
+      status: 'in_progress',
+      completed_lesson_ids: []
+    };
+
+    // コマ2: 英語 STEP 42〜44 (I play ○○○. 〜 I don't play ○○○.)
+    const engTask: LearningTask = {
+      id: 'task-eng-exact',
+      student_id: student.id,
+      scheduled_date: todayStr,
+      subject: '英語',
+      period: 2,
+      unit_id: 'cm-e-42',
+      start_lesson_name: 'I play ○○○. わたしは○○○をする。',
+      end_lesson_name: "I don't play ○○○. わたしは○○○をしません。",
+      lesson_range: "I play ○○○. わたしは○○○をする。 〜 I don't play ○○○. わたしは○○○をしません。",
+      title: "I play ○○○. わたしは○○○をする。 〜 I don't play ○○○. わたしは○○○をしません。",
+      status: 'in_progress',
+      completed_lesson_ids: []
+    };
+
+    // コマ3: 国語 STEP 10〜11 (漢字の広場(1) 〜 漢字の広場(2))
+    const jpnTask: LearningTask = {
+      id: 'task-jpn-exact',
+      student_id: student.id,
+      scheduled_date: todayStr,
+      subject: '国語',
+      period: 3,
+      unit_id: 'cm-j-10',
+      start_lesson_name: '漢字の広場(1)',
+      end_lesson_name: '漢字の広場(2)',
+      lesson_range: '漢字の広場(1) 〜 漢字の広場(2)',
+      title: '漢字の広場(1) 〜 漢字の広場(2)',
+      status: 'in_progress',
+      completed_lesson_ids: []
+    };
+
+    await db.saveLearningTasks([mathTask, engTask, jpnTask]);
+
+    // --- 算数の検証 ---
+    const { unmount: unmountMath } = render(
+      <TeacherDashboard
+        onLogout={() => {}}
+        teacherType="elementary"
+        initialStudentId={student.id}
+        initialTab="milestones"
+      />
+    );
+
+    await waitFor(() => {
+      // 算数の過去レッスン STEP 94〜96 は ✓ 完了
+      const step94 = screen.getByTestId('timeline-item-cm-m-94');
+      const step95 = screen.getByTestId('timeline-item-cm-m-95');
+      const step96 = screen.getByTestId('timeline-item-cm-m-96');
+      expect(step94).toHaveTextContent('✓ 完了');
+      expect(step95).toHaveTextContent('✓ 完了');
+      expect(step96).toHaveTextContent('✓ 完了');
+
+      // 算数の当日コマ割りレッスン STEP 97〜99 はすべて 📍 現在地（取り組み中）
+      const step97 = screen.getByTestId('timeline-item-cm-m-97');
+      const step98 = screen.getByTestId('timeline-item-cm-m-98');
+      const step99 = screen.getByTestId('timeline-item-cm-m-99');
+      expect(step97).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step98).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step99).toHaveTextContent('📍 現在地（取り組み中）');
+
+      // 青枠ハイライトスタイル
+      expect(step97).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+      expect(step98).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+      expect(step99).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+
+      // 未割当の今後予定 STEP 100〜102 は ○ 予定
+      const step100 = screen.getByTestId('timeline-item-cm-m-100');
+      const step101 = screen.getByTestId('timeline-item-cm-m-101');
+      const step102 = screen.getByTestId('timeline-item-cm-m-102');
+      expect(step100).toHaveTextContent('○ 予定');
+      expect(step101).toHaveTextContent('○ 予定');
+      expect(step102).toHaveTextContent('○ 予定');
+    });
+    unmountMath();
+
+    // --- 英語の検証 ---
+    const { unmount: unmountEng } = render(
+      <TeacherDashboard
+        onLogout={() => {}}
+        teacherType="elementary"
+        initialStudentId={student.id}
+        initialTab="milestones"
+      />
+    );
+
+    // 教科を「英語」に切り替え
+    const engBtn = screen.getByRole('button', { name: /英語/ });
+    fireEvent.click(engBtn);
+
+    await waitFor(() => {
+      // 過去完了 STEP 40〜41
+      const step40 = screen.getByTestId('timeline-item-cm-e-40');
+      const step41 = screen.getByTestId('timeline-item-cm-e-41');
+      expect(step40).toHaveTextContent('✓ 完了');
+      expect(step41).toHaveTextContent('✓ 完了');
+
+      // 本日コマ割り STEP 42〜44 はすべて 📍 現在地（取り組み中）
+      const step42 = screen.getByTestId('timeline-item-cm-e-42');
+      const step43 = screen.getByTestId('timeline-item-cm-e-43');
+      const step44 = screen.getByTestId('timeline-item-cm-e-44');
+      expect(step42).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step43).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step44).toHaveTextContent('📍 現在地（取り組み中）');
+
+      // 青枠ハイライト
+      expect(step42).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+      expect(step43).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+      expect(step44).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+
+      // 未割当 STEP 45 は ○ 予定
+      const step45 = screen.getByTestId('timeline-item-cm-e-45');
+      expect(step45).toHaveTextContent('○ 予定');
+    });
+    unmountEng();
+
+    // --- 国語の検証 ---
+    const { unmount: unmountJpn } = render(
+      <TeacherDashboard
+        onLogout={() => {}}
+        teacherType="elementary"
+        initialStudentId={student.id}
+        initialTab="milestones"
+      />
+    );
+
+    const jpnBtn = screen.getByRole('button', { name: /国語/ });
+    fireEvent.click(jpnBtn);
+
+    await waitFor(() => {
+      // 国語の本日コマ割り STEP 10〜11 は 📍 現在地（取り組み中）
+      const step10 = screen.getByTestId('timeline-item-cm-j-10');
+      const step11 = screen.getByTestId('timeline-item-cm-j-11');
+      expect(step10).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step11).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step10).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+      expect(step11).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+
+      // 未割当 STEP 12 は ○ 予定
+      const step12 = screen.getByTestId('timeline-item-cm-j-12');
+      expect(step12).toHaveTextContent('○ 予定');
+    });
+    unmountJpn();
+  });
+
+  it('should enforce current position highlight even when previous unit tests are not passed (no gate test blocking)', async () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const sampleMasters: CurriculumMaster[] = [
+      { id: 'cm-gate-1', grade: '1年生', subject: '算数', unit_name: 'たしざん', lesson_name: 'たしざん(1)', sort_order: 1 },
+      { id: 'cm-gate-2', grade: '1年生', subject: '算数', unit_name: 'たしざん', lesson_name: 'たしざん 単元確認テスト', sort_order: 2, item_type: 'unit_test' },
+      { id: 'cm-gate-3', grade: '1年生', subject: '算数', unit_name: 'ひきざん', lesson_name: 'ひきざん(1)', sort_order: 3 },
+      { id: 'cm-gate-4', grade: '1年生', subject: '算数', unit_name: 'ひきざん', lesson_name: 'ひきざん(2)', sort_order: 4 },
+    ];
+    (db as any).saveMockData('curriculum_masters', sampleMasters);
+
+    const student: Student = {
+      id: 'student-gate-test',
+      name: 'テスト合否影響なし生徒',
+      grade: '小1',
+      grade_category: 'elementary',
+      school_name: 'てんとる小学校',
+      period_count: 1,
+      day_of_week: ['mon'],
+      selected_subjects: ['算数'],
+      completed_lesson_ids: ['cm-gate-1'], // 単元テスト cm-gate-2 は未完了！
+      created_at: new Date().toISOString()
+    };
+    await db.saveStudent(student);
+
+    // 生徒はSTEP 3（ひきざん(1)）のコマ割りタスクを持っている
+    const task: LearningTask = {
+      id: 'task-gate-3',
+      student_id: student.id,
+      scheduled_date: todayStr,
+      subject: '算数',
+      period: 1,
+      unit_id: 'cm-gate-3',
+      start_lesson_name: 'ひきざん(1)',
+      end_lesson_name: 'ひきざん(1)',
+      title: 'ひきざん(1)',
+      status: 'in_progress',
+      completed_lesson_ids: []
+    };
+    await db.saveLearningTasks([task]);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        onLogout={() => {}}
+        teacherType="elementary"
+        initialStudentId={student.id}
+        initialTab="milestones"
+      />
+    );
+
+    await waitFor(() => {
+      // 過去のテストが未合格記録であっても、生徒の学習画面で割り振られているSTEP 3は合否ゲートで除外されず「📍 現在地（取り組み中）」
+      const step3 = screen.getByTestId('timeline-item-cm-gate-3');
+      expect(step3).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(step3).toHaveStyle({ borderLeft: '4px solid #2563eb' });
+
+      // 最前線手前の過去ステップ STEP 2 は受講通過済みとして完了
+      const step2 = screen.getByTestId('timeline-item-cm-gate-2');
+      expect(step2).toHaveTextContent('✓ 完了');
+
+      // 未割当の未来ステップ STEP 4 は ○ 予定
+      const step4 = screen.getByTestId('timeline-item-cm-gate-4');
+      expect(step4).toHaveTextContent('○ 予定');
+    });
+
+    unmount();
+  });
 });

@@ -736,8 +736,9 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     await waitFor(() => {
       // STEP 10 should show completed badge
       expect(timelineRender.getByTestId('timeline-item-cm-p3-m2')).toHaveTextContent('✓ 完了');
-      // Verify timeline displays current position badge for the next item
-      expect(timelineRender.getByText('📍 現在地（取り組み中）')).toBeInTheDocument();
+      // Verify timeline displays current position badge for the next item (cm-p3-m3)
+      expect(timelineRender.getByTestId('timeline-item-cm-p3-m3')).toHaveTextContent('📍 現在地（取り組み中）');
+      expect(timelineRender.getAllByText('📍 現在地（取り組み中）').length).toBeGreaterThanOrEqual(1);
     });
 
     timelineRender.unmount();

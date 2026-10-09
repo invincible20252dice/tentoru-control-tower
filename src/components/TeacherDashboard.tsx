@@ -8851,42 +8851,57 @@ export default function TeacherDashboard({
                   // 未完了タスク
                   const uncompletedTasks = targetSubjectTasks.filter(t => t.status !== 'completed' && !t.test_passed);
 
-                  // 生徒学習画面で開かれる日付（今日の授業日）を確実に特定
+                  // 強力な表記揺れ正規化ヘルパー（全角半角英数・スペース・記号・丸記号・アポストロフィ・括弧等を完全統一）
+                  const cleanKey = (s?: string | null): string => {
+                    if (!s) return '';
+                    return s
+                      .toLowerCase()
+                      .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+                      .replace(/[Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+                      .replace(/[○◯]/g, '○')
+                      .replace(/[’']/g, "'")
+                      .replace(/[〜～~]/g, '~')
+                      .replace(/[（(]/g, '(')
+                      .replace(/[）)]/g, ')')
+                      .replace(/[\s\u3000\-_:：.,、。?!！？「」『』]/g, '');
+                  };
+
+                  // 生徒学習画面で開かれる日付（今日の授業日）を全教科タスク基準で確実に特定
                   const sysTodayStr = new Date().toISOString().split('T')[0];
-                  let activeScheduledDate = '';
-                  
-                  // 1) 今日のタスクがあれば今日
-                  const hasSysToday = uncompletedTasks.some(t => t.scheduled_date === sysTodayStr && t.period !== null);
-                  if (hasSysToday) {
-                    activeScheduledDate = sysTodayStr;
-                  } else if (scheduleDate && uncompletedTasks.some(t => t.scheduled_date === scheduleDate && t.period !== null)) {
-                    // 2) 講師が選択中の日付にタスクがあればその日
-                    activeScheduledDate = scheduleDate;
-                  } else {
-                    // 3) 直近の未来のタスク日
-                    const upcomingTasksList = uncompletedTasks
-                      .filter(t => t.scheduled_date >= sysTodayStr && t.period !== null)
+                  let studentActiveDate = sysTodayStr;
+                  const allScheduledTasks = studentTasks.filter(t => t.period !== null);
+                  const hasTodayAll = allScheduledTasks.some(t => t.scheduled_date === sysTodayStr);
+                  if (!hasTodayAll) {
+                    const upcoming = allScheduledTasks
+                      .filter(t => t.scheduled_date >= sysTodayStr)
                       .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-                    if (upcomingTasksList.length > 0) {
-                      activeScheduledDate = upcomingTasksList[0].scheduled_date;
-                    } else if (uncompletedTasks.length > 0) {
-                      // 4) 直近の過去のタスク日
-                      const sortedTasks = [...uncompletedTasks]
-                        .filter(t => t.period !== null)
+                    if (upcoming.length > 0) {
+                      studentActiveDate = upcoming[0].scheduled_date;
+                    } else {
+                      const past = allScheduledTasks
+                        .slice()
                         .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
-                      if (sortedTasks.length > 0) {
-                        activeScheduledDate = sortedTasks[0].scheduled_date;
+                      if (past.length > 0) {
+                        studentActiveDate = past[0].scheduled_date;
                       }
                     }
                   }
 
-                  // 学習画面に現在並んでいるアクティブなタスク（生徒の学習画面に表示される日のタスク、および今日・選択日のタスク）
+                  // 学習画面に現在並んでいるアクティブなタスク日（生徒画面表示日、講師選択日、今日）
                   const activeTaskDateSet = new Set<string>();
-                  if (activeScheduledDate) activeTaskDateSet.add(activeScheduledDate);
+                  if (studentActiveDate) activeTaskDateSet.add(studentActiveDate);
                   if (scheduleDate) activeTaskDateSet.add(scheduleDate);
                   if (sysTodayStr) activeTaskDateSet.add(sysTodayStr);
 
-                  const activeTasks = uncompletedTasks.filter(t => activeTaskDateSet.has(t.scheduled_date));
+                  let activeTasks = uncompletedTasks.filter(t => activeTaskDateSet.has(t.scheduled_date) && t.period !== null);
+                  // 日付で絞り込んだ結果が空でも未完了のコマ割りタスクがあれば直近のタスクを採用
+                  if (activeTasks.length === 0 && uncompletedTasks.length > 0) {
+                    const scheduledUncompleted = uncompletedTasks.filter(t => t.period !== null);
+                    if (scheduledUncompleted.length > 0) {
+                      const firstDate = scheduledUncompleted[0].scheduled_date;
+                      activeTasks = scheduledUncompleted.filter(t => t.scheduled_date === firstDate);
+                    }
+                  }
 
                   const currentActiveLessonIds = new Set<string>();
                   const activeStepIndicesFromTasks = new Set<number>();
@@ -8904,15 +8919,64 @@ export default function TeacherDashboard({
                     const uUnit = u.unit_name || '';
                     const cleanTarget = targetStr.replace(/^[^-]+-\s*/, '').trim();
 
+                    // 1. 完全一致
                     if (uName === targetStr || uLesson === targetStr) return true;
                     if (cleanTarget && (uLesson === cleanTarget || uName.replace(/^[^-]+-\s*/, '').trim() === cleanTarget)) return true;
 
-                    // まとめテストやCheck Test等の照合
+                    // 2. cleanKey による強力な表記揺れ吸収一致
+                    const targetKey = cleanKey(targetStr);
+                    const cleanTargetKey = cleanKey(cleanTarget);
+                    const uNameKey = cleanKey(uName);
+                    const uLessonKey = cleanKey(uLesson);
+                    const uUnitKey = cleanKey(uUnit);
+
+                    if (targetKey && (uNameKey === targetKey || uLessonKey === targetKey)) return true;
+                    if (cleanTargetKey && (uLessonKey === cleanTargetKey || uNameKey === cleanTargetKey)) return true;
+
+                    // 3. まとめテストやCheck Test等の照合
                     if (isMatchingUnitOrTest(uName, targetStr) || isMatchingUnitOrTest(uLesson, targetStr)) return true;
+                    if (cleanTarget && (isMatchingUnitOrTest(uName, cleanTarget) || isMatchingUnitOrTest(uLesson, cleanTarget))) return true;
 
-                    // 単元名＋レッスン名の一致
+                    // 4. 部分一致照合 (uNameKey と targetKey の包含関係、または uUnit + cleanTarget)
+                    if (targetKey && targetKey.length >= 4 && (uNameKey.includes(targetKey) || targetKey.includes(uNameKey))) return true;
+                    if (uLessonKey && uLessonKey.length >= 4 && cleanTargetKey && (uLessonKey.includes(cleanTargetKey) || cleanTargetKey.includes(uLessonKey))) return true;
+
+                    // 5. 単元名＋レッスン名の一致
                     if (uUnit && targetStr.includes(uUnit) && cleanTarget && (uLesson === cleanTarget || uName.includes(cleanTarget))) return true;
+                    if (uUnitKey && targetKey.includes(uUnitKey) && cleanTargetKey && (uLessonKey === cleanTargetKey || uNameKey.includes(cleanTargetKey))) return true;
 
+                    return false;
+                  };
+
+                  const isStepCompletedForStudent = (ru: any, t?: any): boolean => {
+                    const rId = String(ru.id);
+                    const rSort = ru.sort_order !== undefined ? String(ru.sort_order) : '';
+                    const rName = ru.name || '';
+                    const rLesson = ru.lesson_name || '';
+                    const rNorm = normalizeUnitName(rName);
+
+                    if (
+                      studentCompletedIds.has(rId) || 
+                      (rSort && studentCompletedIds.has(rSort)) || 
+                      studentCompletedIds.has(rName) || 
+                      (rLesson && studentCompletedIds.has(rLesson)) || 
+                      (rNorm && studentCompletedIds.has(rNorm))
+                    ) {
+                      return true;
+                    }
+                    if (lessonProgressMap.get(rId) === 'completed') {
+                      return true;
+                    }
+                    if (t && Array.isArray(t.completed_lesson_ids)) {
+                      if (
+                        t.completed_lesson_ids.includes(rId) ||
+                        (rSort && t.completed_lesson_ids.includes(rSort)) ||
+                        t.completed_lesson_ids.includes(rName) ||
+                        (rLesson && t.completed_lesson_ids.includes(rLesson))
+                      ) {
+                        return true;
+                      }
+                    }
                     return false;
                   };
 
@@ -8947,16 +9011,35 @@ export default function TeacherDashboard({
                       eIdx = timelineUnits.findIndex((u: any) => isUnitMatchingItem(u, toStr, t.end_lesson_id));
                     }
 
-                    if (sIdx >= 0 && eIdx >= sIdx) {
-                      for (let i = sIdx; i <= eIdx; i++) {
+                    // 同一単元内で片方が見つからない場合の補完
+                    if (sIdx >= 0 && eIdx === -1 && toStr) {
+                      const startUnit = timelineUnits[sIdx] as any;
+                      if (startUnit?.unit_name) {
+                        eIdx = timelineUnits.findIndex((u: any, idx) => 
+                          idx >= sIdx && 
+                          u.unit_name === startUnit.unit_name && 
+                          isUnitMatchingItem(u, toStr, t.end_lesson_id)
+                        );
+                      }
+                    }
+                    if (eIdx >= 0 && sIdx === -1 && fromStr) {
+                      const endUnit = timelineUnits[eIdx] as any;
+                      if (endUnit?.unit_name) {
+                        sIdx = timelineUnits.findIndex((u: any, idx) => 
+                          idx <= eIdx && 
+                          u.unit_name === endUnit.unit_name && 
+                          isUnitMatchingItem(u, fromStr, t.start_lesson_id)
+                        );
+                      }
+                    }
+
+                    if (sIdx >= 0 && eIdx >= 0) {
+                      const minI = Math.min(sIdx, eIdx);
+                      const maxI = Math.max(sIdx, eIdx);
+                      for (let i = minI; i <= maxI; i++) {
                         const ru = timelineUnits[i] as any;
                         const rId = String(ru.id);
-                        const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
-                          t.completed_lesson_ids.includes(rId) ||
-                          t.completed_lesson_ids.includes(ru.name) ||
-                          (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
-                        );
-                        if (!isIndividuallyCompleted) {
+                        if (!isStepCompletedForStudent(ru, t)) {
                           currentActiveLessonIds.add(rId);
                           if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
                           if (ru.name) currentActiveLessonIds.add(ru.name);
@@ -8965,29 +9048,41 @@ export default function TeacherDashboard({
                         }
                       }
                     } else if (sIdx >= 0) {
-                      const ru = timelineUnits[sIdx] as any;
-                      const rId = String(ru.id);
-                      const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
-                        t.completed_lesson_ids.includes(rId) ||
-                        t.completed_lesson_ids.includes(ru.name) ||
-                        (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
-                      );
-                      if (!isIndividuallyCompleted) {
-                        currentActiveLessonIds.add(rId);
-                        if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
-                        if (ru.name) currentActiveLessonIds.add(ru.name);
-                        if (ru.lesson_name) currentActiveLessonIds.add(ru.lesson_name);
-                        activeStepIndicesFromTasks.add(sIdx);
+                      // sIdx のみ特定できた場合、同一単元内の該当ステップ群も展開
+                      const startUnit = timelineUnits[sIdx] as any;
+                      let matchedMultiple = false;
+                      if (startUnit?.unit_name && (toStr || rangeText)) {
+                        timelineUnits.forEach((u: any, i) => {
+                          if (i >= sIdx && u.unit_name === startUnit.unit_name) {
+                            if (i === sIdx || isUnitMatchingItem(u, toStr, t.end_lesson_id) || (rangeText && cleanKey(rangeText).includes(cleanKey(u.name)))) {
+                              const rId = String(u.id);
+                              if (!isStepCompletedForStudent(u, t)) {
+                                currentActiveLessonIds.add(rId);
+                                if (u.sort_order !== undefined) currentActiveLessonIds.add(String(u.sort_order));
+                                if (u.name) currentActiveLessonIds.add(u.name);
+                                if (u.lesson_name) currentActiveLessonIds.add(u.lesson_name);
+                                activeStepIndicesFromTasks.add(i);
+                                matchedMultiple = true;
+                              }
+                            }
+                          }
+                        });
+                      }
+                      if (!matchedMultiple) {
+                        const ru = timelineUnits[sIdx] as any;
+                        const rId = String(ru.id);
+                        if (!isStepCompletedForStudent(ru, t)) {
+                          currentActiveLessonIds.add(rId);
+                          if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
+                          if (ru.name) currentActiveLessonIds.add(ru.name);
+                          if (ru.lesson_name) currentActiveLessonIds.add(ru.lesson_name);
+                          activeStepIndicesFromTasks.add(sIdx);
+                        }
                       }
                     } else if (eIdx >= 0) {
                       const ru = timelineUnits[eIdx] as any;
                       const rId = String(ru.id);
-                      const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
-                        t.completed_lesson_ids.includes(rId) ||
-                        t.completed_lesson_ids.includes(ru.name) ||
-                        (ru.lesson_name && t.completed_lesson_ids.includes(ru.lesson_name))
-                      );
-                      if (!isIndividuallyCompleted) {
+                      if (!isStepCompletedForStudent(ru, t)) {
                         currentActiveLessonIds.add(rId);
                         if (ru.sort_order !== undefined) currentActiveLessonIds.add(String(ru.sort_order));
                         if (ru.name) currentActiveLessonIds.add(ru.name);
@@ -8995,22 +9090,23 @@ export default function TeacherDashboard({
                         activeStepIndicesFromTasks.add(eIdx);
                       }
                     } else {
+                      const rangeKey = cleanKey(rangeText);
+                      const customKey = cleanKey(t.custom_unit_name);
                       timelineUnits.forEach((u: any, i) => {
                         const uName = u.name || '';
                         const uLesson = u.lesson_name || '';
+                        const uNameKey = cleanKey(uName);
+                        const uLessonKey = cleanKey(uLesson);
                         const rId = String(u.id);
-                        const isIndividuallyCompleted = Array.isArray(t.completed_lesson_ids) && (
-                          t.completed_lesson_ids.includes(rId) ||
-                          t.completed_lesson_ids.includes(uName) ||
-                          (uLesson && t.completed_lesson_ids.includes(uLesson))
-                        );
-                        if (!isIndividuallyCompleted && (
-                          (t.unit_id && String(u.id) === String(t.unit_id)) ||
-                          (t.custom_unit_name && (uName.includes(t.custom_unit_name) || t.custom_unit_name.includes(uName) || isMatchingUnitOrTest(uName, t.custom_unit_name))) ||
-                          (rangeText && (rangeText.includes(uName) || (uLesson && rangeText.includes(uLesson))))
+                        if (!isStepCompletedForStudent(u, t) && (
+                          (t.unit_id && (String(u.id) === String(t.unit_id) || (u.sort_order !== undefined && String(u.sort_order) === String(t.unit_id)))) ||
+                          (customKey && (uNameKey.includes(customKey) || customKey.includes(uNameKey) || isMatchingUnitOrTest(uName, t.custom_unit_name))) ||
+                          (rangeKey && (rangeKey.includes(uNameKey) || (uLessonKey && rangeKey.includes(uLessonKey))))
                         )) {
                           currentActiveLessonIds.add(String(u.id));
+                          if (u.sort_order !== undefined) currentActiveLessonIds.add(String(u.sort_order));
                           if (u.name) currentActiveLessonIds.add(u.name);
+                          if (u.lesson_name) currentActiveLessonIds.add(u.lesson_name);
                           activeStepIndicesFromTasks.add(i);
                         }
                       });
@@ -9213,7 +9309,38 @@ export default function TeacherDashboard({
                     const uName = u.name || '';
                     const uNorm = normalizeUnitName(uName);
 
-                    // 単元テスト自身の場合: 不合格記録があれば未完了、合格・完了記録があれば完了
+                    // 1. 生徒が明示的に完了しているか（ID、ソート順、名称、正規化名、進捗マップすべてで判定）
+                    // 生徒自身が完了済みのレッスンは最優先で「✓ 完了」！
+                    if (
+                      studentCompletedIds.has(uid) || 
+                      (uSort && studentCompletedIds.has(uSort)) || 
+                      studentCompletedIds.has(uName) || 
+                      (uNorm && studentCompletedIds.has(uNorm)) ||
+                      lessonProgressMap.get(uid) === 'completed' ||
+                      completedTaskLessonIds.has(uid) || 
+                      completedTaskLessonIds.has(uName) || 
+                      (uNorm && completedTaskLessonIds.has(uNorm))
+                    ) {
+                      return true;
+                    }
+
+                    // 2. 現在コマ割りで取り組み中の未完了レッスンは完了としない
+                    if (
+                      activeStepIndicesFromTasks.has(idx) || 
+                      currentActiveLessonIds.has(uid) || 
+                      (uSort && currentActiveLessonIds.has(uSort)) || 
+                      currentActiveLessonIds.has(u.name) ||
+                      (u.lesson_name && currentActiveLessonIds.has(u.lesson_name))
+                    ) {
+                      return false;
+                    }
+
+                    // 3. 生徒の現在の最前線（initialMinActiveIdx）より手前にある過去のレッスンは、学習画面を通過した過去ステップとして確実に「✓ 完了」とする！
+                    if (initialMinActiveIdx >= 0 && idx < initialMinActiveIdx) {
+                      return true;
+                    }
+
+                    // 4. 単元テスト自身の場合: 不合格記録があれば未完了、合格・完了記録があれば完了
                     if (isUnitTestStep(u)) {
                       if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
                         const failedTest = latestUnitTestStatus.failedUnitTest;
@@ -9225,33 +9352,12 @@ export default function TeacherDashboard({
                       return isUnitTestStepPassed(u);
                     }
 
-                    // まとめテストまたはCheck Testの場合:
+                    // 5. まとめテストまたはCheck Testの場合:
                     // 生徒が受講完了している、または小テスト結果管理で合格・入力されている場合は完了
                     if (isReviewOrCheckStep(u)) {
                       if (isUnitTestStepPassed(u)) return true;
                     }
 
-                    // 現在コマ割りで取り組み中のレッスンは完了としない
-                    if (
-                      activeStepIndicesFromTasks.has(idx) || 
-                      currentActiveLessonIds.has(uid) || 
-                      (uSort && currentActiveLessonIds.has(uSort)) || 
-                      currentActiveLessonIds.has(u.name) ||
-                      (u.lesson_name && currentActiveLessonIds.has(u.lesson_name))
-                    ) {
-                      return false;
-                    }
-
-                    // 生徒の現在の最前線（initialMinActiveIdx）より手前にある過去のレッスンは、学習画面を通過した過去ステップとして確実に「✓ 完了」とする！
-                    if (initialMinActiveIdx >= 0 && idx < initialMinActiveIdx) {
-                      return true;
-                    }
-
-                    // 生徒が実際に完了したか（ID、ソート順、名称、正規化名すべてで判定）
-                    if (studentCompletedIds.has(uid) || (uSort && studentCompletedIds.has(uSort)) || studentCompletedIds.has(uName) || (uNorm && studentCompletedIds.has(uNorm))) return true;
-                    if (lessonProgressMap.get(uid) === 'completed') return true;
-                    if (completedTaskLessonIds.has(uid) || completedTaskLessonIds.has(uName) || (uNorm && completedTaskLessonIds.has(uNorm))) return true;
-                    
                     // スタートライン以前のレッスン（ただし現在アクティブでないもの）
                     if (startSeq > 0 && (idx + 1) <= startSeq) return true;
 
@@ -9870,15 +9976,16 @@ export default function TeacherDashboard({
                                       alignItems: 'center',
                                       justifyContent: 'space-between',
                                       padding: '10px 14px',
-                                      borderRadius: isCurrent ? '6px' : '0px',
+                                      borderRadius: isCurrent ? '8px' : '0px',
                                       backgroundColor: isCurrent 
                                         ? '#eff6ff' 
                                         : (isCompleted 
                                           ? (isEven ? '#f0fdf4' : '#f7fee7') 
                                           : (isEven ? 'rgba(248, 250, 252, 0.65)' : '#ffffff')),
-                                      border: 'none',
-                                      borderLeft: isCurrent ? '4px solid #2563eb' : (isCompleted ? '4px solid #22c55e' : '4px solid transparent'),
+                                      borderTop: 'none',
+                                      borderRight: 'none',
                                       borderBottom: idx === timelineUnits.length - 1 ? 'none' : '1px solid #f1f5f9',
+                                      borderLeft: isCurrent ? '4px solid #2563eb' : (isCompleted ? '4px solid #22c55e' : '4px solid transparent'),
                                       boxShadow: isCurrent ? '0 1px 4px rgba(37, 99, 235, 0.12)' : 'none',
                                       transition: 'all 0.15s ease'
                                     }}
@@ -9889,7 +9996,7 @@ export default function TeacherDashboard({
                                         fontWeight: 800,
                                         padding: '3px 8px',
                                         borderRadius: '12px',
-                                        backgroundColor: isUnitTestBadge ? '#8b5cf6' : (isCompleted ? '#22c55e' : (isCurrent ? '#3b82f6' : '#cbd5e1')),
+                                        backgroundColor: isUnitTestBadge ? '#8b5cf6' : (isCompleted ? '#22c55e' : (isCurrent ? '#2563eb' : '#cbd5e1')),
                                         color: '#ffffff'
                                       }}>
                                         STEP {stepNum}
@@ -9955,7 +10062,7 @@ export default function TeacherDashboard({
                                         }
                                         return null;
                                       })()}
-                                      <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 700 : (isCompleted ? 600 : 500), color: isCurrent ? '#1e40af' : (isCompleted ? '#166534' : '#334155') }}>
+                                      <span style={{ fontSize: '0.88rem', fontWeight: isCurrent ? 800 : (isCompleted ? 600 : 500), color: isCurrent ? '#1d4ed8' : (isCompleted ? '#166534' : '#334155') }}>
                                         {unit.name}
                                       </span>
                                     </div>
