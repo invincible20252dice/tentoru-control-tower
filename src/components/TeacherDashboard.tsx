@@ -1128,7 +1128,7 @@ export default function TeacherDashboard({
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
   const [applyScope, setApplyScope] = useState<'individual' | 'school' | 'grade' | 'level'>('individual');
   
-  // 各コマの選択状態：教科、単元ID、カスタムテーマ、開始〜終了授業範囲
+  // 各コマの選択状態：教科、単元ID、カスタムテーマ、開始〜終了授業範囲、確定レッスンID配列
   const [periodSelections, setPeriodSelections] = useState<Record<number, { 
     subject: string; 
     unitId: string; 
@@ -1138,17 +1138,18 @@ export default function TeacherDashboard({
     startLessonName?: string;
     endLessonName?: string;
     lessonRange?: string;
+    lesson_ids?: string[];
   }>>({
-    1: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    2: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    3: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    4: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    5: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    6: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    7: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    8: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    9: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' },
-    10: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '' }
+    1: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    2: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    3: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    4: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    5: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    6: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    7: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    8: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    9: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] },
+    10: { subject: '', unitId: '', customTheme: '', startLessonId: '', endLessonId: '', startLessonName: '', endLessonName: '', lessonRange: '', lesson_ids: [] }
   });
   const [periodCount, setPeriodCount] = useState<number>(2);
   const [commonOfficeNote, setCommonOfficeNote] = useState<string>('');
@@ -2713,6 +2714,30 @@ export default function TeacherDashboard({
             const customUnitId = targetUnitId || `custom-${student.id}-${scheduleDate}-${p}`;
             const customThemeName = rangeString || startLessonName || config.customTheme || (selectedUnit ? selectedUnit.name : '');
 
+            // カリキュラムマスタから From〜To 範囲に含まれる全ステップの確定ID配列を正確に抽出（Single Source of Truth）
+            let extractedLessonIds: string[] = [];
+            if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
+              extractedLessonIds = config.lesson_ids.map(String);
+            } else {
+              const stepLessons = getLessonRangeStepIds({
+                subject: config.subject,
+                startLessonId: config.startLessonId || targetUnitId,
+                endLessonId: config.endLessonId || config.startLessonId || targetUnitId,
+                startLessonName: startLessonName,
+                endLessonName: endLessonName,
+                lessonRange: rangeString,
+                customUnitName: customThemeName,
+                lessonIds: config.lesson_ids,
+                curriculumMasters: curriculumMastersList,
+                curriculumUnits: allCurriculumUnits,
+                studentGrade: student.grade
+              });
+              extractedLessonIds = stepLessons.map(s => String(s.id));
+            }
+            if (extractedLessonIds.length === 0 && (config.startLessonId || targetUnitId)) {
+              extractedLessonIds = [String(config.startLessonId || targetUnitId)];
+            }
+
             newDailyTasks.push({
               id: `task-${student.id}-${scheduleDate}-${p}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               student_id: student.id,
@@ -2729,6 +2754,7 @@ export default function TeacherDashboard({
               start_lesson_name: startLessonName,
               end_lesson_name: endLessonName,
               lesson_range: rangeString,
+              lesson_ids: extractedLessonIds,
               office_note: commonOfficeNote,
               created_at: new Date().toISOString()
             });
@@ -2736,6 +2762,27 @@ export default function TeacherDashboard({
             // カスタムテーマ指定の場合
             const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
             const customThemeName = config.customTheme || config.subject || '';
+
+            let customLessonIds: string[] = [];
+            if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
+              customLessonIds = config.lesson_ids.map(String);
+            } else if (config.startLessonId || config.endLessonId) {
+              const stepLessons = getLessonRangeStepIds({
+                subject: config.subject,
+                startLessonId: config.startLessonId,
+                endLessonId: config.endLessonId,
+                startLessonName: config.startLessonName || customThemeName,
+                endLessonName: config.endLessonName || customThemeName,
+                lessonRange: config.lessonRange || customThemeName,
+                customUnitName: customThemeName,
+                curriculumMasters: curriculumMastersList,
+                studentGrade: student.grade
+              });
+              customLessonIds = stepLessons.map(s => String(s.id));
+            }
+            if (customLessonIds.length === 0 && customUnitId) {
+              customLessonIds = [customUnitId];
+            }
 
             newDailyTasks.push({
               id: `task-custom-${Date.now()}-${p}-${student.id}-${Math.random().toString(36).substr(2, 5)}`,
@@ -2753,6 +2800,7 @@ export default function TeacherDashboard({
               start_lesson_name: config.startLessonName || customThemeName,
               end_lesson_name: config.endLessonName || customThemeName,
               lesson_range: config.lessonRange || customThemeName,
+              lesson_ids: customLessonIds,
               office_note: commonOfficeNote,
               created_at: new Date().toISOString()
             });

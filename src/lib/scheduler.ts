@@ -1392,8 +1392,16 @@ export function getLessonRangeStepIds(params: {
 
   // 1. もし lessonIds 配列が渡されていれば、そのID順に該当ステップを取り出して即時返却
   if (Array.isArray(lessonIds) && lessonIds.length > 0) {
-    const allEnsured = ensureMathEnglishUnitTests(subjectOnlyMasters);
-    const map = new Map(allEnsured.map(m => [String(m.id), m]));
+    const allEnsured = ensureMathEnglishUnitTests(subjectOnlyMasters.length > 0 ? subjectOnlyMasters : curriculumMasters);
+    const map = new Map<string, any>(allEnsured.map(m => [String(m.id), m]));
+    if (params.curriculumUnits) {
+      params.curriculumUnits.forEach(u => {
+        if (!map.has(String(u.id))) {
+          map.set(String(u.id), { id: u.id, lesson_name: u.name, unit_name: u.name, sort_order: u.sequence_order });
+        }
+      });
+    }
+
     const matched = lessonIds
       .map(id => map.get(String(id)))
       .filter((m): m is NonNullable<typeof m> => Boolean(m))
@@ -1403,7 +1411,7 @@ export function getLessonRangeStepIds(params: {
           m.item_type === 'unit_test' ||
           Boolean((m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト') || (m.lesson_name || '').includes('確認テスト'))
         );
-        const cleanLesson = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+        const cleanLesson = (m.lesson_name || m.name || '').replace(/^[^-]+-\s*/, '').trim();
         return {
           id: String(m.id),
           name: cleanLesson || m.unit_name || '',
@@ -2706,6 +2714,7 @@ export function generateSlotsForSelectedSubjects(params: {
   startLessonName: string;
   endLessonName: string;
   lessonRange: string;
+  lesson_ids?: string[];
 }> {
   const {
     student,
@@ -2815,7 +2824,8 @@ export function generateSlotsForSelectedSubjects(params: {
       endLessonId: finalEndId,
       startLessonName: finalStartName,
       endLessonName: finalEndName,
-      lessonRange: finalRangeText
+      lessonRange: finalRangeText,
+      lesson_ids: range.lesson_ids || (finalStartId ? [finalStartId] : [])
     };
   }
 

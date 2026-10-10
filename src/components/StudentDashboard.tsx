@@ -341,6 +341,41 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const isElem = student.grade.startsWith('小') || student.grade === '園児';
     const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || (isElem ? '算数' : '数学');
 
+    // 1. task.lesson_ids が明示的に保存されている場合は、単一データソース（Single Source of Truth）として最優先展開
+    if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 0) {
+      const masterMap = new Map(mastersSource.map(m => [String(m.id), m]));
+      const unitMap = new Map((units || []).map(u => [String(u.id), u]));
+
+      const mappedSteps = task.lesson_ids.map(id => {
+        const idStr = String(id);
+        const m = masterMap.get(idStr);
+        if (m) {
+          const cleanLesson = (m.lesson_name || '').replace(/^[^-]+-\s*/, '').trim();
+          return {
+            id: idStr,
+            name: cleanLesson || m.unit_name || '',
+            fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+          };
+        }
+        const u = unitMap.get(idStr);
+        if (u) {
+          return {
+            id: idStr,
+            name: u.name,
+            fullTitle: u.name
+          };
+        }
+        return {
+          id: idStr,
+          name: task.start_lesson_name || task.custom_unit_name || '授業',
+          fullTitle: task.start_lesson_name || task.custom_unit_name || '授業'
+        };
+      });
+      if (mappedSteps.length > 0) {
+        return mappedSteps;
+      }
+    }
+
     const steps = getLessonRangeStepIds({
       subject: taskSubject,
       startLessonId: task.start_lesson_id,
@@ -368,6 +403,48 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     const defaultName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '授業';
     return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
+  };
+
+  // 授業コマ受講完了時の次回通塾日を期限とする宿題自動生成ヘルパー
+  const autoGenerateHomeworkForCompletedTask = async (task: LearningTask, stepLessons: Array<{ id: string; name: string; fullTitle: string }>) => {
+    try {
+      const isUT = Boolean(
+        task.custom_unit_name?.includes('単元テスト') ||
+        task.custom_unit_name?.includes('単元確認テスト') ||
+        task.start_lesson_name?.includes('単元テスト') ||
+        task.start_lesson_name?.includes('単元確認テスト') ||
+        task.lesson_range?.includes('単元テスト')
+      );
+      if (isUT) return; // 単元テストは対象外
+
+      const isElem = currentStudent.grade.startsWith('小') || currentStudent.grade === '園児';
+      const hwSubject = task.subject || (isElem ? '算数' : '数学');
+      const stepNames = stepLessons.map(s => s.name || s.fullTitle).join(', ');
+      const hwContent = `【復習演習】${hwSubject}: ${task.custom_unit_name || task.start_lesson_name || stepNames}（2回目演習ドリル）`;
+      const nextAttendance = getNextAttendanceDate(currentDateStr, currentStudent);
+
+      const hwId = `hw-auto-${currentStudent.id}-${currentDateStr}-${task.period || 1}`;
+      const newHw: HomeworkResult = {
+        id: hwId,
+        student_id: currentStudent.id,
+        date: currentDateStr,
+        subject: hwSubject,
+        homework_type: 'drill_2nd',
+        homework_content: hwContent,
+        homework_deadline: nextAttendance,
+        status: 'incomplete',
+        target_scope: 'individual',
+        created_at: new Date().toISOString()
+      };
+
+      await db.saveHomeworkResult(newHw);
+      setHomeworkResults(prev => {
+        const filtered = prev.filter(h => h.id !== hwId && h.homework_content !== hwContent);
+        return [...filtered, newHw];
+      });
+    } catch (e) {
+      console.warn('Auto homework generation warning:', e);
+    }
   };
 
   // 次回通塾予定日の計算ヘルパー
@@ -671,6 +748,16 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     
     // 既存の完了済みIDセット
     const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
+
+    // 中抜き・スキップ受講の完全禁止ガード（未完了先頭ステップ以外は受講不可）
+    const firstIncompleteStepIdx = allSteps.findIndex(s => !currentTaskCompletedIds.has(String(s.id)));
+    if (firstIncompleteStepIdx !== -1 && stepIndex > firstIncompleteStepIdx) {
+      if (typeof window !== 'undefined') {
+        window.alert('前のステップを順番に受講してください。中抜き・スキップ受講はできません。');
+      }
+      return;
+    }
+
     currentTaskCompletedIds.add(stepIdStr);
 
     const isStepUnitTest = Boolean(
@@ -748,6 +835,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       test_passed: newTestPassed,
       actual_completed_date: newActualCompletedDate
     };
+
+    // 通常授業コマが受講完了となった際、次回通塾日を提出期限とする宿題を自動生成
+    if (!isUnitTest && isAllStepsCompleted && task.status !== 'completed') {
+      autoGenerateHomeworkForCompletedTask(updatedTask, allSteps);
+    }
 
     const updatedStudent: Student = {
       ...currentStudent,
@@ -1118,6 +1210,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     try {
       await db.saveStudent(updatedStudent);
       await db.saveLearningTasks([updatedTask]);
+      if (!isRemedial) {
+        autoGenerateHomeworkForCompletedTask(updatedTask, stepLessons);
+      }
     } catch (primaryErr) {
       console.error('一括完了 プライマリ保存エラー (フォールバック保持):', primaryErr);
     }
@@ -1961,6 +2056,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                             </div>
                             {stepLessons.map((step, sIdx) => {
                               const isStepDone = completedStepIds.has(String(step.id));
+                              // 未受講の先頭ステップのみ受講可能とする（中抜き・飛ばし受講の完全禁止）
+                              const firstIncompleteIdx = stepLessons.findIndex(s => !completedStepIds.has(String(s.id)));
+                              const isPlayable = !isStepDone && sIdx === firstIncompleteIdx;
                               return (
                                 <div 
                                   key={step.id || sIdx} 
@@ -1976,7 +2074,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                       <span className={styles.stepCompletedBadge} data-testid={`step-done-badge-${task.period}-${sIdx}`}>
                                         ✅ 受講完了
                                       </span>
-                                    ) : (
+                                    ) : isPlayable ? (
                                       <button
                                         type="button"
                                         onClick={(e) => {
@@ -1989,6 +2087,23 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                       >
                                         🎯 完了にする
                                       </button>
+                                    ) : (
+                                      <span 
+                                        style={{ 
+                                          fontSize: '0.75rem', 
+                                          color: '#94a3b8', 
+                                          fontWeight: 600, 
+                                          padding: '4px 8px', 
+                                          borderRadius: '6px', 
+                                          backgroundColor: '#f1f5f9',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
+                                        }}
+                                        data-testid={`step-waiting-badge-${task.period}-${sIdx}`}
+                                      >
+                                        ⏳ 待機中
+                                      </span>
                                     )}
                                   </div>
                                 </div>

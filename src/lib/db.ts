@@ -598,6 +598,7 @@ export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string
   const passing_line = toSafeTextOrNull(task.passing_line);
   const actual_completed_date = toSafeTextOrNull(task.actual_completed_date);
   const completed_lesson_ids = Array.isArray(task.completed_lesson_ids) ? task.completed_lesson_ids : undefined;
+  const lesson_ids = Array.isArray(task.lesson_ids) ? task.lesson_ids : undefined;
   const created_at = task.created_at ? String(task.created_at) : new Date().toISOString();
 
   return {
@@ -620,6 +621,7 @@ export function sanitizeLearningTask(task: Partial<LearningTask> & Record<string
     ...(passing_line != null ? { passing_line } : {}),
     ...(actual_completed_date != null ? { actual_completed_date } : {}),
     ...(completed_lesson_ids ? { completed_lesson_ids } : {}),
+    ...(lesson_ids ? { lesson_ids } : {}),
     created_at
   };
 }
@@ -650,6 +652,7 @@ export function sanitizeLearningTaskForDB(task: Partial<LearningTask> & Record<s
     passing_line: sanitized.passing_line ?? null,
     actual_completed_date: sanitized.actual_completed_date ?? null,
     ...(sanitized.completed_lesson_ids ? { completed_lesson_ids: sanitized.completed_lesson_ids } : {}),
+    ...(sanitized.lesson_ids ? { lesson_ids: sanitized.lesson_ids } : {}),
     created_at: sanitized.created_at
   };
 }
@@ -2045,6 +2048,78 @@ class DatabaseService {
     return student;
   }
 
+  /**
+   * 中抜き・置き去り未受講ステップのクリーンアップ補正
+   * 生徒の現在地（最大完了位置・スタート位置・直近タスク）より手前に取り残された
+   * 未完了ステップを一括で completed に補正し、シーケンシャルな現在地からのコマ割りを保証する
+   */
+  public async cleanupStudentSteppingStoneUncompletedLessons(
+    studentId: string,
+    subject?: string
+  ): Promise<Student | null> {
+    const student = this.getStudents().find(s => s.id === studentId);
+    if (!student) return null;
+
+    const completedSet = new Set((student.completed_lesson_ids || []).map(String));
+    const allMasters = this.getCurriculumMasters();
+    
+    const targetSubjects = subject 
+      ? [subject] 
+      : (student.selected_subjects && student.selected_subjects.length > 0 ? student.selected_subjects : ['算数', '国語', '英語', '数学']);
+
+    let modified = false;
+
+    for (const sub of targetSubjects) {
+      const subMasters = allMasters.filter(m => {
+        if (sub === '算数' || sub === '数学') return m.subject === '算数' || m.subject === '数学';
+        return m.subject === sub;
+      });
+
+      const isElem = (student.grade || '').startsWith('小') || student.grade === '園児';
+      const isJunior = (student.grade || '').startsWith('中');
+      const filtered = subMasters.filter(m => {
+        if (isElem) return (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
+        if (isJunior) return (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
+        return true;
+      });
+      const ensured = filtered.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+      let maxIdx = -1;
+      ensured.forEach((m, idx) => {
+        if (completedSet.has(String(m.id)) || (m.sort_order !== undefined && completedSet.has(String(m.sort_order)))) {
+          if (idx > maxIdx) maxIdx = idx;
+        }
+      });
+
+      const startUnitId = (student.subject_start_positions && student.subject_start_positions[sub]) || 
+                          (student.subject_start_units && student.subject_start_units[sub]) ||
+                          (sub === '算数' ? student.start_unit_math : sub === '英語' ? student.start_unit_english : student.start_unit_id);
+      if (startUnitId) {
+        const sIdx = ensured.findIndex(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId) || m.lesson_name === startUnitId);
+        if (sIdx > maxIdx) maxIdx = sIdx;
+      }
+
+      if (maxIdx > 0) {
+        for (let i = 0; i < maxIdx; i++) {
+          const mId = String(ensured[i].id);
+          if (!completedSet.has(mId)) {
+            completedSet.add(mId);
+            modified = true;
+          }
+        }
+      }
+    }
+
+    if (modified) {
+      const updated: Student = {
+        ...student,
+        completed_lesson_ids: Array.from(completedSet)
+      };
+      return await this.saveStudent(updated);
+    }
+    return student;
+  }
+
   public async saveStudent(student: Student): Promise<Student> {
     // 誤完了まとめテストID・未来テストIDの自動サニタイズ（生徒データのID汚染を根本防止）
     if (Array.isArray(student.completed_lesson_ids) && student.completed_lesson_ids.length > 0) {
@@ -2853,18 +2928,20 @@ class DatabaseService {
 
       const { data, error } = await this.supabase.from('learning_tasks').upsert(dbPayloads).select();
       if (error) {
-        // もしユニーク制約エラー (23505 または learning_tasks_student_id_unit_id_key) や completed_lesson_ids が原因の場合、一括削除＋強制一意化でリトライ
+        // もしユニーク制約エラー (23505 または learning_tasks_student_id_unit_id_key) や completed_lesson_ids / lesson_ids が原因の場合、一括削除＋強制一意化でリトライ
         if (
           error.code === '23505' ||
           error.message?.includes('learning_tasks_student_id_unit_id_key') ||
           error.message?.includes('completed_lesson_ids') ||
+          error.message?.includes('lesson_ids') ||
           error.code === '42703' ||
           (error as any).details?.includes('completed_lesson_ids') ||
+          (error as any).details?.includes('lesson_ids') ||
           error.code === 'PGRST204'
         ) {
           // 強制一意化ペイロードの準備
           const fallbackPayloads = dbPayloads.map((p, idx) => {
-            const { completed_lesson_ids, ...rest } = p;
+            const { completed_lesson_ids, lesson_ids, ...rest } = p;
             return {
               ...rest,
               unit_id: `${rest.unit_id}_p${rest.period || idx}_${Math.random().toString(36).substring(2, 5)}`

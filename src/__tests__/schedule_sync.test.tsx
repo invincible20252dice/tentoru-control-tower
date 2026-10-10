@@ -284,9 +284,8 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     });
 
     const step1Btn = screen.getByTestId('step-complete-btn-1-0');
-    const step2Btn = screen.getByTestId('step-complete-btn-1-1');
     expect(step1Btn).toBeInTheDocument();
-    expect(step2Btn).toBeInTheDocument();
+    expect(screen.getByTestId('step-waiting-badge-1-1')).toBeInTheDocument();
 
     // Sugoroku node cm-jhs-1 should initially not be completed
     const videoNode1 = screen.getByTestId('sugoroku-video-cm-jhs-1');
@@ -511,9 +510,10 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       expect(screen.getByTestId('step-progress-count-1')).toHaveTextContent('0 / 8 完了');
     });
 
-    // Check that all 8 step complete buttons exist
-    for (let i = 0; i < 8; i++) {
-      expect(screen.getByTestId(`step-complete-btn-1-${i}`)).toBeInTheDocument();
+    // 初期状態では先頭ステップのみ受講可能、後続ステップは待機中（中抜き受講禁止）
+    expect(screen.getByTestId('step-complete-btn-1-0')).toBeInTheDocument();
+    for (let i = 1; i < 8; i++) {
+      expect(screen.getByTestId(`step-waiting-badge-1-${i}`)).toBeInTheDocument();
     }
 
     // Click step 1
