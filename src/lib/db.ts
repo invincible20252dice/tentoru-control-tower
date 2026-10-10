@@ -2424,7 +2424,7 @@ class DatabaseService {
     // Always update local cache so synchronous getStudents() immediately reflects the updated student!
     const rawList = this.getMockData<Student>('students', []);
     let idx = rawList.findIndex(s => s.id === finalStudent.id || s.id === student.id);
-    if (idx === -1 && savedData?.id && student.student_id) {
+    if (idx === -1 && student.student_id) {
       idx = rawList.findIndex(s => s.student_id === student.student_id);
     }
     if (idx >= 0) rawList[idx] = finalStudent;

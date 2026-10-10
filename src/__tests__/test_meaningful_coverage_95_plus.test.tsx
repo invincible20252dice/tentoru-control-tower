@@ -294,6 +294,7 @@ describe('Meaningful 95%+ Coverage Boost Tests (Pure & Substantive)', () => {
     const studentA: Student = {
       ...baseStudent,
       id: 'st-hw-a',
+      student_id: 'S_HW_A',
       name: '青山 太郎',
       name_kana: 'アオヤマ タロウ',
       grade: '小5'
@@ -301,6 +302,7 @@ describe('Meaningful 95%+ Coverage Boost Tests (Pure & Substantive)', () => {
     const studentB: Student = {
       ...baseStudent,
       id: 'st-hw-b',
+      student_id: 'S_HW_B',
       name: '渡辺 次郎',
       name_kana: 'ワタナベ ジロウ',
       grade: '中2'
@@ -340,9 +342,14 @@ describe('Meaningful 95%+ Coverage Boost Tests (Pure & Substantive)', () => {
         <TeacherDashboard
           initialStudentId={studentA.id}
           initialTab="homeworks"
+          students={[studentA, studentB]}
         />
       );
     });
+
+    // 宿題提出状況タブをクリック
+    const hwTab = screen.getByText('宿題提出状況');
+    fireEvent.click(hwTab);
 
     const sortSelect = screen.getByLabelText(/並び順:/i);
     const gradeSelect = screen.getByLabelText(/学年:/i);
