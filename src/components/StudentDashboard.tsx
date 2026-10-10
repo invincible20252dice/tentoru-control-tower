@@ -166,6 +166,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const d = determineInitialDate();
     return db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === d);
   });
+  const [assignedTestIds, setAssignedTestIds] = useState<Set<string>>(() => {
+    const d = determineInitialDate();
+    const initialMini = db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === d);
+    return new Set(initialMini.map(m => m.id));
+  });
   const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>(() => {
     const d = determineInitialDate();
     return db.getHomeworkResults().filter(r => r.student_id === student.id && r.date === d);
@@ -275,6 +280,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       todayMiniItems: todayMini
     });
     setMiniTestResults(todayMini);
+    setAssignedTestIds(new Set(todayMini.map(m => m.id)));
     
     const initialScores: Record<string, string> = {};
     todayMini.forEach(r => {
@@ -967,7 +973,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const unit = units.find(u => u.id === task.unit_id);
     const subjectName = task.subject || (unit ? unit.subject : 'その他');
     const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const cleanUnitName = normalizeUnitName(rawUnitName) || rawUnitName
+    const cleanUnitName = rawUnitName
+      .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
       .replace(/【やり直し授業】/g, '')
       .replace(/（再テスト）/g, '')
       .replace(/復習/g, '')
@@ -1149,61 +1156,6 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       console.warn('addLearningLog error:', e);
     }
 
-    // まとめテストまたはテスト系タスクの場合、講師ダッシュボードの小テスト結果管理（MiniTestResult）にも合格を記録連動
-    const isTestLikeTask = Boolean(
-      task.start_lesson_name?.includes('まとめテスト') ||
-      task.start_lesson_name?.toLowerCase().includes('check test') ||
-      task.lesson_range?.includes('まとめテスト') ||
-      task.lesson_range?.toLowerCase().includes('check test') ||
-      task.custom_unit_name?.includes('まとめテスト') ||
-      task.custom_unit_name?.toLowerCase().includes('check test')
-    );
-    if (isTestLikeTask) {
-      const unit = units.find(u => u.id === task.unit_id);
-      const subjectName = task.subject || (unit ? unit.subject : 'その他');
-      const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-      const cleanUnitName = rawUnitName
-        .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
-        .replace(/\s*-\s*(単元確認テスト|単元テスト|確認テスト|テスト|やり直し|再テスト|まとめテスト).*$/i, '')
-        .trim() || '単元';
-      let testSuffix = '単元確認テスト';
-      if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
-        testSuffix = 'まとめテスト（１）';
-      } else if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
-        testSuffix = 'まとめテスト（２）';
-      } else if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
-        testSuffix = 'まとめテスト（３）';
-      } else if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
-        testSuffix = 'Check Test';
-      }
-      const testContent = `${subjectName}: ${cleanUnitName} - ${testSuffix}`;
-
-      const miniResult: MiniTestResult = {
-        id: `mini-test-${student.id}-${task.id}`,
-        student_id: student.id,
-        task_id: task.id,
-        date: currentDateStr,
-        subject: subjectName,
-        test_type: 'unit_test',
-        unit_name: cleanUnitName,
-        test_content: testContent,
-        score: 100,
-        passed: true,
-        status: 'passed',
-        completed_at: new Date().toISOString(),
-        passing_line: '100%',
-        target_scope: 'individual',
-        students: {
-          id: student.id,
-          name: student.name,
-          grade: student.grade
-        },
-        created_at: new Date().toISOString()
-      };
-      await db.saveMiniTestResult(miniResult);
-      setMiniTestResults(prev => [...prev.filter(m => m.id !== miniResult.id), miniResult]);
-    }
-
     // 他の教科の授業もすべて完了したか確認
     const allCurrentTasks = db.getLearningTasks().filter(t => t.student_id === currentStudent.id && t.scheduled_date === currentDateStr);
     const otherTasks = allCurrentTasks.filter(t => t.id !== task.id);
@@ -1331,38 +1283,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const defaultPassScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
     const finalScore = passedScore !== undefined ? passedScore : (existingMini?.score !== null && existingMini?.score !== undefined ? existingMini.score : 100);
 
-    const miniResult: MiniTestResult = {
-      id: existingMini?.id || `mini-unit-${currentStudent.id}-${task.id}`,
-      student_id: currentStudent.id,
-      task_id: task.id,
-      date: currentDateStr,
-      subject: subjectName,
-      test_type: 'unit_test',
-      unit_name: cleanUnitName,
-      test_content: testContent,
-      score: finalScore,
-      passed: true,
-      status: 'passed',
-      completed_at: new Date().toISOString(),
-      passing_line: task.passing_line || `レベル${stLevel} (${defaultPassScore}点以上)`,
-      target_scope: 'individual',
-      students: {
-        id: currentStudent.id,
-        name: currentStudent.name,
-        grade: currentStudent.grade
-      },
-      created_at: existingMini?.created_at || new Date().toISOString()
-    };
-    await db.saveMiniTestResult(miniResult);
-    setMiniTestResults(prev => {
-      const idx = prev.findIndex(p => p.id === miniResult.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = miniResult;
-        return copy;
-      }
-      return [...prev, miniResult];
-    });
+    if (existingMini) {
+      const miniResult: MiniTestResult = {
+        ...existingMini,
+        score: finalScore,
+        passed: true,
+        status: 'passed',
+        completed_at: new Date().toISOString()
+      };
+      await db.saveMiniTestResult(miniResult);
+      setMiniTestResults(prev => prev.map(m => m.id === miniResult.id ? miniResult : m));
+    }
 
     // 合格時：他の教科の授業も完了していれば、次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
     const isUnitTestTask = passedScore !== undefined ||
@@ -1508,6 +1439,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     }
   };
 
+  // 🎯 本日のテスト（ボス戦）は、講師が明示的に登録したテストレコード（初期取得・割当テスト）のみを表示
+  const displayMiniTests = miniTestResults.filter(t => t.date === currentDateStr && assignedTestIds.has(t.id));
+
   const dashboardClass = `${styles.dashboard} ${theme === 'dark' ? styles.darkTheme : ''}`;
 
   return (
@@ -1612,7 +1546,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             let completedMissions = 0;
 
             // Mini Tests
-            miniTestResults.forEach(t => {
+            displayMiniTests.forEach(t => {
               totalMissions += 1;
               if (t.score !== null && t.score !== undefined) {
                 const passScore = (student.level === 'A' ? 90 : student.level === 'B' ? 80 : 70);
@@ -1755,7 +1689,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
           })()}
 
           {/* 🎯 本日のテスト（ボス戦 / チャレンジカード） */}
-          {miniTestResults.length > 0 && (
+          {displayMiniTests.length > 0 && (
             <div 
               className={styles.bossTestCard}
               data-testid="today-test-card"
@@ -1765,7 +1699,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                 <span>🎯 本日のテスト（ボス戦チャレンジ）</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {miniTestResults.map(test => {
+                {displayMiniTests.map(test => {
                   const stLevel = student.level || 'A';
                   const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
                   const currentScore = test.score;

@@ -365,10 +365,11 @@ describe('StudentDashboard Perfect 95%+ Coverage Suite', () => {
 
     await waitFor(() => {
       const results = db.getMiniTestResults().filter(r => r.student_id === studentPass.id);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（１）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（２）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（３）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('Check Test'))).toBe(true);
+      // 授業完了によって勝手な MiniTestResult が自動生成・注入されないことを検証
+      expect(results.some(r => r.test_content?.includes('まとめテスト（１）'))).toBe(false);
+      expect(results.some(r => r.test_content?.includes('まとめテスト（２）'))).toBe(false);
+      expect(results.some(r => r.test_content?.includes('まとめテスト（３）'))).toBe(false);
+      expect(results.some(r => r.test_content?.includes('Check Test'))).toBe(false);
       expect(results.some(r => r.test_content?.includes('再テスト'))).toBe(true);
     });
 
@@ -749,6 +750,16 @@ describe('StudentDashboard Perfect 95%+ Coverage Suite', () => {
     ];
     await db.saveLearningTasks(tasks);
 
+    const initialMiniTests: MiniTestResult[] = [
+      { id: 'mini-suf-1', student_id: studentSuffix.id, task_id: 'task-suf-1', date: todayStr, subject: '算数', test_type: 'unit_test', unit_name: '大きな数 まとめテスト（１）', test_content: '算数: 大きな数 まとめテスト（１） - まとめテスト（１）', score: null, passed: null, status: 'unstarted', created_at: new Date().toISOString() },
+      { id: 'mini-suf-2', student_id: studentSuffix.id, task_id: 'task-suf-2', date: todayStr, subject: '算数', test_type: 'unit_test', unit_name: '大きな数 まとめテスト（２）', test_content: '算数: 大きな数 まとめテスト（２） - まとめテスト（２）', score: null, passed: null, status: 'unstarted', created_at: new Date().toISOString() },
+      { id: 'mini-suf-3', student_id: studentSuffix.id, task_id: 'task-suf-3', date: todayStr, subject: '算数', test_type: 'unit_test', unit_name: '大きな数 まとめテスト（３）', test_content: '算数: 大きな数 まとめテスト（３） - まとめテスト（３）', score: null, passed: null, status: 'unstarted', created_at: new Date().toISOString() },
+      { id: 'mini-suf-4', student_id: studentSuffix.id, task_id: 'task-suf-4', date: todayStr, subject: '英語', test_type: 'unit_test', unit_name: 'Unit 1 Check Test', test_content: '英語: Unit 1 Check Test - Check Test', score: null, passed: null, status: 'unstarted', created_at: new Date().toISOString() }
+    ];
+    for (const m of initialMiniTests) {
+      await db.saveMiniTestResult(m);
+    }
+
     const { unmount } = render(<StudentDashboard student={studentSuffix} onLogout={vi.fn()} initialDate={todayStr} />);
     await waitFor(() => {
       expect(screen.getByText(/サフィックス純粋生徒 さんの学習画面/)).toBeInTheDocument();
@@ -780,10 +791,10 @@ describe('StudentDashboard Perfect 95%+ Coverage Suite', () => {
 
     await waitFor(() => {
       const results = db.getMiniTestResults().filter(r => r.student_id === studentSuffix.id);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（１）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（２）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('まとめテスト（３）'))).toBe(true);
-      expect(results.some(r => r.test_content?.includes('Check Test'))).toBe(true);
+      expect(results.some(r => r.test_content?.includes('まとめテスト（１）') && r.passed === true)).toBe(true);
+      expect(results.some(r => r.test_content?.includes('まとめテスト（２）') && r.passed === true)).toBe(true);
+      expect(results.some(r => r.test_content?.includes('まとめテスト（３）') && r.passed === true)).toBe(true);
+      expect(results.some(r => r.test_content?.includes('Check Test') && r.passed === true)).toBe(true);
     });
 
     unmount();

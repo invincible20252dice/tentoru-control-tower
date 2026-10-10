@@ -386,12 +386,13 @@ describe('Step-by-Step Summary Tests Progression & Auto Reschedule', () => {
         fireEvent.click(completeBtn);
       });
 
-      // 保存された小テスト結果を確認
+      // タスクが完了ステータスになり、講師未設定のため勝手な小テスト結果が自動生成されないことを確認
       await waitFor(() => {
+        const updatedTask = db.getLearningTasks().find(t => t.id === 'task-s1');
+        expect(updatedTask?.status).toBe('completed');
         const savedResults = db.getMiniTestResults().filter(r => r.student_id === baseStudent.id);
         const savedTest = savedResults.find(r => r.task_id === 'task-s1' || r.test_content?.includes('まとめテスト（１）'));
-        expect(savedTest).toBeDefined();
-        expect(savedTest?.test_content).toBe('算数: 0の たしざんと ひきざん - まとめテスト（１）');
+        expect(savedTest).toBeUndefined();
       });
     });
   });
