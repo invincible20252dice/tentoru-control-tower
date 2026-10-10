@@ -27,10 +27,10 @@ export default defineConfig({
         'src/app/api/**'
       ],
       thresholds: {
-        statements: 85,
-        branches: 74,
-        functions: 90,
-        lines: 85
+        statements: 95,
+        branches: 85,
+        functions: 95,
+        lines: 95
       }
     }
   },
