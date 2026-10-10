@@ -366,6 +366,7 @@ export interface LearningTask {
   start_lesson_id?: string | null;
   end_lesson_id?: string | null;
   lesson_range?: string | null;
+  lesson_ids?: string[];
   completed_lesson_ids?: string[];
   created_at: string;
 }

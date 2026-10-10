@@ -1067,6 +1067,7 @@ export function calculateLessonRangeForSlot(params: {
   start_lesson_name: string | null;
   end_lesson_name: string | null;
   lesson_range: string | null;
+  lesson_ids?: string[];
   inferred_pace?: number;
   pace_reason?: string;
 } {
@@ -1302,15 +1303,313 @@ export function calculateLessonRangeForSlot(params: {
     paceReason = `単元テスト不合格のため新単元進行をストップし、${cleanUnitName}の総復習を割り当てました`;
   }
 
+  const slicedLessons = (hasFailed && failedTestObj)
+    ? (startItem ? [startItem] : [])
+    : masterLessons.slice(startIdx, endIdx + 1);
+  const lessonIds = slicedLessons.map(m => String(m.id));
+
   return {
     start_lesson_id: startItem?.id || null,
     end_lesson_id: (hasFailed && failedTestObj) ? (startItem?.id || null) : (endItem?.id || startItem?.id || null),
     start_lesson_name: startName,
     end_lesson_name: endName,
     lesson_range: rangeStr || null,
+    lesson_ids: lessonIds,
     inferred_pace: effectivePace,
     pace_reason: paceReason
   };
+}
+
+/**
+ * コマ割り設定（From〜To）に含まれる全レッスンステップ（通常授業・まとめテスト・Check Test等）を展開・抽出する
+ * ①学習計画、②進度タイムライン、③生徒学習画面で完全に同一のレッスンID配列を保証するための単一データソース関数
+ */
+export function getLessonRangeStepIds(params: {
+  subject: string;
+  startLessonId?: string | null;
+  endLessonId?: string | null;
+  startLessonName?: string | null;
+  endLessonName?: string | null;
+  lessonRange?: string | null;
+  customUnitName?: string | null;
+  lessonIds?: string[] | null;
+  curriculumMasters?: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  studentGrade?: string | null;
+  schoolId?: string;
+}): Array<{ id: string; name: string; fullTitle: string; unit_name?: string; isUnitTest?: boolean }> {
+  const {
+    subject,
+    startLessonId,
+    endLessonId,
+    startLessonName,
+    endLessonName,
+    lessonRange,
+    customUnitName,
+    lessonIds,
+    curriculumMasters: rawMasters = [],
+    studentGrade,
+    schoolId
+  } = params;
+
+  const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
+  const isElem = Boolean(
+    studentGrade?.startsWith('小') ||
+    (studentGrade?.includes('年') && !studentGrade?.startsWith('中') && !studentGrade?.startsWith('高')) ||
+    studentGrade === '園児'
+  );
+  const isJunior = Boolean(studentGrade?.startsWith('中'));
+  const isHigh = Boolean(studentGrade?.startsWith('高') || studentGrade === '既卒');
+
+  const subjectOnlyMasters = curriculumMasters.filter(m => {
+    if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+      return m.subject === '算数' || m.subject === '数学';
+    }
+    return m.subject === subject;
+  });
+
+  const targetGradeNorm = studentGrade ? normalizeGrade(studentGrade) : '';
+  const gradeExactMasters = targetGradeNorm
+    ? subjectOnlyMasters.filter(m => normalizeGrade(m.grade) === targetGradeNorm)
+    : [];
+
+  const gradeFilteredMasters = subjectOnlyMasters.filter(m => {
+    if (isElem) {
+      return (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
+    } else if (isJunior) {
+      return (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
+    } else if (isHigh) {
+      return (m.grade || '').startsWith('高') || m.grade === '既卒';
+    }
+    return true;
+  });
+
+  const masterListsToTry = [
+    gradeExactMasters.length > 0 ? gradeExactMasters : null,
+    gradeFilteredMasters.length > 0 ? gradeFilteredMasters : null,
+    subjectOnlyMasters.length > 0 ? subjectOnlyMasters : null
+  ].filter(Boolean) as CurriculumMaster[][];
+
+  // 1. もし lessonIds 配列が渡されていれば、そのID順に該当ステップを取り出して即時返却
+  if (Array.isArray(lessonIds) && lessonIds.length > 0) {
+    const allEnsured = ensureMathEnglishUnitTests(subjectOnlyMasters);
+    const map = new Map(allEnsured.map(m => [String(m.id), m]));
+    const matched = lessonIds
+      .map(id => map.get(String(id)))
+      .filter((m): m is NonNullable<typeof m> => Boolean(m))
+      .map(m => {
+        const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
+        const isUT = !isReviewOrCheck && (
+          m.item_type === 'unit_test' ||
+          Boolean((m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト') || (m.lesson_name || '').includes('確認テスト'))
+        );
+        const cleanLesson = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+        return {
+          id: String(m.id),
+          name: cleanLesson || m.unit_name || '',
+          fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson,
+          unit_name: m.unit_name,
+          sort_order: m.sort_order ?? 0,
+          isUnitTest: isUT
+        };
+      });
+    if (matched.length > 0) return matched;
+  }
+
+  // 2. From〜To の文字列表現を解析
+  let fromStr = startLessonName || '';
+  let toStr = endLessonName || '';
+  const rangeText = lessonRange || customUnitName || '';
+  if ((!fromStr || !toStr) && rangeText) {
+    if (/\s+[〜~～]\s+/.test(rangeText)) {
+      const parts = rangeText.split(/\s+[〜~～]\s+/);
+      if (parts.length >= 2) {
+        if (!fromStr) fromStr = parts[0].trim();
+        if (!toStr) toStr = parts[1].trim();
+      }
+    } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
+      const parts = rangeText.split(/〜|~|～/);
+      if (parts.length >= 2) {
+        if (!fromStr) fromStr = parts[0].trim();
+        if (!toStr) toStr = parts[1].trim();
+      }
+    } else if (!fromStr) {
+      fromStr = rangeText.trim();
+    }
+  }
+
+  const clean = (s: string) => (s || '').toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：?？!！]/g, '');
+  const fromClean = clean(fromStr);
+  const toClean = clean(toStr);
+  const fromLessonOnly = fromStr.includes('-') ? fromStr.replace(/^[^-]+-\s*/, '').trim() : fromStr;
+  const toLessonOnly = toStr.includes('-') ? toStr.replace(/^[^-]+-\s*/, '').trim() : toStr;
+  const fromLessonClean = clean(fromLessonOnly);
+  const toLessonClean = clean(toLessonOnly);
+
+  for (const rawMastersList of masterListsToTry) {
+    const ensuredMasters = ensureMathEnglishUnitTests(rawMastersList);
+    const masterLessons = ensuredMasters
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(m => {
+        const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
+        const isUT = !isReviewOrCheck && (
+          m.item_type === 'unit_test' ||
+          Boolean(
+            (m.lesson_name || '').includes('単元確認テスト') ||
+            (m.lesson_name || '').includes('単元テスト') ||
+            (m.lesson_name || '').includes('確認テスト')
+          )
+        );
+        const cleanLesson = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+        return {
+          id: String(m.id),
+          name: cleanLesson || m.unit_name || '',
+          fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson,
+          unit_name: m.unit_name,
+          sort_order: m.sort_order ?? 0,
+          isUnitTest: isUT
+        };
+      });
+
+    // startIdx の特定
+    let startIdx = -1;
+    if (startLessonId) {
+      startIdx = masterLessons.findIndex(m => m.id === String(startLessonId) || String(m.sort_order) === String(startLessonId));
+    }
+    if (startIdx < 0 && fromClean) {
+      // 1. 完全一致（fullTitle, name, またはレッスン単体名）
+      startIdx = masterLessons.findIndex(m => {
+        const mClean = clean(m.name);
+        const fClean = clean(m.fullTitle);
+        return mClean === fromClean || fClean === fromClean || (fromLessonClean && mClean === fromLessonClean);
+      });
+      // 2. 照合関数（レッスン名単体同士）
+      if (startIdx < 0) {
+        startIdx = masterLessons.findIndex(m => isMatchingUnitOrTest(m.name, fromLessonOnly) || isMatchingUnitOrTest(m.fullTitle, fromStr));
+      }
+      // 3. 部分一致
+      if (startIdx < 0) {
+        startIdx = masterLessons.findIndex(m => {
+          const mClean = clean(m.name);
+          const fClean = clean(m.fullTitle);
+          return mClean.includes(fromClean) || fClean.includes(fromClean) || fromClean.includes(mClean) ||
+            (fromLessonClean && (mClean.includes(fromLessonClean) || fromLessonClean.includes(mClean)));
+        });
+      }
+    }
+
+    // endIdx の特定（同一単元優先検索！）
+    let endIdx = -1;
+    const startItem = startIdx >= 0 ? masterLessons[startIdx] : null;
+    const startUnit = startItem?.unit_name;
+
+    if (endLessonId) {
+      if (startUnit) {
+        const inUnitIdx = masterLessons.findIndex((m, i) => i >= startIdx && m.unit_name === startUnit && (m.id === String(endLessonId) || String(m.sort_order) === String(endLessonId)));
+        if (inUnitIdx >= 0) endIdx = inUnitIdx;
+      }
+      if (endIdx < 0) {
+        endIdx = masterLessons.findIndex(m => m.id === String(endLessonId) || String(m.sort_order) === String(endLessonId));
+      }
+    }
+
+    if (endIdx < 0 && toClean) {
+      if (startUnit) {
+        // 同一単元内での検索
+        // 1. 完全一致
+        const inUnitStrict = masterLessons.findIndex((m, i) => {
+          if (i < startIdx || m.unit_name !== startUnit) return false;
+          const mClean = clean(m.name);
+          const fClean = clean(m.fullTitle);
+          return mClean === toClean || fClean === toClean || (toLessonClean && mClean === toLessonClean);
+        });
+        if (inUnitStrict >= 0) endIdx = inUnitStrict;
+
+        // 2. 照合関数（レッスン名単体同士）
+        if (endIdx < 0) {
+          const inUnitMatch = masterLessons.findIndex((m, i) => {
+            if (i < startIdx || m.unit_name !== startUnit) return false;
+            return isMatchingUnitOrTest(m.name, toLessonOnly) || isMatchingUnitOrTest(m.fullTitle, toStr);
+          });
+          if (inUnitMatch >= 0) endIdx = inUnitMatch;
+        }
+
+        // 3. 部分一致
+        if (endIdx < 0) {
+          const inUnitPartial = masterLessons.findIndex((m, i) => {
+            if (i < startIdx || m.unit_name !== startUnit) return false;
+            const mClean = clean(m.name);
+            const fClean = clean(m.fullTitle);
+            return mClean.includes(toClean) || fClean.includes(toClean) ||
+              (toLessonClean && (mClean.includes(toLessonClean) || toLessonClean.includes(mClean)));
+          });
+          if (inUnitPartial >= 0) endIdx = inUnitPartial;
+        }
+      }
+
+      if (endIdx < 0) {
+        // startIdx より後の全体検索
+        const afterStartStrict = masterLessons.findIndex((m, i) => {
+          if (i < startIdx) return false;
+          const mClean = clean(m.name);
+          const fClean = clean(m.fullTitle);
+          return mClean === toClean || fClean === toClean || (toLessonClean && mClean === toLessonClean);
+        });
+        if (afterStartStrict >= 0) {
+          endIdx = afterStartStrict;
+        } else {
+          const afterStartMatch = masterLessons.findIndex((m, i) => {
+            if (i < startIdx) return false;
+            return isMatchingUnitOrTest(m.name, toLessonOnly) || isMatchingUnitOrTest(m.fullTitle, toStr);
+          });
+          if (afterStartMatch >= 0) endIdx = afterStartMatch;
+        }
+      }
+
+      if (endIdx < 0) {
+        endIdx = masterLessons.findIndex(m => {
+          const mClean = clean(m.name);
+          const fClean = clean(m.fullTitle);
+          return mClean === toClean || fClean === toClean || (toLessonClean && mClean === toLessonClean) || isMatchingUnitOrTest(m.name, toLessonOnly);
+        });
+      }
+    }
+
+    if (startIdx >= 0 && endIdx >= 0) {
+      const sItem = masterLessons[startIdx];
+      const eItem = masterLessons[endIdx];
+      // 同一単元内の場合はその単元のみでスライス（他単元の重複sort_order混入を完全遮断）
+      if (sItem.unit_name && eItem.unit_name && sItem.unit_name === eItem.unit_name) {
+        const sameUnitLessons = masterLessons.filter(m => m.unit_name === sItem.unit_name);
+        const sI = sameUnitLessons.findIndex(m => m.id === sItem.id || m.name === sItem.name);
+        const eI = sameUnitLessons.findIndex(m => m.id === eItem.id || m.name === eItem.name);
+        if (sI >= 0 && eI >= 0) {
+          const minI = Math.min(sI, eI);
+          const maxI = Math.max(sI, eI);
+          return sameUnitLessons.slice(minI, maxI + 1);
+        }
+      }
+
+      const minI = Math.min(startIdx, endIdx);
+      const maxI = Math.max(startIdx, endIdx);
+      return masterLessons.slice(minI, maxI + 1);
+    }
+
+    if (startIdx >= 0 && !toClean) {
+      return [masterLessons[startIdx]];
+    }
+    if (endIdx >= 0 && !fromClean) {
+      return [masterLessons[endIdx]];
+    }
+  }
+
+  const fallbackTitle = fromStr || toStr || rangeText || '授業';
+  return [{
+    id: startLessonId || endLessonId || 'lesson-fallback',
+    name: fallbackTitle,
+    fullTitle: fallbackTitle,
+    isUnitTest: false
+  }];
 }
 
 /**

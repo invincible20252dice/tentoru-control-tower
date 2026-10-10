@@ -69,7 +69,8 @@ import {
   getLatestUnitTestStatusForSubject,
   normalizeUnitName,
   ensureMathEnglishUnitTests,
-  isMatchingUnitOrTest
+  isMatchingUnitOrTest,
+  getLessonRangeStepIds
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { 
@@ -3821,6 +3822,20 @@ export default function TeacherDashboard({
         const unit = allCurriculumUnits.find(u => u.id === sel.unitId);
         const master = curriculumMastersList.find(m => m.id === sel.unitId || String(m.sort_order) === String(sel.unitId));
 
+        const stepLessons = getLessonRangeStepIds({
+          subject: sel.subject,
+          startLessonId: sel.startLessonId,
+          endLessonId: sel.endLessonId,
+          startLessonName: sel.startLessonName,
+          endLessonName: sel.endLessonName,
+          lessonRange: sel.lessonRange,
+          customUnitName: sel.customTheme,
+          lessonIds: (sel as any).lesson_ids,
+          curriculumMasters: curriculumMastersList,
+          studentGrade: freshSt.grade
+        });
+        const extractedLessonIds = stepLessons.map(s => String(s.id));
+
         newDayTasks.push({
           id: `task-${freshSt.id}-${scheduleDate}-${p}`,
           student_id: freshSt.id,
@@ -3834,6 +3849,7 @@ export default function TeacherDashboard({
           start_lesson_name: sel.startLessonName || '',
           end_lesson_name: sel.endLessonName || '',
           lesson_range: sel.lessonRange || formatLessonRange(sel.startLessonName, sel.endLessonName),
+          lesson_ids: extractedLessonIds,
           status: 'unstarted',
           video_watched: false,
           test_passed: false,
@@ -9089,10 +9105,28 @@ export default function TeacherDashboard({
 
                   // コマ割りスロットから受講対象レッスンID群を抽出する汎用関数
                   const extractLessonIdsFromSlot = (slot: any): string[] => {
-                    const ids: string[] = [];
-                    if (Array.isArray(slot.lesson_ids)) {
-                      slot.lesson_ids.forEach((id: any) => ids.push(String(id)));
+                    // 1. slot.lesson_ids が明示的に保持されている場合は最優先返却（完全同期の単一データソース）
+                    if (Array.isArray(slot.lesson_ids) && slot.lesson_ids.length > 0) {
+                      return slot.lesson_ids.map((id: any) => String(id));
                     }
+
+                    // 2. getLessonRangeStepIds を用いて同一単元優先・全ステップ展開
+                    const steps = getLessonRangeStepIds({
+                      subject: slot.subject || targetSubject,
+                      startLessonId: slot.start_lesson_id || slot.startLessonId,
+                      endLessonId: slot.end_lesson_id || slot.endLessonId,
+                      startLessonName: slot.start_lesson_name || slot.startLessonName,
+                      endLessonName: slot.end_lesson_name || slot.endLessonName,
+                      lessonRange: slot.lesson_range || slot.lessonRange,
+                      customUnitName: slot.custom_unit_name || slot.customTheme,
+                      curriculumMasters: curriculumMastersList,
+                      studentGrade: selectedStudent.grade
+                    });
+                    if (steps && steps.length > 0 && steps[0].id !== 'lesson-fallback') {
+                      return steps.map(s => String(s.id));
+                    }
+
+                    const ids: string[] = [];
                     if (slot.unit_id) ids.push(String(slot.unit_id));
                     if (slot.unitId) ids.push(String(slot.unitId));
 
@@ -9177,6 +9211,36 @@ export default function TeacherDashboard({
                     const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
                     if (isTargetSub) {
                       extractLessonIdsFromSlot(p).forEach(id => todayActiveLessonIds.add(id));
+                    }
+                  });
+
+                  // 1-b. 単元テスト特化日（通常コマ0件でテスト枠のみの日）またはテスト枠に該当教科の単元テストがある場合の連動
+                  const todayMiniTests = miniTestResultsList.filter(m => 
+                    m.student_id === selectedStudent.id && 
+                    (activeTaskDateSet.has(m.date) || m.date === scheduleDate) &&
+                    (m.subject === targetSubject || (targetSubject === '算数' && m.subject === '数学') || (targetSubject === '数学' && m.subject === '算数'))
+                  );
+
+                  todayMiniTests.forEach(test => {
+                    const isUT = test.test_type === 'unit_test' || 
+                                 test.unit_name?.includes('単元テスト') || 
+                                 test.test_content?.includes('単元テスト') ||
+                                 test.unit_name?.includes('確認テスト') ||
+                                 test.test_content?.includes('単元確認テスト');
+                    if (isUT) {
+                      const testContent = test.test_content || '';
+                      const unitName = test.unit_name || '';
+                      const matchedTestUnit = timelineUnits.find((u: any) => {
+                        const isUTItem = u.item_type === 'unit_test' || 
+                                         (u.lesson_name && (u.lesson_name.includes('単元確認テスト') || u.lesson_name.includes('単元テスト') || u.lesson_name.includes('確認テスト')));
+                        if (!isUTItem) return false;
+                        if (unitName && (u.unit_name === unitName || u.name === unitName || (u.lesson_name && u.lesson_name.includes(unitName)))) return true;
+                        if (testContent && (matchesTimelineUnit(u, testContent) || isMatchingUnitOrTest(u.lesson_name, testContent) || isMatchingUnitOrTest(u.name, testContent))) return true;
+                        return false;
+                      });
+                      if (matchedTestUnit) {
+                        todayActiveLessonIds.add(String(matchedTestUnit.id));
+                      }
                     }
                   });
 
