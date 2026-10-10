@@ -1434,6 +1434,11 @@ class DatabaseService {
           english: 'cm-p-en1',
           japanese: 'cm-p-jp1'
         },
+        completed_lesson_ids: [
+          'cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3', 'cm-p1-m4',
+          'cm-elem-1', 'cm-elem-2',
+          'cm-p-en1', 'cm-p-jp1'
+        ],
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
         enrollment_date: '2026-04-01',

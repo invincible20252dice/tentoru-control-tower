@@ -341,8 +341,127 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const isElem = student.grade.startsWith('小') || student.grade === '園児';
     const taskSubject = task.subject || (units.find(u => u.id === task.unit_id)?.subject) || (isElem ? '算数' : '数学');
 
-    // 1. task.lesson_ids が明示的に保存されている場合は、単一データソース（Single Source of Truth）として最優先展開
-    if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 0) {
+    // --- 【国語コマ（コマ3）等における From〜To スライスの厳密抽出（中抜き・抜け落ち完全防止）】 ---
+    if (taskSubject === '国語' || taskSubject === '理科' || taskSubject === '社会') {
+      const subjectLessons = mastersSource.filter((item: any) => item.subject === taskSubject);
+      const fromLessonId = task.start_lesson_id || (task as any).from_lesson_id;
+      let fromLessonTitle = task.start_lesson_name || (task as any).from_lesson_title || '';
+      const toLessonId = task.end_lesson_id || (task as any).to_lesson_id;
+      let toLessonTitle = task.end_lesson_name || (task as any).to_lesson_title || '';
+
+      const rangeText = task.lesson_range || task.custom_unit_name || '';
+      if ((!fromLessonTitle || !toLessonTitle) && rangeText) {
+        const matchNumRange = rangeText.match(/^(.+?)\s*([1-9]\d*)\s*[〜~～]\s*([1-9]\d*)$/);
+        if (matchNumRange) {
+          const basePrefix = matchNumRange[1].trim();
+          const startNum = parseInt(matchNumRange[2], 10);
+          const endNum = parseInt(matchNumRange[3], 10);
+          const cleanP = (s: string) => (s || '').toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：?？!！]/g, '');
+          const unitLessons = subjectLessons.filter((item: any) => {
+            const uClean = cleanP(item.unit_name);
+            const pClean = cleanP(basePrefix);
+            return uClean === pClean || uClean.includes(pClean) || pClean.includes(uClean);
+          });
+          if (unitLessons.length > 0 && startNum >= 1 && endNum >= startNum) {
+            const sliced = unitLessons.slice(startNum - 1, endNum);
+            if (sliced.length > 0) {
+              return sliced.map((m: any) => {
+                const cleanLesson = (m.lesson_name || m.title || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+                return {
+                  id: String(m.id),
+                  name: cleanLesson || m.unit_name || '授業',
+                  fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+                };
+              });
+            }
+          }
+        } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
+          const parts = rangeText.split(/\s*[〜~～]\s*/);
+          if (parts.length >= 2) {
+            if (!fromLessonTitle) fromLessonTitle = parts[0].trim();
+            if (!toLessonTitle) toLessonTitle = parts[1].trim();
+          }
+        } else if (!fromLessonTitle) {
+          fromLessonTitle = rangeText.trim();
+        }
+      }
+
+      const cleanStr = (s: string) => (s || '').toLowerCase().replace(/[\s\-\_〜～~.・、。()（）「」『』:：?？!！]/g, '');
+      const cleanFrom = cleanStr(fromLessonTitle);
+      const cleanTo = cleanStr(toLessonTitle);
+
+      const matchLesson = (item: any, id?: string, title?: string, cleanT?: string) => {
+        if (id && (String(item.id) === String(id) || String(item.sort_order) === String(id))) return true;
+        if (title && (item.title === title || item.lesson_name === title || item.name === title)) return true;
+        if (cleanT) {
+          const itemLesson = cleanStr(item.lesson_name || item.title || item.name || '');
+          const itemFull = cleanStr(item.unit_name ? `${item.unit_name} - ${item.lesson_name}` : (item.lesson_name || ''));
+          const lessonOnly = title && title.includes('-') ? cleanStr(title.replace(/^[^-]+-\s*/, '').trim()) : '';
+          if (itemLesson === cleanT || itemFull === cleanT) return true;
+          if (lessonOnly && itemLesson === lessonOnly) return true;
+          if (itemLesson && cleanT.includes(itemLesson)) return true;
+          if (cleanT && itemLesson.includes(cleanT)) return true;
+        }
+        return false;
+      };
+
+      const fromIndex = subjectLessons.findIndex((item: any) => matchLesson(item, fromLessonId, fromLessonTitle, cleanFrom));
+      const toIndex = subjectLessons.findIndex((item: any) => matchLesson(item, toLessonId, toLessonTitle, cleanTo));
+
+      if (fromIndex !== -1 && toIndex !== -1 && fromIndex <= toIndex) {
+        const fromItem = subjectLessons[fromIndex];
+        const toItem = subjectLessons[toIndex];
+        if (fromItem && toItem && fromItem.unit_name && toItem.unit_name && fromItem.unit_name === toItem.unit_name) {
+          const sameUnitLessons = subjectLessons
+            .filter((item: any) => item.unit_name === fromItem.unit_name)
+            .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+          const sI = sameUnitLessons.findIndex((item: any) => 
+            (Boolean(fromItem.id) && String(item.id) === String(fromItem.id)) || 
+            (Boolean(fromItem.lesson_name) && item.lesson_name === fromItem.lesson_name) || 
+            (Boolean((fromItem as any).title) && item.title === (fromItem as any).title) || 
+            (Boolean((fromItem as any).name) && item.name === (fromItem as any).name)
+          );
+          const tI = sameUnitLessons.findIndex((item: any) => 
+            (Boolean(toItem.id) && String(item.id) === String(toItem.id)) || 
+            (Boolean(toItem.lesson_name) && item.lesson_name === toItem.lesson_name) || 
+            (Boolean((toItem as any).title) && item.title === (toItem as any).title) || 
+            (Boolean((toItem as any).name) && item.name === (toItem as any).name)
+          );
+          if (sI !== -1 && tI !== -1 && sI <= tI) {
+            const resolvedSteps = sameUnitLessons.slice(sI, tI + 1);
+            return resolvedSteps.map((m: any) => {
+              const cleanLesson = (m.lesson_name || m.title || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+              return {
+                id: String(m.id),
+                name: cleanLesson || m.unit_name || '授業',
+                fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+              };
+            });
+          }
+        }
+
+        const resolvedSteps = subjectLessons.slice(fromIndex, toIndex + 1);
+        return resolvedSteps.map((m: any) => {
+          const cleanLesson = (m.lesson_name || m.title || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+          return {
+            id: String(m.id),
+            name: cleanLesson || m.unit_name || '授業',
+            fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+          };
+        });
+      } else if (fromIndex !== -1) {
+        const m: any = subjectLessons[fromIndex];
+        const cleanLesson = (m.lesson_name || m.title || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+        return [{
+          id: String(m.id),
+          name: cleanLesson || m.unit_name || '授業',
+          fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+        }];
+      }
+    }
+
+    // 1. task.lesson_ids が複数件明示的に保存されている場合は、単一データソース（Single Source of Truth）として最優先展開
+    if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 1) {
       const masterMap = new Map(mastersSource.map(m => [String(m.id), m]));
       const unitMap = new Map((units || []).map(u => [String(u.id), u]));
 
@@ -384,8 +503,9 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       endLessonName: task.end_lesson_name,
       lessonRange: task.lesson_range,
       customUnitName: task.custom_unit_name,
-      lessonIds: task.lesson_ids,
+      lessonIds: (task.lesson_ids && task.lesson_ids.length > 1) ? task.lesson_ids : null,
       curriculumMasters: mastersSource,
+      curriculumUnits: units,
       studentGrade: student.grade
     });
 
@@ -399,6 +519,29 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       if (unit) {
         return [{ id: unit.id, name: unit.name, fullTitle: unit.name }];
       }
+    }
+
+    // 単一 lesson_ids がある場合のフォールバック
+    if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 0) {
+      const masterMap = new Map(mastersSource.map(m => [String(m.id), m]));
+      const mappedSteps = task.lesson_ids.map(id => {
+        const idStr = String(id);
+        const m = masterMap.get(idStr);
+        if (m) {
+          const cleanLesson = (m.lesson_name || '').replace(/^[^-]+-\s*/, '').trim();
+          return {
+            id: idStr,
+            name: cleanLesson || m.unit_name || '',
+            fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
+          };
+        }
+        return {
+          id: idStr,
+          name: task.start_lesson_name || task.custom_unit_name || '授業',
+          fullTitle: task.start_lesson_name || task.custom_unit_name || '授業'
+        };
+      });
+      if (mappedSteps.length > 0) return mappedSteps;
     }
 
     const defaultName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '授業';
