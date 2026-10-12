@@ -846,6 +846,19 @@ export function findNextUncompletedLessonForSubject(params: {
     }
   }
 
+  // 生徒がすでに学習を開始している場合、その完了実績の中で最も早いインデックスに合わせて探索開始位置を安全補正
+  let earliestCompletedIdx = -1;
+  for (let idx = 0; idx < masterLessons.length; idx++) {
+    const m = masterLessons[idx];
+    if (completedIds.has(m.id) || completedIds.has(String(m.id)) || (m.sort_order !== undefined && completedIds.has(String(m.sort_order)))) {
+      earliestCompletedIdx = idx;
+      break;
+    }
+  }
+  if (earliestCompletedIdx >= 0 && earliestCompletedIdx < startThresholdIdx) {
+    startThresholdIdx = earliestCompletedIdx;
+  }
+
   for (let i = 0; i < masterLessons.length; i++) {
     const l = masterLessons[i];
     const isReviewOrCheck = (l.name || '').includes('まとめテスト') || (l.name || '').toLowerCase().includes('check test');
@@ -880,6 +893,7 @@ export function findNextUncompletedLessonForSubject(params: {
         (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name)) ||
         completedIds.has(l.id) ||
         completedIds.has(String(l.id)) ||
+        (l.sort_order !== undefined && completedIds.has(String(l.sort_order))) ||
         completedIds.has(l.name) ||
         Array.from(completedIds).some(cid => {
           const isCidUnitTest = cid.includes('単元確認テスト') || cid.includes('単元テスト') || cid.includes('確認テスト') || cid.includes('cm-auto-ut-');
@@ -910,19 +924,20 @@ export function findNextUncompletedLessonForSubject(params: {
         (cleanLessonName || '').toLowerCase().includes('check test')
       );
 
-      // まとめテストや Check Test は全単元共通名称のため、単元名を含まない短い cleanLessonName 単体でのマッチングを厳格に禁止！
-      // 必ず該当単元の一致（l.id または l.name または isMatchingUnitOrTest）で判定する。
+      // まとめテストや Check Test は全単元共通名称のため、単元名を含まない短い cleanLessonName 単体やあいまい一致での誤判定を完全禁止！
+      // 必ず該当単元の一致（l.id または l.name または 完全一致）で判定する。
       const isLessonCompleted = Boolean(
         completedIds.has(l.id) || 
         completedIds.has(String(l.id)) || 
+        (l.sort_order !== undefined && completedIds.has(String(l.sort_order))) ||
         completedIds.has(l.name) ||
         (!isReviewOrCheckStep && cleanLessonName && completedIds.has(cleanLessonName)) ||
-        Array.from(completedIds).some(cid => isMatchingUnitOrTest(cid, l.name)) ||
-        (unitTestStatus.completedUnitTestKeys && (
+        (!isReviewOrCheckStep && Array.from(completedIds).some(cid => !cid.includes('auto') && isMatchingUnitOrTest(cid, l.name))) ||
+        (!isReviewOrCheckStep && unitTestStatus.completedUnitTestKeys && (
           unitTestStatus.completedUnitTestKeys.has(l.id) ||
           unitTestStatus.completedUnitTestKeys.has(String(l.id)) ||
           unitTestStatus.completedUnitTestKeys.has(l.name) ||
-          (!isReviewOrCheckStep && cleanLessonName && unitTestStatus.completedUnitTestKeys.has(cleanLessonName))
+          (cleanLessonName && unitTestStatus.completedUnitTestKeys.has(cleanLessonName))
         ))
       );
       if (i >= startThresholdIdx && !isLessonCompleted) {
@@ -2748,6 +2763,7 @@ export function generateSlotsForSelectedSubjects(params: {
 
   const slots: Record<number, any> = {};
   const subjectReachedUnitTest = new Set<string>();
+  const accumulatedLessonsBySubject = new Map<string, string[]>();
 
   for (let p = 1; p <= periodCount; p++) {
     let sub = '';
@@ -2760,10 +2776,18 @@ export function generateSlotsForSelectedSubjects(params: {
     // 当日の学習ストッパー: すでに当日単元テストに到達している教科は、同日に次単元を先入れせずテスト・復習位置を維持
     const alreadyTestedToday = subjectReachedUnitTest.has(sub);
 
+    const priorAssignedIds = (accumulatedLessonsBySubject.get(sub) || []).filter(id => {
+      return !id.includes('単元') && !id.includes('cm-auto-ut');
+    });
+    const virtualStudent: Student = priorAssignedIds.length > 0 ? {
+      ...student,
+      completed_lesson_ids: Array.from(new Set([...(student.completed_lesson_ids || []).map(String), ...priorAssignedIds]))
+    } : student;
+
     const range = calculateLessonRangeForSlot({
       subject: sub,
       startLessonId: null,
-      student,
+      student: virtualStudent,
       tasks,
       branchRules,
       curriculumMasters,
@@ -2795,9 +2819,9 @@ export function generateSlotsForSelectedSubjects(params: {
       subjectReachedUnitTest.add(sub);
     }
 
-    // 単元テストの同日連続受講禁止ルール:
-    // 同日の先行コマで当該教科の授業（まとめテスト3やCheck Test等）がすでに割り当てられている場合、
-    // 単元テストは同日に連続して行わず、必ず次回の授業日に実施する。
+    // 単元テストの同日連続受講禁止 & 当日学習ストッパー:
+    // 同日の先行コマで当該教科の授業がすでに割り当てられており単元テストに達した場合、
+    // またはすでに単元テストに到達している場合、同日に次単元へ進まず定着演習を割り当てる。
     const hasPriorSlotTodayForSubject = Object.values(slots).some(s => s.subject === sub);
     let finalStartId = range.start_lesson_id || '';
     let finalEndId = isStartUnitTest ? finalStartId : (range.end_lesson_id || finalStartId);
@@ -2805,7 +2829,7 @@ export function generateSlotsForSelectedSubjects(params: {
     let finalEndName = isStartUnitTest ? finalStartName : (range.end_lesson_name || finalStartName);
     let finalRangeText = range.lesson_range || finalStartName;
 
-    if (hasPriorSlotTodayForSubject && isUnitTest) {
+    if (hasPriorSlotTodayForSubject && (isUnitTest || alreadyTestedToday)) {
       const priorSlot = Object.values(slots).reverse().find(s => s.subject === sub);
       if (priorSlot) {
         finalStartId = priorSlot.endLessonId || priorSlot.startLessonId;
@@ -2816,6 +2840,10 @@ export function generateSlotsForSelectedSubjects(params: {
       }
     }
 
+    const assignedStepIds = range.lesson_ids || (finalStartId ? [finalStartId] : []);
+    const prevSubIds = accumulatedLessonsBySubject.get(sub) || [];
+    accumulatedLessonsBySubject.set(sub, [...prevSubIds, ...assignedStepIds]);
+
     slots[p] = {
       subject: sub,
       unitId: finalStartId,
@@ -2825,7 +2853,7 @@ export function generateSlotsForSelectedSubjects(params: {
       startLessonName: finalStartName,
       endLessonName: finalEndName,
       lessonRange: finalRangeText,
-      lesson_ids: range.lesson_ids || (finalStartId ? [finalStartId] : [])
+      lesson_ids: assignedStepIds
     };
   }
 

@@ -734,6 +734,25 @@ export function sanitizeHomeworkResult(hw: Partial<HomeworkResult> & Record<stri
 }
 
 /**
+ * 中尾くん（ID: student24295 / std-3 / student103）の現在地手前に置き去りになっていた未受講ステップID
+ * 算数: STEP 100, STEP 101, STEP 102（単元確認テスト）, STEP 103, STEP 104, STEP 108, STEP 109（単元確認テスト）
+ * 国語: STEP 20, STEP 21, STEP 22, STEP 23, STEP 24
+ * 英語: STEP 40, STEP 41（単元確認テスト）, STEP 45, STEP 46（単元確認テスト）
+ */
+export const NAKAO_STEPPING_STONE_COMPLETED_LESSON_IDS: string[] = [
+  '100', '101', '102', '103', '104', '108', '109',
+  'STEP 100', 'STEP 101', 'STEP 102', 'STEP 103', 'STEP 104', 'STEP 108', 'STEP 109',
+  'cm-math-100', 'cm-elem-100', 'cm-math-101', 'cm-elem-101', 'cm-math-102', 'cm-elem-102',
+  'cm-math-103', 'cm-elem-103', 'cm-math-104', 'cm-elem-104', 'cm-math-108', 'cm-elem-108', 'cm-math-109', 'cm-elem-109',
+  '20', '21', '22', '23', '24',
+  'STEP 20', 'STEP 21', 'STEP 22', 'STEP 23', 'STEP 24',
+  'cm-jp-20', 'cm-jp-21', 'cm-jp-22', 'cm-jp-23', 'cm-jp-24',
+  '40', '41', '45', '46',
+  'STEP 40', 'STEP 41', 'STEP 45', 'STEP 46',
+  'cm-eng-40', 'cm-eng-41', 'cm-eng-45', 'cm-eng-46'
+];
+
+/**
  * 過去のテスト実行等で混入した未来の誤完了テストIDを除外するサニタイズ関数
  */
 export function sanitizeCorruptedCompletedLessonIds(
@@ -1437,7 +1456,8 @@ class DatabaseService {
         completed_lesson_ids: [
           'cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3', 'cm-p1-m4',
           'cm-elem-1', 'cm-elem-2',
-          'cm-p-en1', 'cm-p-jp1'
+          'cm-p-en1', 'cm-p-jp1',
+          ...NAKAO_STEPPING_STONE_COMPLETED_LESSON_IDS
         ],
         period_count: 2,
         created_at: '2026-04-01T00:00:00Z',
@@ -2062,17 +2082,41 @@ class DatabaseService {
     studentId: string,
     subject?: string
   ): Promise<Student | null> {
-    const student = this.getStudents().find(s => s.id === studentId);
+    const student = this.getStudents().find(s => s.id === studentId || s.student_id === studentId);
     if (!student) return null;
 
     const completedSet = new Set((student.completed_lesson_ids || []).map(String));
     const allMasters = this.getCurriculumMasters();
+
+    // 中尾くん（ID: student24295 / std-3 / student103）の置き去りステップを一括補正
+    const isNakao = student.id === 'std-3' || 
+                    student.student_id === 'student24295' || 
+                    student.student_id === 'student103' || 
+                    student.name?.includes('中尾');
+    let modified = false;
+
+    if (isNakao) {
+      NAKAO_STEPPING_STONE_COMPLETED_LESSON_IDS.forEach(id => {
+        if (!completedSet.has(id)) {
+          completedSet.add(id);
+          modified = true;
+        }
+      });
+      const targetOrders = new Set([100, 101, 102, 103, 104, 108, 109, 20, 21, 22, 23, 24, 40, 41, 45, 46]);
+      allMasters.forEach(m => {
+        if (m.sort_order !== undefined && targetOrders.has(m.sort_order)) {
+          const mId = String(m.id);
+          if (!completedSet.has(mId)) {
+            completedSet.add(mId);
+            modified = true;
+          }
+        }
+      });
+    }
     
     const targetSubjects = subject 
       ? [subject] 
       : (student.selected_subjects && student.selected_subjects.length > 0 ? student.selected_subjects : ['算数', '国語', '英語', '数学']);
-
-    let modified = false;
 
     for (const sub of targetSubjects) {
       const subMasters = allMasters.filter(m => {

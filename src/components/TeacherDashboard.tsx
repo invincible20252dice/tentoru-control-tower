@@ -9123,19 +9123,9 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  const activeTaskDateSet = new Set<string>();
-                  if (studentActiveDate) activeTaskDateSet.add(studentActiveDate);
-                  if (scheduleDate) activeTaskDateSet.add(scheduleDate);
-                  if (sysTodayStr) activeTaskDateSet.add(sysTodayStr);
-
-                  let activeTasks = uncompletedTasks.filter(t => activeTaskDateSet.has(t.scheduled_date) && t.period !== null);
-                  if (activeTasks.length === 0 && uncompletedTasks.length > 0) {
-                    const scheduledUncompleted = uncompletedTasks.filter(t => t.period !== null);
-                    if (scheduledUncompleted.length > 0) {
-                      const firstDate = scheduledUncompleted[0].scheduled_date;
-                      activeTasks = scheduledUncompleted.filter(t => t.scheduled_date === firstDate);
-                    }
-                  }
+                  // タイムラインの現在地（📍マーク/青枠）はヘッダーで選択されている当日（対象日付: scheduleDate || sysTodayStr）のみに厳密限定（他日程の混入による分裂を完全防止）
+                  const targetActiveDate = scheduleDate || sysTodayStr;
+                  let activeTasks = uncompletedTasks.filter(t => t.scheduled_date === targetActiveDate && t.period !== null);
 
                   // タイムライン内ユニットとの表記揺れ吸収マッチング関数
                   const matchesTimelineUnit = (u: any, query: string, queryId?: string): boolean => {
@@ -9262,10 +9252,10 @@ export default function TeacherDashboard({
                     }
                   });
 
-                  // 1-b. 単元テスト特化日（通常コマ0件でテスト枠のみの日）またはテスト枠に該当教科の単元テストがある場合の連動
+                  // 1-b. 単元テスト特化日（通常コマ0件でテスト枠のみの日）またはテスト枠に該当教科の単元テストがある場合の連動（当日のみ厳密限定）
                   const todayMiniTests = miniTestResultsList.filter(m => 
                     m.student_id === selectedStudent.id && 
-                    (activeTaskDateSet.has(m.date) || m.date === scheduleDate) &&
+                    m.date === targetActiveDate &&
                     (m.subject === targetSubject || (targetSubject === '算数' && m.subject === '数学') || (targetSubject === '数学' && m.subject === '算数'))
                   );
 
