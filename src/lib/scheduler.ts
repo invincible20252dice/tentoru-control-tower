@@ -1787,9 +1787,9 @@ export function getLessonRangeStepIds(params: {
     '授業'
   ).replace(/\s+[1-9]\d*$/, '').trim();
 
-  const isToSummaryTest2 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?2[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)[（(]?2[)）]?/i.test(rangeText);
-  const isToSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(rangeText);
-  const isFromSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(fromStr);
+  const isToSummaryTest2 = /(?:まとめテスト|確認テスト|check\s*test)\s*[（(]?\s*[2２]\s*[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)\s*[（(]?\s*[2２]\s*[)）]?/i.test(rangeText);
+  const isToSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)\s*[（(]?\s*[1１]\s*[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)\s*[（(]?\s*[1１]\s*[)）]?/i.test(rangeText);
+  const isFromSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)\s*[（(]?\s*[1１]\s*[)）]?/i.test(fromStr);
   const isFromNormalLesson = !isFromSummaryTest1 && !/(?:まとめテスト|確認テスト|check\s*test)/i.test(fromStr);
 
   if (isToSummaryTest2) {
