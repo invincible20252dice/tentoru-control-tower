@@ -371,9 +371,9 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
 
       // 1. 算数（全単元）: 「まとめテスト（１）」「まとめテスト（２）」「まとめテスト（３）」
       if (firstItem.subject === '算数' || firstItem.subject === '数学') {
-        const hasSummary1 = lessons.some(l => l.lesson_name?.includes('まとめテスト（１）') || l.lesson_name?.includes('まとめテスト(1)'));
-        const hasSummary2 = lessons.some(l => l.lesson_name?.includes('まとめテスト（２）') || l.lesson_name?.includes('まとめテスト(2)'));
-        const hasSummary3 = lessons.some(l => l.lesson_name?.includes('まとめテスト（３）') || l.lesson_name?.includes('まとめテスト(3)'));
+        const hasSummary1 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[1１]\s*[)）]?/.test(l.lesson_name)));
+        const hasSummary2 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[2２]\s*[)）]?/.test(l.lesson_name)));
+        const hasSummary3 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[3３]\s*[)）]?/.test(l.lesson_name)));
 
         if (!hasSummary1) {
           lessons.push({
@@ -432,9 +432,9 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
 
       // 3. 国語（全単元）: 各単元の最後に「まとめテスト（１）」「まとめテスト（２）」「まとめテスト（３）」
       if (firstItem.subject === '国語') {
-        const hasSummary1 = lessons.some(l => l.lesson_name?.includes('まとめテスト（１）') || l.lesson_name?.includes('まとめテスト(1)'));
-        const hasSummary2 = lessons.some(l => l.lesson_name?.includes('まとめテスト（２）') || l.lesson_name?.includes('まとめテスト(2)'));
-        const hasSummary3 = lessons.some(l => l.lesson_name?.includes('まとめテスト（３）') || l.lesson_name?.includes('まとめテスト(3)'));
+        const hasSummary1 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[1１]\s*[)）]?/.test(l.lesson_name)));
+        const hasSummary2 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[2２]\s*[)）]?/.test(l.lesson_name)));
+        const hasSummary3 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[3３]\s*[)）]?/.test(l.lesson_name)));
 
         if (!hasSummary1) {
           lessons.push({
@@ -1471,8 +1471,16 @@ export function getLessonRangeStepIds(params: {
     subjectOnlyMasters.length > 0 ? subjectOnlyMasters : null
   ].filter(Boolean) as CurriculumMaster[][];
 
-  // 1. もし lessonIds 配列が渡されていれば、そのID順に該当ステップを取り出して即時返却
-  if (Array.isArray(lessonIds) && lessonIds.length > 0) {
+  const hasRangeDefinition = Boolean(
+    (startLessonId && endLessonId && startLessonId !== endLessonId) ||
+    (startLessonName && endLessonName && startLessonName !== endLessonName) ||
+    (lessonRange && (lessonRange.includes('〜') || lessonRange.includes('~') || lessonRange.includes('～'))) ||
+    (customUnitName && (customUnitName.includes('〜') || customUnitName.includes('~') || customUnitName.includes('～')))
+  );
+
+  // 1. もし lessonIds 配列が渡されていれば、そのID順に該当ステップを取り出して返却
+  // （ただし範囲定義があるのに1件だけしかない場合は誤丸め込み防止のためFrom〜Toスライスを優先）
+  if (Array.isArray(lessonIds) && (lessonIds.length > 1 || (lessonIds.length === 1 && !hasRangeDefinition))) {
     const allEnsured = ensureMathEnglishUnitTests(subjectOnlyMasters.length > 0 ? subjectOnlyMasters : curriculumMasters);
     const map = new Map<string, any>(allEnsured.map(m => [String(m.id), m]));
     if (params.curriculumUnits) {
@@ -1484,22 +1492,35 @@ export function getLessonRangeStepIds(params: {
     }
 
     const matched = lessonIds
-      .map(id => map.get(String(id)))
-      .filter((m): m is NonNullable<typeof m> => Boolean(m))
-      .map(m => {
-        const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
-        const isUT = !isReviewOrCheck && (
-          m.item_type === 'unit_test' ||
-          Boolean((m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト') || (m.lesson_name || '').includes('確認テスト'))
-        );
-        const cleanLesson = (m.lesson_name || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+      .map((id, idx) => {
+        const m = map.get(String(id));
+        if (m) {
+          const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
+          const isUT = !isReviewOrCheck && (
+            m.item_type === 'unit_test' ||
+            Boolean((m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト') || (m.lesson_name || '').includes('確認テスト'))
+          );
+          const cleanLesson = (m.lesson_name || m.name || '').replace(/^[^-]+-\s*/, '').trim();
+          return {
+            id: String(m.id),
+            name: cleanLesson || m.unit_name || '',
+            fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson,
+            unit_name: m.unit_name,
+            sort_order: m.sort_order ?? (idx + 1),
+            isUnitTest: isUT
+          };
+        }
+        // マスターデータ未登録のIDであってもステップ情報として維持する
+        const fallbackName = (idx === 0 && startLessonName) ? startLessonName :
+                             (idx === lessonIds.length - 1 && endLessonName) ? endLessonName :
+                             `ステップ ${idx + 1}`;
         return {
-          id: String(m.id),
-          name: cleanLesson || m.unit_name || '',
-          fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson,
-          unit_name: m.unit_name,
-          sort_order: m.sort_order ?? 0,
-          isUnitTest: isUT
+          id: String(id),
+          name: fallbackName,
+          fullTitle: customUnitName ? `${customUnitName} - ${fallbackName}` : fallbackName,
+          unit_name: customUnitName,
+          sort_order: idx + 1,
+          isUnitTest: false
         };
       });
     if (matched.length > 0) return matched;
@@ -1509,8 +1530,19 @@ export function getLessonRangeStepIds(params: {
   let fromStr = startLessonName || '';
   let toStr = endLessonName || '';
   const rangeText = lessonRange || customUnitName || '';
+  let numRangeMatch: RegExpMatchArray | null = null;
+  if (rangeText) {
+    numRangeMatch = rangeText.match(/^(.+?)\s*([1-9]\d*)\s*[〜~～]\s*([1-9]\d*)$/);
+  }
+
   if ((!fromStr || !toStr) && rangeText) {
-    if (/\s+[〜~～]\s+/.test(rangeText)) {
+    if (numRangeMatch) {
+      const prefix = numRangeMatch[1].trim();
+      const startNum = numRangeMatch[2];
+      const endNum = numRangeMatch[3];
+      if (!fromStr) fromStr = `${prefix} ${startNum}`;
+      if (!toStr) toStr = `${prefix} ${endNum}`;
+    } else if (/\s+[〜~～]\s+/.test(rangeText)) {
       const parts = rangeText.split(/\s+[〜~～]\s+/);
       if (parts.length >= 2) {
         if (!fromStr) fromStr = parts[0].trim();
@@ -1560,9 +1592,32 @@ export function getLessonRangeStepIds(params: {
         };
       });
 
-    // startIdx の特定
+    // startIdx / endIdx の特定
     let startIdx = -1;
-    if (startLessonId) {
+    let endIdx = -1;
+
+    // 0. 数値インデックス範囲（例: 「げんこう用紙のつかい方 1〜3」）に基づく同一単元スライス特定
+    if (numRangeMatch) {
+      const prefix = numRangeMatch[1].trim();
+      const startNum = parseInt(numRangeMatch[2], 10);
+      const endNum = parseInt(numRangeMatch[3], 10);
+      const prefixClean = clean(prefix);
+
+      const unitLessonsWithIdx = masterLessons
+        .map((m, idx) => ({ m, idx }))
+        .filter(({ m }) => {
+          const uClean = clean(m.unit_name || '');
+          const fClean = clean(m.fullTitle);
+          return uClean === prefixClean || uClean.includes(prefixClean) || prefixClean.includes(uClean) || fClean.includes(prefixClean);
+        });
+
+      if (unitLessonsWithIdx.length >= endNum && startNum >= 1 && startNum <= endNum) {
+        startIdx = unitLessonsWithIdx[startNum - 1].idx;
+        endIdx = unitLessonsWithIdx[endNum - 1].idx;
+      }
+    }
+
+    if (startIdx < 0 && startLessonId) {
       startIdx = masterLessons.findIndex(m => m.id === String(startLessonId) || String(m.sort_order) === String(startLessonId));
     }
     if (startIdx < 0 && fromClean) {
@@ -1576,23 +1631,22 @@ export function getLessonRangeStepIds(params: {
       if (startIdx < 0) {
         startIdx = masterLessons.findIndex(m => isMatchingUnitOrTest(m.name, fromLessonOnly) || isMatchingUnitOrTest(m.fullTitle, fromStr));
       }
-      // 3. 部分一致
+      // 3. 部分一致（マスター名が指定名を含む順方向のみ！逆包含による誤マッチを完全遮断）
       if (startIdx < 0) {
         startIdx = masterLessons.findIndex(m => {
           const mClean = clean(m.name);
           const fClean = clean(m.fullTitle);
-          return mClean.includes(fromClean) || fClean.includes(fromClean) || fromClean.includes(mClean) ||
-            (fromLessonClean && (mClean.includes(fromLessonClean) || fromLessonClean.includes(mClean)));
+          return mClean.includes(fromClean) || fClean.includes(fromClean) ||
+            (fromLessonClean && mClean.includes(fromLessonClean));
         });
       }
     }
 
     // endIdx の特定（同一単元優先検索！）
-    let endIdx = -1;
     const startItem = startIdx >= 0 ? masterLessons[startIdx] : null;
     const startUnit = startItem?.unit_name;
 
-    if (endLessonId) {
+    if (endIdx < 0 && endLessonId) {
       if (startUnit) {
         const inUnitIdx = masterLessons.findIndex((m, i) => i >= startIdx && m.unit_name === startUnit && (m.id === String(endLessonId) || String(m.sort_order) === String(endLessonId)));
         if (inUnitIdx >= 0) endIdx = inUnitIdx;
@@ -1630,7 +1684,7 @@ export function getLessonRangeStepIds(params: {
             const mClean = clean(m.name);
             const fClean = clean(m.fullTitle);
             return mClean.includes(toClean) || fClean.includes(toClean) ||
-              (toLessonClean && (mClean.includes(toLessonClean) || toLessonClean.includes(mClean)));
+              (toLessonClean && mClean.includes(toLessonClean));
           });
           if (inUnitPartial >= 0) endIdx = inUnitPartial;
         }
@@ -1690,6 +1744,88 @@ export function getLessonRangeStepIds(params: {
     if (endIdx >= 0 && !fromClean) {
       return [masterLessons[endIdx]];
     }
+  }
+
+  // 3. もしマスター一覧からスライス特定ができなかった場合でも、From〜To の構造（通常授業〜まとめテスト等）から正確に全ステップを展開
+  const unitNameCandidate = (
+    fromStr.includes('-') ? fromStr.split('-')[0].trim() :
+    toStr.includes('-') ? toStr.split('-')[0].trim() :
+    customUnitName?.split('-')[0]?.trim() ||
+    fromStr ||
+    rangeText.split(/[〜~～]/)[0]?.trim() ||
+    '授業'
+  ).replace(/\s+[1-9]\d*$/, '').trim();
+
+  const isToSummaryTest2 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?2[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)[（(]?2[)）]?/i.test(rangeText);
+  const isToSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(toStr) || /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(rangeText);
+  const isFromSummaryTest1 = /(?:まとめテスト|確認テスト|check\s*test)[（(]?1[)）]?/i.test(fromStr);
+  const isFromNormalLesson = !isFromSummaryTest1 && !/(?:まとめテスト|確認テスト|check\s*test)/i.test(fromStr);
+
+  if (isToSummaryTest2) {
+    if (isFromSummaryTest1) {
+      return [
+        {
+          id: startLessonId || `step-${unitNameCandidate}-sum1`,
+          name: `${unitNameCandidate} - まとめテスト (1)`,
+          fullTitle: `${unitNameCandidate} - まとめテスト (1)`,
+          unit_name: unitNameCandidate,
+          isUnitTest: false
+        },
+        {
+          id: endLessonId || `step-${unitNameCandidate}-sum2`,
+          name: `${unitNameCandidate} - まとめテスト (2)`,
+          fullTitle: `${unitNameCandidate} - まとめテスト (2)`,
+          unit_name: unitNameCandidate,
+          isUnitTest: false
+        }
+      ];
+    } else {
+      // 通常授業 〜 まとめテスト (2) => 全3ステップ完全展開！
+      const lessonTitleOnly = fromStr.includes('-') ? fromStr.split('-').slice(1).join('-').trim() : fromStr;
+      const baseLessonName = lessonTitleOnly || unitNameCandidate;
+      return [
+        {
+          id: startLessonId || `step-${unitNameCandidate}-lesson`,
+          name: `${unitNameCandidate} - ${baseLessonName}`,
+          fullTitle: `${unitNameCandidate} - ${baseLessonName}`,
+          unit_name: unitNameCandidate,
+          isUnitTest: false
+        },
+        {
+          id: `step-${unitNameCandidate}-sum1`,
+          name: `${unitNameCandidate} - まとめテスト (1)`,
+          fullTitle: `${unitNameCandidate} - まとめテスト (1)`,
+          unit_name: unitNameCandidate,
+          isUnitTest: false
+        },
+        {
+          id: endLessonId || `step-${unitNameCandidate}-sum2`,
+          name: `${unitNameCandidate} - まとめテスト (2)`,
+          fullTitle: `${unitNameCandidate} - まとめテスト (2)`,
+          unit_name: unitNameCandidate,
+          isUnitTest: false
+        }
+      ];
+    }
+  } else if (isToSummaryTest1 && isFromNormalLesson) {
+    const lessonTitleOnly = fromStr.includes('-') ? fromStr.split('-').slice(1).join('-').trim() : fromStr;
+    const baseLessonName = lessonTitleOnly || unitNameCandidate;
+    return [
+      {
+        id: startLessonId || `step-${unitNameCandidate}-lesson`,
+        name: `${unitNameCandidate} - ${baseLessonName}`,
+        fullTitle: `${unitNameCandidate} - ${baseLessonName}`,
+        unit_name: unitNameCandidate,
+        isUnitTest: false
+      },
+      {
+        id: endLessonId || `step-${unitNameCandidate}-sum1`,
+        name: `${unitNameCandidate} - まとめテスト (1)`,
+        fullTitle: `${unitNameCandidate} - まとめテスト (1)`,
+        unit_name: unitNameCandidate,
+        isUnitTest: false
+      }
+    ];
   }
 
   const fallbackTitle = fromStr || toStr || rangeText || '授業';

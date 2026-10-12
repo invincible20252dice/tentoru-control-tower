@@ -2071,7 +2071,19 @@ class DatabaseService {
       unpassedTestIds?: Set<string> | string[];
     }
   ): Promise<Student | null> {
-    const student = this.getStudents().find(s => s.id === studentId || s.student_id === studentId);
+    let student = this.getStudents().find(s => s.id === studentId || s.student_id === studentId);
+    if (!student && !this.isMockMode && this.supabase) {
+      try {
+        const { data } = await this.supabase
+          .from('students')
+          .select('*')
+          .or(`id.eq.${studentId},student_id.eq.${studentId}`)
+          .maybeSingle();
+        if (data) student = data;
+      } catch (err) {
+        console.warn('Supabase fetch student error in cleanup:', err);
+      }
+    }
     if (!student || !Array.isArray(student.completed_lesson_ids)) return null;
 
     // 生徒の合格実績のない単元確認テストIDを自動検出して自己修復除外セットに追加
@@ -3068,21 +3080,40 @@ class DatabaseService {
   }
 
   public async fetchLearningTasks(studentId?: string, date?: string): Promise<LearningTask[]> {
+    const normDate = date ? (date.includes('T') ? date.split('T')[0] : date.trim()) : undefined;
+
     if (!this.isMockMode && this.supabase) {
       try {
+        let effectiveStudentId = studentId;
+        if (studentId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) {
+          // student24295 や std-3 等の非UUID表記から Supabase の UUID を解決
+          const { data: stRow } = await this.supabase
+            .from('students')
+            .select('id')
+            .or(`student_id.eq.${studentId},id.eq.${studentId}`)
+            .limit(1)
+            .maybeSingle();
+          if (stRow?.id) {
+            effectiveStudentId = stRow.id;
+          }
+        }
+
         let query = this.supabase.from('learning_tasks').select('*');
-        if (studentId) query = query.eq('student_id', studentId);
-        if (date) query = query.eq('scheduled_date', date);
+        if (effectiveStudentId) query = query.eq('student_id', effectiveStudentId);
+        if (normDate) query = query.eq('scheduled_date', normDate);
         const { data, error } = await query;
         if (error) throw error;
         const tasks = (data || []) as LearningTask[];
 
         // Synchronize local memory cache with latest remote tasks
         let currentList = this.getLearningTasks();
-        if (studentId && date) {
-          currentList = currentList.filter(t => !(t.student_id === studentId && t.scheduled_date === date));
+        if (studentId && normDate) {
+          currentList = currentList.filter(t => !(
+            (t.student_id === studentId || (effectiveStudentId && t.student_id === effectiveStudentId)) &&
+            (t.scheduled_date === normDate || t.scheduled_date?.startsWith(normDate))
+          ));
         } else if (studentId) {
-          currentList = currentList.filter(t => t.student_id !== studentId);
+          currentList = currentList.filter(t => t.student_id !== studentId && (!effectiveStudentId || t.student_id !== effectiveStudentId));
         }
         currentList.push(...tasks.map(t => sanitizeLearningTask(t)));
         this.saveMockData('learning_tasks', currentList);
@@ -3095,7 +3126,7 @@ class DatabaseService {
     const all = this.getLearningTasks();
     return all.filter(t => {
       if (studentId && t.student_id !== studentId) return false;
-      if (date && t.scheduled_date !== date) return false;
+      if (normDate && t.scheduled_date !== normDate && !t.scheduled_date?.startsWith(normDate)) return false;
       return true;
     });
   }
@@ -4025,6 +4056,10 @@ class DatabaseService {
       { id: 'cm-p6-m4', grade: '小6', subject: '算数', unit_name: '2章 比とその利用', lesson_name: '比例・反比例のグラフと応用', sort_order: 38, created_at: new Date().toISOString() },
       { id: 'cm-p6-m5', grade: '小6', subject: '算数', unit_name: '3章 円の面積・立体の体積', lesson_name: '円の面積公式（半径×半径×3.14）', sort_order: 39, created_at: new Date().toISOString() },
       { id: 'cm-p6-m6', grade: '小6', subject: '算数', unit_name: '3章 円の面積・立体の体積', lesson_name: '柱体の体積公式（底面積×高さ）', sort_order: 40, created_at: new Date().toISOString() },
+      // 小1 国語
+      { id: 'cm-jp-punct-1', grade: '小1', subject: '国語', unit_name: '。と、のつかい方', lesson_name: '。と、のつかい方', sort_order: 10, created_at: new Date().toISOString() },
+      { id: 'cm-jp-punct-2', grade: '小1', subject: '国語', unit_name: '。と、のつかい方', lesson_name: 'まとめテスト (1)', sort_order: 11, created_at: new Date().toISOString() },
+      { id: 'cm-jp-punct-3', grade: '小1', subject: '国語', unit_name: '。と、のつかい方', lesson_name: 'まとめテスト (2)', sort_order: 12, created_at: new Date().toISOString() },
       // 小5・小6 国語
       { id: 'cm-p-jp1', grade: '小5', subject: '国語', unit_name: '1章 言語事項', lesson_name: '同音異義語・同訓異字の使い分け', sort_order: 1, created_at: new Date().toISOString() },
       { id: 'cm-p-jp2', grade: '小5', subject: '国語', unit_name: '1章 言語事項', lesson_name: '敬語の種類（尊敬語・謙譲語・丁寧語）', sort_order: 2, created_at: new Date().toISOString() },
@@ -4468,28 +4503,24 @@ class DatabaseService {
         lastError = err;
       }
 
-      if (lastError) {
-        console.error('詳細登録エラー:', lastError);
-        throw lastError;
-      }
-
       // Step 2: student_support_logs への保存試行
       try {
         const query = this.supabase.from('student_support_logs');
         if (query && typeof query.upsert === 'function') {
           const res = await query.upsert(payload).select().single();
           if (!res.error && res.data) return res.data;
-
-          const resNoId = await query.insert(payloadNoId).select().single();
-          if (!resNoId.error && resNoId.data) return resNoId.data;
-
-          const resNoStaff = await query.insert(payloadNoStaffName).select().single();
-          if (!resNoStaff.error && resNoStaff.data) return resNoStaff.data;
-
           if (res.error) lastError = res.error;
+
+          if (typeof query.insert === 'function') {
+            const resNoId = await query.insert(payloadNoId).select().single();
+            if (!resNoId.error && resNoId.data) return resNoId.data;
+
+            const resNoStaff = await query.insert(payloadNoStaffName).select().single();
+            if (!resNoStaff.error && resNoStaff.data) return resNoStaff.data;
+          }
         }
       } catch (err) {
-        lastError = err;
+        if (!lastError) lastError = err;
       }
 
       // Step 3: student_interactions への保存試行
@@ -4498,28 +4529,32 @@ class DatabaseService {
         if (query && typeof query.upsert === 'function') {
           const res = await query.upsert(payload).select().single();
           if (!res.error && res.data) return res.data;
-
-          const resNoId = await query.insert(payloadNoId).select().single();
-          if (!resNoId.error && resNoId.data) return resNoId.data;
-
           if (res.error) lastError = res.error;
+
+          if (typeof query.insert === 'function') {
+            const resNoId = await query.insert(payloadNoId).select().single();
+            if (!resNoId.error && resNoId.data) return resNoId.data;
+          }
         }
       } catch (err) {
-        lastError = err;
+        if (!lastError) lastError = err;
       }
 
       // Step 4: students テーブルの contact_logs JSONB 配列への追記更新
       try {
-        const stRes = await this.supabase.from('students').select('*').eq('id', studentId).single();
-        if (stRes && stRes.data) {
-          const currentLogs = Array.isArray(stRes.data.contact_logs) ? stRes.data.contact_logs : [];
-          const updatedLogs = [payload, ...currentLogs];
-          const upRes = await this.supabase.from('students').update({ contact_logs: updatedLogs }).eq('id', studentId);
-          if (upRes && !upRes.error) return interaction;
-          if (upRes && upRes.error) lastError = upRes.error;
+        const query = this.supabase.from('students');
+        if (query && typeof query.select === 'function') {
+          const stRes = await query.select('*').eq('id', studentId).single();
+          if (stRes && stRes.data) {
+            const currentLogs = Array.isArray(stRes.data.contact_logs) ? stRes.data.contact_logs : [];
+            const updatedLogs = [payload, ...currentLogs];
+            const upRes = await this.supabase.from('students').update({ contact_logs: updatedLogs }).eq('id', studentId);
+            if (upRes && !upRes.error) return interaction;
+            if (upRes && upRes.error) lastError = upRes.error;
+          }
         }
       } catch (err) {
-        lastError = err;
+        if (!lastError) lastError = err;
       }
 
       if (lastError) {
