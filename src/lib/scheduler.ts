@@ -530,6 +530,7 @@ export function findNextUncompletedLessonForSubject(params: {
   schoolId?: string;
   lessonProgressList?: StudentLessonProgress[];
   miniTestResults?: MiniTestResult[];
+  masterLessons?: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }>;
 }): {
   lessonId: string | null;
   lessonName: string | null;
@@ -545,11 +546,10 @@ export function findNextUncompletedLessonForSubject(params: {
     curriculumUnits: rawUnits = [],
     schoolId = student?.school_id,
     lessonProgressList = [],
-    miniTestResults: rawMiniTestResults
+    miniTestResults: rawMiniTestResults,
+    masterLessons: directMasterLessons
   } = params;
 
-  const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
-  const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
   const miniTestResults = (rawMiniTestResults && rawMiniTestResults.length > 0)
     ? rawMiniTestResults
     : (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults());
@@ -562,45 +562,60 @@ export function findNextUncompletedLessonForSubject(params: {
   const isJunior = Boolean(student?.grade?.startsWith('中'));
   const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
-  const filteredMasters = curriculumMasters.filter(m => {
-    if (isElem) {
-      const isMasterElem = (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
-      if (!isMasterElem) return false;
+  let ensuredMasters: CurriculumMaster[] = [];
+  let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
+
+  if (directMasterLessons && directMasterLessons.length > 0) {
+    masterLessons = directMasterLessons.map(m => ({
+      id: String(m.id),
+      name: m.name,
+      sort_order: m.sort_order ?? 0,
+      unit_name: m.unit_name,
+      item_type: m.item_type
+    })).sort((a, b) => a.sort_order - b.sort_order);
+  } else {
+    const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
+    const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
+
+    if (curriculumMasters.length > 0) {
+      const filteredMasters = curriculumMasters.filter(m => {
+      if (isElem) {
+        const isMasterElem = (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
+        if (!isMasterElem) return false;
+        if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+          return m.subject === '算数' || m.subject === '数学';
+        }
+        return m.subject === subject;
+      } else if (isJunior) {
+        const isMasterJunior = (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
+        if (!isMasterJunior) return false;
+        if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
+          return m.subject === '数学' || m.subject === '算数';
+        }
+        return m.subject === subject;
+      } else if (isHigh) {
+        const isMasterHigh = (m.grade || '').startsWith('高') || m.grade === '既卒';
+        if (!isMasterHigh) return false;
+        return m.subject === subject;
+      }
       if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
         return m.subject === '算数' || m.subject === '数学';
       }
       return m.subject === subject;
-    } else if (isJunior) {
-      const isMasterJunior = (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
-      if (!isMasterJunior) return false;
-      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
-        return m.subject === '数学' || m.subject === '算数';
-      }
-      return m.subject === subject;
-    } else if (isHigh) {
-      const isMasterHigh = (m.grade || '').startsWith('高') || m.grade === '既卒';
-      if (!isMasterHigh) return false;
-      return m.subject === subject;
-    }
-    if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
-      return m.subject === '算数' || m.subject === '数学';
-    }
-    return m.subject === subject;
-  });
+    });
 
-  let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
-
-  const ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
-  if (ensuredMasters.length > 0) {
-    masterLessons = ensuredMasters
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map(m => ({
-        id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
-        sort_order: m.sort_order ?? 0,
-        unit_name: m.unit_name,
-        item_type: m.item_type
-      }));
+    ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
+    if (ensuredMasters.length > 0) {
+      masterLessons = ensuredMasters
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(m => ({
+          id: m.id,
+          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+          sort_order: m.sort_order ?? 0,
+          unit_name: m.unit_name,
+          item_type: m.item_type
+        }));
+    }
   } else {
     const matchingSchoolUnits = curriculumUnits.filter(u => 
       (schoolId ? u.school_id === schoolId : false) &&
@@ -627,6 +642,7 @@ export function findNextUncompletedLessonForSubject(params: {
         }));
       masterLessons = fallbackUnits;
     }
+  }
   }
 
   if (masterLessons.length === 0) {
@@ -1333,6 +1349,56 @@ export function calculateLessonRangeForSlot(params: {
     inferred_pace: effectivePace,
     pace_reason: paceReason
   };
+}
+
+/**
+ * 生徒画面やタイムライン等でコマ割りスロットから表示対象全レッスンステップを展開する関数
+ * From〜To に含まれる通常授業・まとめテスト等の全件配列を丸め込まずに返却する
+ */
+export function getDisplaySteps(
+  slot: {
+    subject?: string;
+    start_lesson_id?: string | null;
+    end_lesson_id?: string | null;
+    start_lesson_name?: string | null;
+    end_lesson_name?: string | null;
+    startLessonId?: string | null;
+    endLessonId?: string | null;
+    startLessonName?: string | null;
+    endLessonName?: string | null;
+    lesson_range?: string | null;
+    lessonRange?: string | null;
+    custom_unit_name?: string | null;
+    customUnitName?: string | null;
+    customTheme?: string | null;
+    lesson_ids?: string[] | null;
+    lessonIds?: string[] | null;
+    unit_id?: string | null;
+    unitId?: string | null;
+    grade?: string | null;
+    studentGrade?: string | null;
+  },
+  options?: {
+    curriculumMasters?: CurriculumMaster[];
+    curriculumUnits?: CurriculumUnit[];
+    studentGrade?: string | null;
+    schoolId?: string;
+  }
+): Array<{ id: string; name: string; fullTitle: string; unit_name?: string; isUnitTest?: boolean }> {
+  return getLessonRangeStepIds({
+    subject: slot.subject || '国語',
+    startLessonId: slot.start_lesson_id || slot.startLessonId || slot.unit_id || slot.unitId,
+    endLessonId: slot.end_lesson_id || slot.endLessonId || slot.unit_id || slot.unitId,
+    startLessonName: slot.start_lesson_name || slot.startLessonName,
+    endLessonName: slot.end_lesson_name || slot.endLessonName,
+    lessonRange: slot.lesson_range || slot.lessonRange,
+    customUnitName: slot.custom_unit_name || slot.customUnitName || slot.customTheme,
+    lessonIds: slot.lesson_ids || slot.lessonIds,
+    curriculumMasters: options?.curriculumMasters,
+    curriculumUnits: options?.curriculumUnits,
+    studentGrade: slot.studentGrade || slot.grade || options?.studentGrade,
+    schoolId: options?.schoolId
+  });
 }
 
 /**

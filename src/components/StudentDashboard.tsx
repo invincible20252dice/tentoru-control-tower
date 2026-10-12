@@ -406,7 +406,23 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       };
 
       const fromIndex = subjectLessons.findIndex((item: any) => matchLesson(item, fromLessonId, fromLessonTitle, cleanFrom));
-      const toIndex = subjectLessons.findIndex((item: any) => matchLesson(item, toLessonId, toLessonTitle, cleanTo));
+      let toIndex = -1;
+      if (fromIndex !== -1) {
+        const fromItem = subjectLessons[fromIndex];
+        // 1. 同一単元内・fromIndex以降を最優先で検索
+        toIndex = subjectLessons.findIndex((item: any, i: number) => {
+          if (i < fromIndex) return false;
+          if (fromItem.unit_name && item.unit_name !== fromItem.unit_name) return false;
+          return matchLesson(item, toLessonId, toLessonTitle, cleanTo);
+        });
+        // 2. fromIndex以降で検索
+        if (toIndex === -1) {
+          toIndex = subjectLessons.findIndex((item: any, i: number) => i >= fromIndex && matchLesson(item, toLessonId, toLessonTitle, cleanTo));
+        }
+      }
+      if (toIndex === -1 && toLessonTitle) {
+        toIndex = subjectLessons.findIndex((item: any) => matchLesson(item, toLessonId, toLessonTitle, cleanTo));
+      }
 
       if (fromIndex !== -1 && toIndex !== -1 && fromIndex <= toIndex) {
         const fromItem = subjectLessons[fromIndex];
@@ -449,7 +465,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
             fullTitle: m.unit_name ? `${m.unit_name} - ${cleanLesson}` : cleanLesson
           };
         });
-      } else if (fromIndex !== -1) {
+      } else if (fromIndex !== -1 && !toLessonTitle && !toLessonId && !rangeText.includes('〜') && !rangeText.includes('~') && !rangeText.includes('～')) {
         const m: any = subjectLessons[fromIndex];
         const cleanLesson = (m.lesson_name || m.title || m.name || '').replace(/^[^-]+-\s*/, '').trim();
         return [{

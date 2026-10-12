@@ -761,6 +761,7 @@ export function sanitizeCorruptedCompletedLessonIds(
     timelineUnits?: Array<{ id: string | number; name?: string; lesson_name?: string; unit_name?: string }>;
     activeLessonIds?: Set<string> | string[];
     subject?: string;
+    unpassedTestIds?: Set<string> | string[];
   }
 ): { cleanedIds: string[]; removedCount: number } {
   if (!Array.isArray(completedLessonIds) || completedLessonIds.length === 0) {
@@ -840,6 +841,16 @@ export function sanitizeCorruptedCompletedLessonIds(
     if (firstActiveIdx >= 0) {
       const idx = timelineIdToIdx.get(sId);
       if (idx !== undefined && idx > lastActiveIdx) {
+        return false;
+      }
+    }
+
+    // 5. 合格実績のない単元テストID（STEP 5等）の明示的除外
+    if (options?.unpassedTestIds) {
+      const unpassedSet = options.unpassedTestIds instanceof Set 
+        ? options.unpassedTestIds 
+        : new Set(options.unpassedTestIds.map(String));
+      if (unpassedSet.has(sId)) {
         return false;
       }
     }
@@ -2057,12 +2068,52 @@ class DatabaseService {
       timelineUnits?: Array<{ id: string | number; name?: string; lesson_name?: string; unit_name?: string }>;
       activeLessonIds?: Set<string> | string[];
       subject?: string;
+      unpassedTestIds?: Set<string> | string[];
     }
   ): Promise<Student | null> {
-    const student = this.getStudents().find(s => s.id === studentId);
+    const student = this.getStudents().find(s => s.id === studentId || s.student_id === studentId);
     if (!student || !Array.isArray(student.completed_lesson_ids)) return null;
 
-    const { cleanedIds, removedCount } = sanitizeCorruptedCompletedLessonIds(student.completed_lesson_ids, options);
+    // 生徒の合格実績のない単元確認テストIDを自動検出して自己修復除外セットに追加
+    const unpassedTests = new Set<string>(
+      options?.unpassedTestIds 
+        ? (options.unpassedTestIds instanceof Set ? Array.from(options.unpassedTestIds) : options.unpassedTestIds) 
+        : []
+    );
+    try {
+      const allResults = this.getMiniTestResults().filter(r => r.student_id === student.id || r.student_id === student.student_id);
+      const passedTestContents = new Set<string>();
+      allResults.forEach(r => {
+        const passScore = r.passing_line ? parseInt(r.passing_line.match(/\d+/)?.[0] || '80', 10) : 80;
+        const isPassed = r.passed === true || r.status === 'passed' || (r.score !== null && r.score !== undefined && r.score >= passScore);
+        if (isPassed) {
+          if (r.test_content) passedTestContents.add(r.test_content);
+          if (r.unit_name) passedTestContents.add(r.unit_name);
+        }
+      });
+
+      const masters = this.getCurriculumMasters();
+      masters.forEach(m => {
+        const isUT = m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')));
+        if (isUT) {
+          const hasPassed = passedTestContents.has(m.lesson_name) || (m.unit_name && passedTestContents.has(m.unit_name));
+          if (!hasPassed) {
+            unpassedTests.add(String(m.id));
+            if (m.sort_order !== undefined) {
+              unpassedTests.add(String(m.sort_order));
+              unpassedTests.add(`STEP ${m.sort_order}`);
+            }
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('Error detecting unpassed unit tests in cleanup:', e);
+    }
+
+    const { cleanedIds, removedCount } = sanitizeCorruptedCompletedLessonIds(student.completed_lesson_ids, {
+      ...options,
+      unpassedTestIds: unpassedTests
+    });
     if (removedCount > 0) {
       const updated = {
         ...student,
