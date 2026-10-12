@@ -5,6 +5,16 @@ export const schedulerConfig = {
 };
 
 /**
+ * カリキュラム中抜き・スキップ受講禁止違反エラー
+ */
+export class CurriculumSkipViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CurriculumSkipViolationError';
+  }
+}
+
+/**
  * 授業範囲文字列のフォーマット ("開始 〜 目標" または "開始")
  */
 export function formatLessonRange(startName?: string | null, endName?: string | null): string {
@@ -1092,6 +1102,7 @@ export function calculateLessonRangeForSlot(params: {
   branchRules?: BranchAIRules | null;
   lessonProgressList?: StudentLessonProgress[];
   miniTestResults?: MiniTestResult[];
+  enforceNoSkip?: boolean;
 }): {
   start_lesson_id: string | null;
   end_lesson_id: string | null;
@@ -1160,7 +1171,7 @@ export function calculateLessonRangeForSlot(params: {
   let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
 
   const ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
-  if (isElem && ensuredMasters.length > 0) {
+  if ((isElem || (rawMasters && rawMasters.length > 0)) && ensuredMasters.length > 0) {
     masterLessons = ensuredMasters
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map(m => ({
@@ -1223,12 +1234,10 @@ export function calculateLessonRangeForSlot(params: {
 
   // 2. 開始授業の特定 (startLessonId がなければ直近の未完了授業を自動特定)
   let startIdx = 0;
-  if (startLessonId) {
-    const foundIdx = masterLessons.findIndex(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId));
-    if (foundIdx >= 0) {
-      startIdx = foundIdx;
-    }
-  } else if (student) {
+  let earliestUncompletedIdx = 0;
+  let hasEarliest = false;
+
+  if (student) {
     const nextUncompleted = findNextUncompletedLessonForSubject({
       student,
       subject,
@@ -1246,17 +1255,39 @@ export function calculateLessonRangeForSlot(params: {
         m.name === nextUncompleted.lessonName
       );
       if (idx >= 0) {
-        startIdx = idx;
-      } else if (nextUncompleted.masterIndex >= 0) {
-        startIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
+        earliestUncompletedIdx = idx;
+        hasEarliest = true;
+      } else if (nextUncompleted.masterIndex >= 0 && (!rawMasters || rawMasters.length === 0)) {
+        earliestUncompletedIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
+        hasEarliest = true;
       }
-    } else if (nextUncompleted.masterIndex >= 0) {
-      startIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
+    } else if (nextUncompleted.masterIndex >= 0 && (!rawMasters || rawMasters.length === 0)) {
+      earliestUncompletedIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
+      hasEarliest = true;
     }
     if (nextUncompleted.hasFailedUnitTest && nextUncompleted.failedUnitTest) {
       hasFailed = true;
       failedTestObj = nextUncompleted.failedUnitTest;
     }
+  }
+
+  if (startLessonId) {
+    const foundIdx = masterLessons.findIndex(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId));
+    if (foundIdx >= 0) {
+      // 中抜き物理禁止ガード: 手前の未完了ステップが存在するのに未来のステップを開始位置に指定した場合
+      if (student && hasEarliest && foundIdx > earliestUncompletedIdx && params.enforceNoSkip) {
+        const skippedStep = masterLessons[earliestUncompletedIdx];
+        const attemptedStep = masterLessons[foundIdx];
+        throw new CurriculumSkipViolationError(
+          `カリキュラム中抜き受講は物理的に禁止されています: 手前の未受講ステップ「${skippedStep?.name || earliestUncompletedIdx}」を飛び越えて「${attemptedStep?.name || foundIdx}」を開始位置に設定することはできません。`
+        );
+      }
+      startIdx = foundIdx;
+    } else if (hasEarliest) {
+      startIdx = earliestUncompletedIdx;
+    }
+  } else if (hasEarliest) {
+    startIdx = earliestUncompletedIdx;
   }
 
   // 3. ペース推論 (lessonsPerSlot が未指定なら AI 推論)
@@ -2996,7 +3027,8 @@ export function generateSlotsForSelectedSubjects(params: {
       curriculumUnits,
       schoolId,
       lessonProgressList,
-      miniTestResults: miniTestResults.length > 0 ? miniTestResults : db.getMiniTestResults(student.id)
+      miniTestResults: miniTestResults.length > 0 ? miniTestResults : db.getMiniTestResults(student.id),
+      enforceNoSkip: true
     });
 
     const isStartReviewOrCheck = (range.start_lesson_name || '').includes('まとめテスト') || (range.start_lesson_name || '').toLowerCase().includes('check test');

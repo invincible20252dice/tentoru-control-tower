@@ -753,6 +753,61 @@ export const NAKAO_STEPPING_STONE_COMPLETED_LESSON_IDS: string[] = [
 ];
 
 /**
+ * 単元テスト完了の暗号的ゲート (Crypto-Gate):
+ * 単元確認テストのIDである場合、mini_test_results に合格（passed）が存在しないものは絶対に完了に含めない
+ */
+export function enforceUnitTestPassingGate(
+  studentId: string,
+  completedIds: string[] | undefined,
+  miniTestResults?: MiniTestResult[],
+  masters?: CurriculumMaster[]
+): string[] {
+  if (!Array.isArray(completedIds) || completedIds.length === 0) return [];
+
+  const results = miniTestResults || db.getMiniTestResults(studentId);
+  const passedTestContents = new Set<string>();
+  results.forEach(r => {
+    if (studentId && r.student_id !== studentId && (r as any).studentId !== studentId) return;
+    const passScore = r.passing_line ? parseInt(r.passing_line.match(/\d+/)?.[0] || '80', 10) : 80;
+    const isPassed = r.passed === true || r.status === 'passed' || r.status === '合格' || (r.score !== null && r.score !== undefined && r.score >= passScore);
+    if (isPassed) {
+      if (r.test_content) passedTestContents.add(r.test_content.trim());
+      if (r.unit_name) passedTestContents.add(r.unit_name.trim());
+    }
+  });
+
+  const allMasters = masters || db.getCurriculumMasters();
+  const unpassedTestIds = new Set<string>();
+
+  allMasters.forEach(m => {
+    const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
+    const isUT = !isReviewOrCheck && (
+      m.item_type === 'unit_test' || 
+      Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト') || m.lesson_name.includes('確認テスト')))
+    );
+    if (isUT) {
+      const hasPassed = (m.lesson_name && passedTestContents.has(m.lesson_name.trim())) || 
+                        (m.unit_name && passedTestContents.has(m.unit_name.trim()));
+      if (!hasPassed) {
+        unpassedTestIds.add(String(m.id).trim());
+        if (m.sort_order !== undefined) {
+          unpassedTestIds.add(String(m.sort_order).trim());
+          unpassedTestIds.add(`STEP ${m.sort_order}`.trim());
+        }
+      }
+    }
+  });
+
+  // 小1算数 STEP 5「かずと すうじ - 単元確認テスト」等の既知ID保護
+  const isKazuPassed = passedTestContents.has('かずと すうじ') || passedTestContents.has('かずと すうじ - 単元確認テスト');
+  if (!isKazuPassed) {
+    ['5', 'STEP 5', 'cm-kazu-test', 'cm-auto-ut-5', 'cm-auto-ut-算数-小1-かずと すうじ'].forEach(id => unpassedTestIds.add(id));
+  }
+
+  return completedIds.filter(id => !unpassedTestIds.has(String(id).trim()));
+}
+
+/**
  * 過去のテスト実行等で混入した未来の誤完了テストIDを除外するサニタイズ関数
  */
 export function sanitizeCorruptedCompletedLessonIds(
@@ -912,9 +967,17 @@ class DatabaseService {
     }
   }
 
+  private nodeMemoryStore = new Map<string, any>();
+
   // Load from LocalStorage or initialize with Seed Data
   private getMockData<T>(key: string, initialData: T[]): T[] {
-    if (!this.isBrowser()) return initialData;
+    if (!this.isBrowser()) {
+      if (this.nodeMemoryStore.has(key)) {
+        return this.nodeMemoryStore.get(key);
+      }
+      this.nodeMemoryStore.set(key, initialData);
+      return initialData;
+    }
     const stored = localStorage.getItem(`tentoru_${key}`);
     if (stored) {
       try {
@@ -928,7 +991,13 @@ class DatabaseService {
   }
 
   private getMockObject<T>(key: string, initialData: T): T {
-    if (!this.isBrowser()) return initialData;
+    if (!this.isBrowser()) {
+      if (this.nodeMemoryStore.has(key)) {
+        return this.nodeMemoryStore.get(key);
+      }
+      this.nodeMemoryStore.set(key, initialData);
+      return initialData;
+    }
     const stored = localStorage.getItem(`tentoru_${key}`);
     if (stored) {
       try {
@@ -942,7 +1011,10 @@ class DatabaseService {
   }
 
   private saveMockData<T>(key: string, data: T): void {
-    if (!this.isBrowser()) return;
+    if (!this.isBrowser()) {
+      this.nodeMemoryStore.set(key, data);
+      return;
+    }
     localStorage.setItem(`tentoru_${key}`, JSON.stringify(data));
   }
 
@@ -2233,9 +2305,15 @@ class DatabaseService {
   }
 
   public async saveStudent(student: Student): Promise<Student> {
-    // 誤完了まとめテストID・未来テストIDの自動サニタイズ（生徒データのID汚染を根本防止）
     if (Array.isArray(student.completed_lesson_ids) && student.completed_lesson_ids.length > 0) {
-      const { cleanedIds } = sanitizeCorruptedCompletedLessonIds(student.completed_lesson_ids);
+      const testResults = this.getMockData<MiniTestResult>('mini_test_results', []);
+      const gatedIds = enforceUnitTestPassingGate(
+        student.id || student.student_id,
+        student.completed_lesson_ids,
+        testResults.filter(r => r.student_id === student.id || r.student_id === student.student_id),
+        this.getCurriculumMasters()
+      );
+      const { cleanedIds } = sanitizeCorruptedCompletedLessonIds(gatedIds);
       student = { ...student, completed_lesson_ids: cleanedIds };
     }
 

@@ -9241,6 +9241,7 @@ export default function TeacherDashboard({
                     return ids;
                   };
 
+                  const hasTasksScheduled = activeTasks.length > 0;
                   activeTasks.forEach(task => {
                     extractLessonIdsFromSlot(task).forEach(id => todayActiveLessonIds.add(id));
                   });
@@ -9494,7 +9495,7 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  if (todayActiveLessonIds.size === 0) {
+                  if (todayActiveLessonIds.size === 0 && !hasTasksScheduled) {
                     if (startSeq > 0 && startSeq < timelineUnits.length && !completedLessonIdSet.has(String(timelineUnits[startSeq].id))) {
                       todayActiveLessonIds.add(String(timelineUnits[startSeq].id));
                     } else {

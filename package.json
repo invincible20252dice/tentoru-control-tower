@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "verify": "tsx scripts/verify-sync.ts"
+    "verify": "tsx scripts/verify-sync.ts",
+    "verify:integrity": "tsx scripts/verify-curriculum-integrity.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
