@@ -164,6 +164,7 @@ describe("Borderless Clean UI Tests (枠線削減 & 背景面グルーピング�
       render(
         <TeacherDashboard
           initialStudentId={sampleStudent.id}
+          initialDate="2026-06-15"
           teacherType="elementary"
           initialTab="milestones"
         />

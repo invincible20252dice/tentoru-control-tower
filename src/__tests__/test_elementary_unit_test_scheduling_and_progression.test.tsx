@@ -80,7 +80,20 @@ describe('Elementary Unit Test Scheduling & Progression Integration Suite', () =
     const nextAfterUnitTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
-      curriculumMasters: mathMasters
+      curriculumMasters: mathMasters,
+      miniTestResults: [
+        {
+          id: 'mini-ut-nb-passed',
+          student_id: student.id,
+          subject: '算数',
+          unit_name: 'なんばんめ',
+          test_content: nextBeforeUnitTest.lessonName || 'なんばんめ - 単元確認テスト',
+          status: 'passed',
+          passed: true,
+          score: 100,
+          date: '2026-09-22'
+        }
+      ]
     });
     expect(nextAfterUnitTest.lessonName).toContain('いろいろな かたち');
   });

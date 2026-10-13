@@ -3154,9 +3154,21 @@ export default function TeacherDashboard({
       return target === s;
     };
 
+    // 単元確認テスト（is_unit_test）判定関数: 通常授業およびまとめテスト（Check Test）のみを許可し、単元確認テストを完全に除外
+    const isUnitTestItem = (item: any) => {
+      const name = item.name || item.lesson_name || '';
+      const isReviewOrCheck = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
+      return !isReviewOrCheck && (
+        item.item_type === 'unit_test' ||
+        name.includes('単元確認テスト') ||
+        name.includes('単元テスト')
+      );
+    };
+
     const matchingSchoolUnits = allCurriculumUnits.filter(u => 
       (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-      matchSubject(u.subject)
+      matchSubject(u.subject) &&
+      !isUnitTestItem(u)
     );
 
     const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
@@ -3167,28 +3179,34 @@ export default function TeacherDashboard({
       id: u.id,
       name: u.name,
       sort_order: u.sequence_order ?? 0,
-      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
+      item_type: (u as any).item_type
     }));
 
-    const masterUnits = ensuredMasters.map(m => ({
-      id: m.id,
-      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
-      sort_order: m.sort_order ?? 0,
-      isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj))
-    }));
+    const masterUnits = ensuredMasters
+      .filter(m => !isUnitTestItem(m))
+      .map(m => ({
+        id: m.id,
+        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+        sort_order: m.sort_order ?? 0,
+        isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj)),
+        item_type: m.item_type
+      }));
 
-    const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean }>();
+    const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean; item_type?: string }>();
     masterUnits.forEach(item => combinedMap.set(item.id, item));
     schoolUnits.forEach(item => combinedMap.set(item.id, item));
 
     const fallbackUnits = allCurriculumUnits.filter(u => 
       (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-      matchSubject(u.subject)
+      matchSubject(u.subject) &&
+      !isUnitTestItem(u)
     ).map(u => ({
       id: u.id,
       name: u.name,
       sort_order: u.sequence_order ?? 0,
-      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj)
+      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
+      item_type: (u as any).item_type
     }));
 
     fallbackUnits.forEach(item => {
@@ -3197,31 +3215,39 @@ export default function TeacherDashboard({
       }
     });
 
-    // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完
+    // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完（単元テストは除外）
     if (periodSelections) {
       Object.values(periodSelections).forEach(sel => {
         if (sel && sel.subject && matchSubject(sel.subject)) {
           if (sel.startLessonId && !combinedMap.has(sel.startLessonId)) {
-            combinedMap.set(sel.startLessonId, {
-              id: sel.startLessonId,
-              name: sel.startLessonName || sel.lessonRange || '単元確認テスト',
-              sort_order: 999,
-              isStartUnit: false
-            });
+            const candidateName = sel.startLessonName || sel.lessonRange || '';
+            if (!isUnitTestItem({ name: candidateName })) {
+              combinedMap.set(sel.startLessonId, {
+                id: sel.startLessonId,
+                name: candidateName,
+                sort_order: 999,
+                isStartUnit: false
+              });
+            }
           }
           if (sel.endLessonId && !combinedMap.has(sel.endLessonId)) {
-            combinedMap.set(sel.endLessonId, {
-              id: sel.endLessonId,
-              name: sel.endLessonName || sel.startLessonName || '単元確認テスト',
-              sort_order: 999,
-              isStartUnit: false
-            });
+            const candidateName = sel.endLessonName || sel.startLessonName || '';
+            if (!isUnitTestItem({ name: candidateName })) {
+              combinedMap.set(sel.endLessonId, {
+                id: sel.endLessonId,
+                name: candidateName,
+                sort_order: 999,
+                isStartUnit: false
+              });
+            }
           }
         }
       });
     }
 
-    return Array.from(combinedMap.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    return Array.from(combinedMap.values())
+      .filter(item => !isUnitTestItem(item))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   };
 
   const findLessonById = (id: string, subject?: string) => {
@@ -5927,48 +5953,68 @@ export default function TeacherDashboard({
                                     {/* カリキュラム単元・授業進捗範囲設定 */}
                                     {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
                                       const lessons = getLessonsForSubject(currentConfig.subject);
+                                              const selectableLessons = lessons.filter(l => {
+                                                const name = l.name || '';
+                                                const isReview = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
+                                                return isReview || (!l.name?.includes('単元確認テスト') && !l.name?.includes('単元テスト') && (l as any).item_type !== 'unit_test');
+                                              });
+                                              const selectedStartId = currentConfig.startLessonId || currentConfig.unitId || '';
+                                              const selectedEndId = currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || '';
+                                              const hasStartInList = selectableLessons.some(l => l.id === selectedStartId);
+                                              const hasEndInList = selectableLessons.some(l => l.id === selectedEndId);
+
                                       return (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'rgba(248, 250, 252, 0.85)', padding: '14px 16px', borderRadius: '12px', border: 'none' }}>
                                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                            <div>
-                                              <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                                                開始授業 (From):
-                                              </label>
-                                              <select
-                                                data-testid={`period-unit-select-${p}`}
-                                                value={currentConfig.startLessonId || currentConfig.unitId || ''}
-                                                onChange={e => handleStartLessonChange(p, e.target.value)}
-                                                className={styles.select}
-                                                style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
-                                              >
-                                                <option value="">-- 開始授業を選択 --</option>
-                                                {lessons.map(l => (
-                                                  <option key={l.id} value={l.id}>
-                                                    {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
-                                                  </option>
-                                                ))}
-                                              </select>
-                                            </div>
-                                            <div>
-                                              <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                                                終了目標授業 (To):
-                                              </label>
-                                              <select
-                                                data-testid={`period-end-lesson-select-${p}`}
-                                                value={currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || ''}
-                                                onChange={e => handleEndLessonChange(p, e.target.value)}
-                                                className={styles.select}
-                                                style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
-                                              >
-                                                <option value="">-- 終了目標授業を選択 --</option>
-                                                {lessons.map(l => (
-                                                  <option key={l.id} value={l.id}>
-                                                    {l.name}
-                                                  </option>
-                                                ))}
-                                              </select>
-                                            </div>
-                                          </div>
+                                                  <div>
+                                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                                                      開始授業 (From):
+                                                    </label>
+                                                    <select
+                                                      data-testid={`period-unit-select-${p}`}
+                                                      value={selectedStartId}
+                                                      onChange={e => handleStartLessonChange(p, e.target.value)}
+                                                      className={styles.select}
+                                                      style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                                    >
+                                                      <option value="">-- 開始授業を選択 --</option>
+                                                      {selectedStartId && !hasStartInList && (
+                                                        <option key={selectedStartId} value={selectedStartId}>
+                                                          {currentConfig.startLessonName || '単元確認テスト'}
+                                                        </option>
+                                                      )}
+                                                      {selectableLessons.map(l => (
+                                                        <option key={l.id} value={l.id}>
+                                                          {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                  </div>
+                                                  <div>
+                                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                                                      終了目標授業 (To):
+                                                    </label>
+                                                    <select
+                                                      data-testid={`period-end-lesson-select-${p}`}
+                                                      value={selectedEndId}
+                                                      onChange={e => handleEndLessonChange(p, e.target.value)}
+                                                      className={styles.select}
+                                                      style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                                    >
+                                                      <option value="">-- 終了目標授業を選択 --</option>
+                                                      {selectedEndId && !hasEndInList && (
+                                                        <option key={selectedEndId} value={selectedEndId}>
+                                                          {currentConfig.endLessonName || currentConfig.startLessonName || '単元確認テスト'}
+                                                        </option>
+                                                      )}
+                                                      {selectableLessons.map(l => (
+                                                        <option key={l.id} value={l.id}>
+                                                          {l.name}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                  </div>
+                                                </div>
                                           {/* 授業範囲プレビュー (薄いテキストラベル) */}
                                           {(currentConfig.lessonRange || currentConfig.startLessonName) && (
                                             <div 
@@ -8969,6 +9015,25 @@ export default function TeacherDashboard({
                   // 小学生向け進行状況と完了予測計算（部門ごとに正確なカリキュラムマスターを抽出）
                   const targetSubject = (isElementary && selectedSubject === '数学') ? '算数' : selectedSubject;
                   const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+
+                  const getGradeOrder = (g?: string | null): number => {
+                    if (!g) return 99;
+                    const norm = normalizeGrade(g);
+                    if (norm === '小1' || /^[1１]年生?$/.test(norm)) return 1;
+                    if (norm === '小2' || /^[2２]年生?$/.test(norm)) return 2;
+                    if (norm === '小3' || /^[3３]年生?$/.test(norm)) return 3;
+                    if (norm === '小4' || /^[4４]年生?$/.test(norm)) return 4;
+                    if (norm === '小5' || /^[5５]年生?$/.test(norm)) return 5;
+                    if (norm === '小6' || /^[6６]年生?$/.test(norm)) return 6;
+                    if (norm === '中1' || /^[7７]年生?$/.test(norm)) return 7;
+                    if (norm === '中2' || /^[8８]年生?$/.test(norm)) return 8;
+                    if (norm === '中3' || /^[9９]年生?$/.test(norm)) return 9;
+                    if (norm.startsWith('高1')) return 10;
+                    if (norm.startsWith('高2')) return 11;
+                    if (norm.startsWith('高3')) return 12;
+                    return 99;
+                  };
+
                   const masterUnits = rawMasters
                     .filter(m => {
                       if (isElementary) {
@@ -8991,8 +9056,33 @@ export default function TeacherDashboard({
                         return m.subject === targetSubject;
                       }
                       return m.subject === targetSubject;
-                    })
-                    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+                    });
+
+                  // 単元ごとの最小 sort_order を算出して同一単元内のレッスンをまとめ、単元分断・割り込みを防止
+                  const calcUnitMinOrderMap = (items: typeof masterUnits) => {
+                    const map = new Map<string, number>();
+                    items.forEach(m => {
+                      const key = `${m.grade || ''}_${m.unit_name || ''}`;
+                      const current = map.get(key) ?? Infinity;
+                      const order = m.sort_order ?? 0;
+                      if (order < current) map.set(key, order);
+                    });
+                    return map;
+                  };
+
+                  const unitMinMap = calcUnitMinOrderMap(masterUnits);
+                  masterUnits.sort((a, b) => {
+                    const ga = getGradeOrder(a.grade);
+                    const gb = getGradeOrder(b.grade);
+                    if (ga !== gb) return ga - gb;
+                    const keyA = `${a.grade || ''}_${a.unit_name || ''}`;
+                    const keyB = `${b.grade || ''}_${b.unit_name || ''}`;
+                    const minA = unitMinMap.get(keyA) ?? (a.sort_order || 0);
+                    const minB = unitMinMap.get(keyB) ?? (b.sort_order || 0);
+                    if (minA !== minB) return minA - minB;
+                    if (a.unit_name !== b.unit_name) return (a.unit_name || '').localeCompare(b.unit_name || '');
+                    return (a.sort_order || 0) - (b.sort_order || 0);
+                  });
 
                   const subjectUnits = allCurriculumUnits.filter(u => 
                     u.school_id === selectedStudent.school_id && (
@@ -9003,7 +9093,20 @@ export default function TeacherDashboard({
                   );
                   const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === targetSubject || (targetSubject === '算数' && u.subject === '数学'));
 
-                  const ensuredMasters = ensureMathEnglishUnitTests(masterUnits);
+                  const rawEnsuredMasters = ensureMathEnglishUnitTests(masterUnits);
+                  const ensuredUnitMinMap = calcUnitMinOrderMap(rawEnsuredMasters);
+                  const ensuredMasters = rawEnsuredMasters.sort((a, b) => {
+                    const ga = getGradeOrder(a.grade);
+                    const gb = getGradeOrder(b.grade);
+                    if (ga !== gb) return ga - gb;
+                    const keyA = `${a.grade || ''}_${a.unit_name || ''}`;
+                    const keyB = `${b.grade || ''}_${b.unit_name || ''}`;
+                    const minA = ensuredUnitMinMap.get(keyA) ?? (a.sort_order || 0);
+                    const minB = ensuredUnitMinMap.get(keyB) ?? (b.sort_order || 0);
+                    if (minA !== minB) return minA - minB;
+                    if (a.unit_name !== b.unit_name) return (a.unit_name || '').localeCompare(b.unit_name || '');
+                    return (a.sort_order || 0) - (b.sort_order || 0);
+                  });
 
                   // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
                   const rawTimelineUnits = ensuredMasters.length > 0
@@ -9175,8 +9278,10 @@ export default function TeacherDashboard({
 
                     const startId = slot.start_lesson_id || slot.startLessonId;
                     const endId = slot.end_lesson_id || slot.endLessonId;
-                    let fromStr = slot.start_lesson_name || '';
-                    let toStr = slot.end_lesson_name || '';
+                    if (startId) ids.push(String(startId));
+                    if (endId) ids.push(String(endId));
+                    let fromStr = slot.start_lesson_name || slot.startLessonName || '';
+                    let toStr = slot.end_lesson_name || slot.endLessonName || '';
                     const rangeText = slot.lesson_range || slot.custom_unit_name || '';
 
                     // rangeText からのスマート分割
@@ -9246,19 +9351,42 @@ export default function TeacherDashboard({
                     return ids;
                   };
 
-                  const hasTasksScheduled = activeTasks.length > 0;
-                  if (hasTasksScheduled) {
-                    activeTasks.forEach(task => {
-                      extractLessonIdsFromSlot(task).forEach(id => todayActiveLessonIds.add(id));
-                    });
+                  const isUnitCheckTestStep = (stepId: string): boolean => {
+                    const u = timelineUnits.find((unit: any) => 
+                      String(unit.id) === String(stepId) || 
+                      ((unit as any).sort_order !== undefined && String((unit as any).sort_order) === String(stepId))
+                    );
+                    if (!u) return false;
+                    const uName = u.lesson_name || u.name || '';
+                    const isReviewOrCheck = uName.includes('まとめテスト') || 
+                                            uName.toLowerCase().includes('check test') ||
+                                            (u.unit_name || '').includes('まとめテスト') ||
+                                            (u.unit_name || '').toLowerCase().includes('check test');
+                    return !isReviewOrCheck && (
+                      (u as any).item_type === 'unit_test' ||
+                      uName.includes('単元確認テスト') ||
+                      uName.includes('単元テスト')
+                    );
+                  };
 
-                    Object.values(periodSelections).forEach(p => {
-                      const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
-                      if (isTargetSub) {
-                        extractLessonIdsFromSlot(p).forEach(id => todayActiveLessonIds.add(id));
+                  activeTasks.forEach(task => {
+                    extractLessonIdsFromSlot(task).forEach(id => {
+                      if (!isUnitCheckTestStep(id)) {
+                        todayActiveLessonIds.add(id);
                       }
                     });
-                  }
+                  });
+
+                  Object.values(periodSelections).forEach(p => {
+                    const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
+                    if (isTargetSub) {
+                      extractLessonIdsFromSlot(p).forEach(id => {
+                        if (!isUnitCheckTestStep(id)) {
+                          todayActiveLessonIds.add(id);
+                        }
+                      });
+                    }
+                  });
 
                   // 1-b. 単元テスト特化日（通常コマ0件でテスト枠のみの日）またはテスト枠に該当教科の単元テストがある場合の連動（当日のみ厳密限定）
                   const todayMiniTests = miniTestResultsList.filter(m => 
@@ -9341,7 +9469,7 @@ export default function TeacherDashboard({
 
                   const miniTestPassedIdSet = new Set<string>();
 
-                  timelineUnits.forEach(u => {
+                  rawTimelineUnits.forEach(u => {
                     const uId = String(u.id);
                     const uName = u.name || '';
                     const uLessonName = u.lesson_name || '';
@@ -9402,6 +9530,15 @@ export default function TeacherDashboard({
                     if (hasPassedMini) {
                       completedLessonIdSet.add(uId);
                       miniTestPassedIdSet.add(uId);
+                      if ((u as any).sort_order !== undefined) {
+                        miniTestPassedIdSet.add(String((u as any).sort_order));
+                      }
+                    } else if (isUT) {
+                      // 合格実績のない単元確認テストは、completedLessonIdSet に入っていても物理除外
+                      completedLessonIdSet.delete(uId);
+                      if ((u as any).sort_order !== undefined) {
+                        completedLessonIdSet.delete(String((u as any).sort_order));
+                      }
                     }
                   });
 
@@ -9412,7 +9549,7 @@ export default function TeacherDashboard({
                   let startSeq = 0;
                   const subjectStartUnitId = getStudentStartUnitIdForSubject(selectedStudent, selectedSubject);
                   if (selectedStudent && subjectStartUnitId) {
-                    const suIdx = timelineUnits.findIndex(u => {
+                    const suIdx = rawTimelineUnits.findIndex(u => {
                       const au = u as any;
                       return (
                         String(au.id) === String(subjectStartUnitId) || 
@@ -9424,6 +9561,17 @@ export default function TeacherDashboard({
                     });
                     if (suIdx >= 0) {
                       startSeq = suIdx;
+                    }
+                  } else if (isElementary && selectedStudent?.grade) {
+                    const studentGradeNorm = normalizeGrade(selectedStudent.grade);
+                    if (studentGradeNorm) {
+                      const gradeStartIdx = rawTimelineUnits.findIndex(u => {
+                        const rawG = (u as any).grade;
+                        return rawG && normalizeGrade(rawG) === studentGradeNorm;
+                      });
+                      if (gradeStartIdx >= 0) {
+                        startSeq = gradeStartIdx;
+                      }
                     }
                   }
 
@@ -9496,102 +9644,103 @@ export default function TeacherDashboard({
                     });
                     if (invalidIds.size > 0) {
                       invalidIds.forEach(id => todayActiveLessonIds.delete(id));
-                      if (todayActiveLessonIds.size === 0) {
-                        todayActiveLessonIds.add(String(timelineUnits[gateUnitTestIdx].id));
-                      }
                     }
                   }
 
-                  if (todayActiveLessonIds.size === 0 && !hasTasksScheduled) {
-                    if (startSeq > 0 && startSeq < timelineUnits.length && !completedLessonIdSet.has(String(timelineUnits[startSeq].id))) {
-                      todayActiveLessonIds.add(String(timelineUnits[startSeq].id));
-                    } else {
-                      const next = findNextUncompletedLessonForSubject({
-                        student: selectedStudent,
-                        subject: selectedSubject,
-                        tasks: studentTasks,
-                        curriculumMasters: masterUnits,
-                        curriculumUnits: subjectUnits,
-                        miniTestResults: miniTestResultsList
-                      });
-                      if (next && next.lessonId) {
-                        const targetUnit = timelineUnits.find(u => String(u.id) === String(next.lessonId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(next.lessonId)));
-                        if (targetUnit) {
-                          todayActiveLessonIds.add(String(targetUnit.id));
-                        }
-                      }
-                      if (todayActiveLessonIds.size === 0) {
-                        const firstIncomplete = timelineUnits.find(u => !completedLessonIdSet.has(String(u.id)));
-                        if (firstIncomplete) {
-                          todayActiveLessonIds.add(String(firstIncomplete.id));
-                        }
-                      }
-                    }
-                  }
-
-                  // 3. 各STEP（全単元・全テスト共通）の動的ステータス判定（ユーザー確定仕様クリーン走査ロジック）
-                  // （ハードコード、特定文字列マッチ(includes)、例外分岐を一切排除し、現在地インデックスで未来の飛び石完了を徹底ガード）
-                  let currentRangeStartIdx = -1;
-                  let currentRangeEndIdx = -1;
-
-                  timelineUnits.forEach((step: any, idx: number) => {
-                    const stepIdStr = String(step.id);
-                    const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
-                      ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
-                    if (todayActiveLessonIds.has(stepIdStr) && !isRecordedCompleted) {
-                      if (currentRangeStartIdx === -1) currentRangeStartIdx = idx;
-                      currentRangeEndIdx = idx;
+                  // 単元確認テストが合格済みの単元内の先行レッスン（まとめテスト、Check Test、授業）を完了として保証
+                  const passedUnitNames = new Set<string>();
+                  rawTimelineUnits.forEach(u => {
+                    const uIdStr = String(u.id);
+                    const uOrderStr = (u as any).sort_order !== undefined ? String((u as any).sort_order) : '';
+                    const isUT = (u as any).item_type === 'unit_test' || 
+                      (u.name && (u.name.includes('単元確認テスト') || u.name.includes('単元テスト'))) ||
+                      (u.lesson_name && (u.lesson_name.includes('単元確認テスト') || u.lesson_name.includes('単元テスト')));
+                    if (isUT && (miniTestPassedIdSet.has(uIdStr) || (uOrderStr && miniTestPassedIdSet.has(uOrderStr)))) {
+                      if (u.unit_name) passedUnitNames.add(normalizeUnitName(u.unit_name));
+                      if (u.name) passedUnitNames.add(normalizeUnitName(u.name));
                     }
                   });
 
-                  const hasTodayActive = currentRangeStartIdx !== -1;
-                  let firstIncompleteIdx = -1;
-                  if (!hasTodayActive) {
-                    firstIncompleteIdx = timelineUnits.findIndex((step: any) => {
-                      const stepIdStr = String(step.id);
-                      const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
-                        ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
-                      return !isRecordedCompleted;
+                  if (passedUnitNames.size > 0) {
+                    rawTimelineUnits.forEach(u => {
+                      const uUnitNorm = normalizeUnitName(u.unit_name);
+                      if (uUnitNorm && (passedUnitNames.has(uUnitNorm) || Array.from(passedUnitNames).some(pun => isMatchingUnitOrTest(uUnitNorm, pun)))) {
+                        completedLessonIdSet.add(String(u.id));
+                        if ((u as any).sort_order !== undefined) completedLessonIdSet.add(String((u as any).sort_order));
+                      }
                     });
                   }
 
+                  // 3. 全学年カリキュラム（rawTimelineUnits）を先頭から順次走査し、
+                  // 単元テストの合格実績照合および中抜き・飛び石受講の完全遮断を実施
+                  const trulyCompletedStepIds = new Set<string>();
+                  let hasEncounteredIncomplete = false;
+
+
+                  for (let i = 0; i < rawTimelineUnits.length; i++) {
+                    const step = rawTimelineUnits[i];
+                    const stepIdStr = String(step.id);
+                    const stepOrderStr = (step as any).sort_order !== undefined ? String((step as any).sort_order) : '';
+
+                    // スタート位置より前のステップ（生徒が途中学年から開始した場合）
+                    if (i < startSeq) {
+                      if (completedLessonIdSet.has(stepIdStr) || (stepOrderStr && completedLessonIdSet.has(stepOrderStr))) {
+                        trulyCompletedStepIds.add(stepIdStr);
+                        if (stepOrderStr) trulyCompletedStepIds.add(stepOrderStr);
+                      }
+                      continue;
+                    }
+
+
+                    // 中抜き・飛び石受講の物理的遮断: 最初の未完了ステップに遭遇した時点で以降の全未来ステップの完了を遮断
+                    if (hasEncounteredIncomplete) {
+                      continue;
+                    }
+
+                    const stepName = step.lesson_name || step.name || '';
+                    const isReviewOrCheck = stepName.includes('まとめテスト') || 
+                                            stepName.toLowerCase().includes('check test') ||
+                                            (step.unit_name || '').includes('まとめテスト') ||
+                                            (step.unit_name || '').toLowerCase().includes('check test');
+                    const isUnitTest = !isReviewOrCheck && (
+                      step.item_type === 'unit_test' || 
+                      stepName.includes('単元確認テスト') || 
+                      stepName.includes('単元テスト')
+                    );
+
+                    let isStepDone = false;
+                    if (isUnitTest) {
+                      // 単元確認テストは mini_test_results に合格実績（passed）が存在する場合のみ完了
+                      isStepDone = miniTestPassedIdSet.has(stepIdStr) || (stepOrderStr ? miniTestPassedIdSet.has(stepOrderStr) : false);
+                    } else {
+                      // 通常授業およびまとめテストは completedLessonIdSet に存在する場合に完了
+                      isStepDone = completedLessonIdSet.has(stepIdStr) || (stepOrderStr ? completedLessonIdSet.has(stepOrderStr) : false);
+                    }
+
+                    if (isStepDone) {
+                      trulyCompletedStepIds.add(stepIdStr);
+                      if (stepOrderStr) trulyCompletedStepIds.add(stepOrderStr);
+                    } else {
+                      hasEncounteredIncomplete = true;
+                    }
+                  }
+
+                  // 4. 各STEPの動的ステータス判定（現在地は当日コマ割り・テスト枠のみに厳格限定、未来学年は予定として描画）
                   const stepStatusMap = new Map<string, 'completed' | 'current' | 'planned'>();
 
-                  timelineUnits.forEach((step: any, idx: number) => {
+                  timelineUnits.forEach((step: any) => {
                     const stepIdStr = String(step.id);
-                    const isTodayActive = todayActiveLessonIds.has(stepIdStr);
-                    const isRecordedCompleted = completedLessonIdSet.has(stepIdStr) ||
-                      ((step as any).sort_order !== undefined && completedLessonIdSet.has(String((step as any).sort_order)));
+                    const stepOrderStr = (step as any).sort_order !== undefined ? String((step as any).sort_order) : '';
+                    const isDone = trulyCompletedStepIds.has(stepIdStr) || (stepOrderStr ? trulyCompletedStepIds.has(stepOrderStr) : false);
+                    const isTodayActive = todayActiveLessonIds.has(stepIdStr) || (stepOrderStr ? todayActiveLessonIds.has(stepOrderStr) : false);
 
                     let status: 'completed' | 'current' | 'planned' = 'planned';
-
-                    if (hasTodayActive) {
-                      if (idx < currentRangeStartIdx) {
-                        // 現在地より手前
-                        status = isRecordedCompleted ? 'completed' : 'planned';
-                      } else if (idx <= currentRangeEndIdx) {
-                        // 現在地（今日のコマ割りに含まれる未完了ステップ）
-                        status = (isTodayActive && !isRecordedCompleted) ? 'current' : (isRecordedCompleted ? 'completed' : 'planned');
-                      } else {
-                        // 現在地に到達した以降（未来の全ステップ、および未受講のまとめテスト）
-                        // ただし、小テスト・単元確認テストの正規合格実績（miniTestPassedIdSet）があるものは保護
-                        status = miniTestPassedIdSet.has(stepIdStr) ? 'completed' : 'planned';
-                      }
+                    if (isDone) {
+                      status = 'completed';
+                    } else if (isTodayActive) {
+                      status = 'current';
                     } else {
-                      // 今日のコマに未完了ステップがない場合（仕様4）:
-                      if (firstIncompleteIdx === -1) {
-                        // 全ステップ完了
-                        status = 'completed';
-                      } else if (idx < firstIncompleteIdx) {
-                        // 未完了の先頭ステップより手前
-                        status = isRecordedCompleted ? 'completed' : 'planned';
-                      } else if (idx === firstIncompleteIdx) {
-                        // 未完了の先頭ステップを「現在地」とする
-                        status = 'current';
-                      } else {
-                        // それ以降の全ステップ: 正規合格実績があるものは保護、それ以外は「○ 予定」（飛び石完了完全防止）
-                        status = miniTestPassedIdSet.has(stepIdStr) ? 'completed' : 'planned';
-                      }
+                      status = 'planned';
                     }
 
                     stepStatusMap.set(stepIdStr, status);

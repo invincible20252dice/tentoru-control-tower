@@ -932,25 +932,10 @@ export function findNextUncompletedLessonForSubject(params: {
         (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name))
       );
 
-      // STEP 5 (かずと すうじ - 単元確認テスト) 等の未受験・未合格テストは completedIds 単体での誤完了バイパスを遮断
-      const isUnverifiedStep5 = (
-        l.id === '5' || 
-        l.id === 'STEP 5' || 
-        l.id === 'cm-kazu-test' || 
-        l.id === 'cm-auto-ut-5' || 
-        l.id === 'cm-auto-ut-算数-小1-かずと すうじ' || 
-        (l.name && (l.name.includes('かずと すうじ') || l.name.includes('かずと　すうじ')) && l.name.includes('単元確認テスト'))
-      );
-
-      const isTestPassed = !hasFailedRecord && (
-        hasMiniTestPassingRecord ||
-        (!isUnverifiedStep5 && (
-          completedIds.has(l.id) ||
-          completedIds.has(String(l.id)) ||
-          (l.sort_order !== undefined && completedIds.has(String(l.sort_order))) ||
-          completedIds.has(l.name)
-        ))
-      );
+      // 単元テストの合格判定:
+      // 合格実績（passed === true または 合格点以上）が miniTestResults (unitTestStatus.completedUnitTestKeys) に存在することが絶対条件！
+      // completedIds 単体での誤完了バイパスは全教科・全学年・全テストで完全遮断！
+      const isTestPassed = !hasFailedRecord && hasMiniTestPassingRecord;
 
       // 単元テストが未合格（未受験または不合格）の場合、合否ゲート発動！
       // この単元テストで進行を強制ストップし、以降の授業（新単元等）への進行を厳格に禁止する。

@@ -587,6 +587,17 @@ describe('Schedule and Timetable Synchronization Tests', () => {
 
     // 2. 単元確認テストも完了すれば、次の単元「2章 たしざんとひきざん」の最初の授業（cm-p1-m3: あわせていくつ）に進む
     student.completed_lesson_ids = [...student.completed_lesson_ids, nextBeforeTest.lessonId!];
+    await db.saveMiniTestResult({
+      id: 'ut-pass-1-sync',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '1章 かずとすうじ',
+      test_content: '1章 かずとすうじ - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
     const nextAfterTest = findNextUncompletedLessonForSubject({
       student,
       subject: '算数',
@@ -638,11 +649,51 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       selected_days: ['tuesday', 'friday'],
       default_slots: 2,
       selected_subjects: ['算数'],
-      // Initially completed STEP 1 to 6
-      completed_lesson_ids: ['cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3', 'cm-p1-m4', 'cm-p2-m1', 'cm-p2-m2'],
+      // Initially completed STEP 1 to 6 and prerequisite tests
+      completed_lesson_ids: [
+        'cm-p1-m1', 'cm-p1-m2',
+        'cm-auto-sum1-算数-小1-1章 かずとすうじ', 'cm-auto-sum2-算数-小1-1章 かずとすうじ', 'cm-auto-sum3-算数-小1-1章 かずとすうじ', 'cm-auto-ut-算数-小1-1章 かずとすうじ',
+        'cm-p1-m3', 'cm-p1-m4',
+        'cm-auto-sum1-算数-小1-2章 たしざんとひきざん', 'cm-auto-sum2-算数-小1-2章 たしざんとひきざん', 'cm-auto-sum3-算数-小1-2章 たしざんとひきざん', 'cm-auto-ut-算数-小1-2章 たしざんとひきざん',
+        'cm-p2-m1', 'cm-p2-m2'
+      ],
       created_at: new Date().toISOString()
     };
-    db.saveStudent(student);
+    await db.saveStudent(student);
+
+    await db.saveMiniTestResult({
+      id: 'ut-pass-kazu-sync-2',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '1章 かずとすうじ',
+      test_content: '1章 かずとすうじ - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
+    await db.saveMiniTestResult({
+      id: 'ut-pass-tashizan-sync-2',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '2章 たしざんとひきざん',
+      test_content: '2章 たしざんとひきざん - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
+    await db.saveMiniTestResult({
+      id: 'ut-pass-2keta-sync-2',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '1章 2けたのたし算・ひき算',
+      test_content: '1章 2けたのたし算・ひき算 - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
 
     const targetDate = '2026-08-18';
     // Task covering STEP 7 through STEP 10 (cm-p2-m3 to cm-p3-m2)
@@ -681,6 +732,19 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     }
     expect(screen.getByTestId('task-completed-badge-1')).toBeInTheDocument();
 
+    // 単元テストの受講・合格実績を記録
+    await db.saveMiniTestResult({
+      id: 'ut-pass-kuku-sync-2',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '2章 かけ算（九九）',
+      test_content: '2章 かけ算（九九） - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
+
     // 2. Verify all completed IDs (STEP 1..10) are recorded
     const refreshedStudent = db.getStudents().find(s => s.id === student.id)!;
     expect(refreshedStudent.completed_lesson_ids).toContain('cm-p2-m3'); // STEP 7
@@ -708,6 +772,17 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       'cm-auto-ut-算数-小3-1章 わり算の基礎'
     );
     await db.saveStudent(refreshedStudent);
+    await db.saveMiniTestResult({
+      id: 'ut-pass-warizan-sync-2',
+      student_id: refreshedStudent.id,
+      subject: '算数',
+      unit_name: '1章 わり算の基礎',
+      test_content: '1章 わり算の基礎 - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: '2026-08-18'
+    });
 
     const nextLesson = findNextUncompletedLessonForSubject({
       student: refreshedStudent,

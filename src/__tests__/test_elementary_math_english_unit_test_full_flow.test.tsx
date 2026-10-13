@@ -217,7 +217,20 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
     const nextEngPassed = findNextUncompletedLessonForSubject({
       student: studentPassed,
       subject: '英語',
-      curriculumMasters: processedEnglish
+      curriculumMasters: processedEnglish,
+      miniTestResults: [
+        {
+          id: 'mini-ut-eng-passed',
+          student_id: student.id,
+          subject: '英語',
+          unit_name: iamTest?.unit_name || 'I am ~.',
+          test_content: iamTest?.lesson_name || 'I am ~. - 単元確認テスト',
+          status: 'passed',
+          passed: true,
+          score: 100,
+          date: '2026-09-22'
+        }
+      ]
     });
     expect(nextEngPassed.lessonName).toContain('You are ~.(1)');
   });

@@ -225,6 +225,21 @@ describe('Elementary Timeline Step Range and Test Sync Suite', () => {
     };
     await db.saveStudent(student);
 
+    // 生徒は過去の「She is ~.」単元確認テストの合格記録を持っている
+    const pastMiniResult: MiniTestResult = {
+      id: 'mini-she-ut-passed-3',
+      student_id: student.id,
+      subject: '英語',
+      date: '2026-10-01',
+      test_type: 'unit_test',
+      unit_name: 'She is ~. かのじょは~です。',
+      test_content: '英語: She is ~. かのじょは~です。 - 単元確認テスト',
+      score: 100,
+      passed: true,
+      status: 'passed'
+    };
+    await db.saveMiniTestResult(pastMiniResult);
+
     // 生徒が「I like ○○○...」の単元確認テストを受験して100点で合格した
     const likeMiniResult: MiniTestResult = {
       id: 'mini-like-ut-passed',

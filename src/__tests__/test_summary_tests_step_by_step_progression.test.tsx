@@ -167,7 +167,19 @@ describe('Step-by-Step Summary Tests Progression & Auto Reschedule', () => {
         curriculumUnits: [],
         schoolId: baseStudent.school_id,
         lessonProgressList: [],
-        miniTestResults: []
+        miniTestResults: [
+          {
+            id: 'mini-zero-pass',
+            student_id: baseStudent.id,
+            subject: '算数',
+            unit_name: '0の たしざんと ひきざん',
+            test_content: '0の たしざんと ひきざん - 単元確認テスト',
+            status: 'passed',
+            passed: true,
+            score: 100,
+            date: '2026-09-01'
+          }
+        ]
       });
 
       // 単元2のまとめテスト（２）が返されるべきであり、決して単元テストにスキップしてはならない！
@@ -194,7 +206,19 @@ describe('Step-by-Step Summary Tests Progression & Auto Reschedule', () => {
         curriculumUnits: [],
         schoolId: baseStudent.school_id,
         lessonProgressList: [],
-        miniTestResults: []
+        miniTestResults: [
+          {
+            id: 'mini-iam-pass-1',
+            student_id: baseStudent.id,
+            subject: '英語',
+            unit_name: 'I am 〜. わたしは〜です。',
+            test_content: 'I am ~. わたしは〜です。 - 単元確認テスト',
+            status: 'passed',
+            passed: true,
+            score: 100,
+            date: '2026-09-01'
+          }
+        ]
       });
 
       // 過去の「I am 〜」ではなく、新単元「You are 〜. あなたは〜です。」のSTEP 1に進むべき！
@@ -217,7 +241,20 @@ describe('Step-by-Step Summary Tests Progression & Auto Reschedule', () => {
         periodCount: 1,
         selectedSubjects: ['英語'],
         curriculumMasters: testMasters,
-        schoolId: baseStudent.school_id
+        schoolId: baseStudent.school_id,
+        miniTestResults: [
+          {
+            id: 'mini-iam-pass-2',
+            student_id: baseStudent.id,
+            subject: '英語',
+            unit_name: 'I am 〜. わたしは〜です。',
+            test_content: 'I am 〜. わたしは〜です。 - 単元確認テスト',
+            status: 'passed',
+            passed: true,
+            score: 100,
+            date: '2026-09-01'
+          }
+        ]
       });
 
       expect(slots[1].startLessonName).toContain('You are 〜. あなたは〜です。');

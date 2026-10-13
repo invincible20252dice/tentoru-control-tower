@@ -137,11 +137,29 @@ describe('Auto Reschedule Preserves Completed Lessons Specification', () => {
       selected_subjects: ['算数'],
       selected_days: ['wednesday'],
       status: 'normal',
-      // 初期レッスン cm-p1-m1, cm-p1-m2, cm-p1-m3 を完了している
-      completed_lesson_ids: ['cm-p1-m1', 'cm-p1-m2', 'cm-p1-m3'],
+      // 初期レッスン 1章全ステップおよび 2章 cm-p1-m3 を完了している
+      completed_lesson_ids: [
+        'cm-p1-m1', 'cm-p1-m2',
+        'cm-auto-sum1-算数-小1-1章 かずとすうじ',
+        'cm-auto-sum2-算数-小1-1章 かずとすうじ',
+        'cm-auto-sum3-算数-小1-1章 かずとすうじ',
+        'cm-auto-ut-算数-小1-1章 かずとすうじ',
+        'cm-p1-m3'
+      ],
       last_completed_lesson_id: 'cm-p1-m3'
     };
     await db.saveStudent(mockStudent);
+    await db.saveMiniTestResult({
+      id: 'ut-pass-auto-reschedule-1',
+      student_id: mockStudent.id,
+      subject: '算数',
+      unit_name: '1章 かずとすうじ',
+      test_content: '1章 かずとすうじ - 単元確認テスト',
+      status: 'passed',
+      passed: true,
+      score: 100,
+      date: targetDate
+    });
 
     // 既存の未完了タスク（初期レッスン cm-p1-m1 を含んでいた古いタスク）
     const existingTask: LearningTask = {

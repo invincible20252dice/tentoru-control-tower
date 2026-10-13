@@ -4753,8 +4753,12 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.click(allGradeBtn);
     });
 
-    // Verify that the start unit step is displayed as 📍 現在地（取り組み中）
-    expect(screen.getAllByText('📍 現在地（取り組み中）').length).toBeGreaterThan(0);
+    // Verify that the start unit step is displayed with ⭐ スタートライン
+    expect(screen.getByText('⭐ スタートライン')).toBeInTheDocument();
+    const p4m1 = screen.getByTestId('timeline-item-cm-p4-m1');
+    expect(p4m1).toHaveTextContent('⭐ スタートライン');
+    expect(p4m1).toHaveTextContent('○ 予定');
+
     // Verify that other uncompleted steps are displayed as ○ 予定 (not prematurely marked as completed)
     expect(screen.getAllByText('○ 予定').length).toBeGreaterThan(0);
     expect(screen.queryAllByText('✓ 完了').length).toBe(0);

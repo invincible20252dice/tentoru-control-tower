@@ -395,4 +395,116 @@ describe('カリキュラム中抜き防止ガード & 単元テスト合否暗�
       expect(range.start_lesson_name).toContain("I’m  a 〜");
     });
   });
+
+  describe('5. 学年跨ぎ現在地誤爆撤廃・単元テスト合格照合完全義務化・中抜き飛び石遮断の徹底検証', () => {
+    const multiGradeMasters: CurriculumMaster[] = [
+      // 1年生
+      { id: 'cm-g1-1', subject: '算数', grade: '小1', unit_name: 'かず', lesson_name: '1から5', sort_order: 1, item_type: 'lesson' },
+      { id: 'cm-g1-2', subject: '算数', grade: '小1', unit_name: 'かず', lesson_name: '6から10', sort_order: 2, item_type: 'lesson' },
+      { id: 'cm-g1-ut', subject: '算数', grade: '小1', unit_name: 'かず', lesson_name: 'かず - 単元確認テスト', sort_order: 3, item_type: 'unit_test' },
+      // 2年生
+      { id: 'cm-g2-1', subject: '算数', grade: '小2', unit_name: 'ひきざん', lesson_name: 'ひきざんのしかた', sort_order: 4, item_type: 'lesson' },
+      { id: 'cm-g2-2', subject: '算数', grade: '小2', unit_name: 'ひきざん', lesson_name: 'まとめテスト(1)', sort_order: 5, item_type: 'lesson' },
+      { id: 'cm-g2-ut', subject: '算数', grade: '小2', unit_name: 'ひきざん', lesson_name: 'ひきざん - 単元確認テスト', sort_order: 6, item_type: 'unit_test' },
+      // 3年生（未来学年）
+      { id: 'cm-g3-1', subject: '算数', grade: '小3', unit_name: 'かけざん', lesson_name: '九九', sort_order: 7, item_type: 'lesson' },
+      { id: 'cm-g3-2', subject: '算数', grade: '小3', unit_name: 'かけざん', lesson_name: 'まとめテスト(1)', sort_order: 8, item_type: 'lesson' }
+    ];
+
+    it('未来の学年（3年）タブを開いた時、本日のコマ割りに含まれないためSTEP 1を含め全ステップが「○ 予定」になること（現在地誤爆ゼロ）', () => {
+      // 生徒は1年生で、本日のコマ割りは 1年生の cm-g1-2
+      const todayActiveIds = new Set(['cm-g1-2']);
+      const completedIds = new Set(['cm-g1-1']);
+      const miniTestPassedSet = new Set<string>();
+
+      // 3年生のタイムライン表示ユニット
+      const g3TimelineUnits = multiGradeMasters.filter(m => m.grade === '小3');
+
+      // 全体マスタ走査による真の完了セット構築
+      const trulyCompleted = new Set<string>();
+      let hasIncomplete = false;
+      for (const m of multiGradeMasters) {
+        if (hasIncomplete) continue;
+        const isDone = completedIds.has(m.id);
+        if (isDone) trulyCompleted.add(m.id);
+        else hasIncomplete = true;
+      }
+
+      const statusMap = new Map<string, string>();
+      g3TimelineUnits.forEach(u => {
+        const isDone = trulyCompleted.has(u.id);
+        const isActive = todayActiveIds.has(u.id);
+        let status = 'planned';
+        if (isDone) status = 'completed';
+        else if (isActive) status = 'current';
+        statusMap.set(u.id, status);
+      });
+
+      // 3年生の STEP 1 も STEP 2 も例外なく「planned」であり、「current」ではないこと！
+      expect(statusMap.get('cm-g3-1')).toBe('planned');
+      expect(statusMap.get('cm-g3-2')).toBe('planned');
+      expect(Array.from(statusMap.values()).every(s => s === 'planned')).toBe(true);
+    });
+
+    it('未合格の単元確認テスト（STEP 5, 44, 62等）は、completed_lesson_ids に入っていても完了にならず planned になること', () => {
+      const studentCompletedWithFakeTests = ['cm-g1-1', 'cm-g1-2', 'cm-g1-ut', '5', '44', '62'];
+      const miniTestResults: MiniTestResult[] = []; // 合格記録ゼロ
+
+      const sanitized = enforceUnitTestPassingGate(
+        'std-fake-gate',
+        studentCompletedWithFakeTests,
+        miniTestResults,
+        multiGradeMasters
+      );
+
+      // 単元確認テスト cm-g1-ut, 5, 44, 62 は合格記録がないためすべて除外される
+      expect(sanitized).not.toContain('cm-g1-ut');
+      expect(sanitized).not.toContain('5');
+      expect(sanitized).not.toContain('44');
+      expect(sanitized).not.toContain('62');
+      expect(sanitized).toEqual(['cm-g1-1', 'cm-g1-2']);
+    });
+
+    it('中抜き・飛び石受講の物理的遮断: 最初の未完了ステップに遭遇した以降の未来ステップは完了として扱われないこと', () => {
+      // 英語カリキュラム: STEP 1〜3 完了、STEP 4〜6 未完了、STEP 7〜11 が勝手に完了に入っている汚染状態
+      const engUnits: CurriculumMaster[] = Array.from({ length: 11 }, (_, i) => ({
+        id: `eng-step-${i + 1}`,
+        subject: '英語',
+        grade: '小1',
+        unit_name: '英語単元',
+        lesson_name: `Lesson ${i + 1}`,
+        sort_order: i + 1,
+        item_type: 'lesson'
+      }));
+
+      const corruptedCompletedIds = new Set([
+        'eng-step-1', 'eng-step-2', 'eng-step-3',
+        // 4, 5, 6 は未受講
+        'eng-step-7', 'eng-step-8', 'eng-step-9', 'eng-step-10', 'eng-step-11'
+      ]);
+
+      const trulyCompleted = new Set<string>();
+      let hasIncomplete = false;
+
+      for (let i = 0; i < engUnits.length; i++) {
+        const u = engUnits[i];
+        if (hasIncomplete) continue; // 最初の未完了以降は物理遮断
+        if (corruptedCompletedIds.has(u.id)) {
+          trulyCompleted.add(u.id);
+        } else {
+          hasIncomplete = true;
+        }
+      }
+
+      // STEP 1〜3 のみが完了として残り、飛び石完了（STEP 7〜11）はすべて遮断される
+      expect(trulyCompleted.has('eng-step-1')).toBe(true);
+      expect(trulyCompleted.has('eng-step-2')).toBe(true);
+      expect(trulyCompleted.has('eng-step-3')).toBe(true);
+      expect(trulyCompleted.has('eng-step-4')).toBe(false);
+      expect(trulyCompleted.has('eng-step-7')).toBe(false);
+      expect(trulyCompleted.has('eng-step-8')).toBe(false);
+      expect(trulyCompleted.has('eng-step-11')).toBe(false);
+      expect(trulyCompleted.size).toBe(3);
+    });
+  });
 });

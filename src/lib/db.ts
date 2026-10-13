@@ -770,8 +770,20 @@ export function enforceUnitTestPassingGate(
     const passScore = r.passing_line ? parseInt(r.passing_line.match(/\d+/)?.[0] || '80', 10) : 80;
     const isPassed = r.passed === true || r.status === 'passed' || r.status === '合格' || (r.score !== null && r.score !== undefined && r.score >= passScore);
     if (isPassed) {
-      if (r.test_content) passedTestContents.add(r.test_content.trim());
-      if (r.unit_name) passedTestContents.add(r.unit_name.trim());
+      if (r.test_content) {
+        const cleanContent = r.test_content.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+        passedTestContents.add(r.test_content.trim());
+        passedTestContents.add(cleanContent);
+        passedTestContents.add(cleanContent.replace(/\s+/g, ' '));
+        passedTestContents.add(cleanContent.replace(/\s+/g, '　'));
+      }
+      if (r.unit_name) {
+        const cleanUnit = r.unit_name.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
+        passedTestContents.add(r.unit_name.trim());
+        passedTestContents.add(cleanUnit);
+        passedTestContents.add(cleanUnit.replace(/\s+/g, ' '));
+        passedTestContents.add(cleanUnit.replace(/\s+/g, '　'));
+      }
     }
   });
 
@@ -779,22 +791,45 @@ export function enforceUnitTestPassingGate(
   const unpassedTestIds = new Set<string>();
 
   allMasters.forEach(m => {
-    const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || 
-                            (m.lesson_name || '').toLowerCase().includes('check test') ||
-                            (m.unit_name || '').includes('まとめテスト') ||
-                            (m.unit_name || '').toLowerCase().includes('check test');
+    const mLesson = (m.lesson_name || '').trim();
+    const mUnit = (m.unit_name || '').trim();
+    const isReviewOrCheck = mLesson.includes('まとめテスト') || 
+                            mLesson.toLowerCase().includes('check test') ||
+                            mUnit.includes('まとめテスト') ||
+                            mUnit.toLowerCase().includes('check test');
     const isUT = !isReviewOrCheck && (
       m.item_type === 'unit_test' || 
-      Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))
+      Boolean(mLesson && (mLesson.includes('単元確認テスト') || mLesson.includes('単元テスト')))
     );
     if (isUT) {
-      const hasPassed = (m.lesson_name && passedTestContents.has(m.lesson_name.trim())) || 
-                        (m.unit_name && passedTestContents.has(m.unit_name.trim()));
+      const cleanLesson = mLesson.replace(/^[^-]+-\s*/, '').trim();
+      const hasPassed = (mLesson && passedTestContents.has(mLesson)) || 
+                        (cleanLesson && passedTestContents.has(cleanLesson)) ||
+                        (mUnit && (passedTestContents.has(mUnit) || passedTestContents.has(`${mUnit} - 単元確認テスト`)));
       if (!hasPassed) {
         unpassedTestIds.add(String(m.id).trim());
         if (m.sort_order !== undefined) {
           unpassedTestIds.add(String(m.sort_order).trim());
           unpassedTestIds.add(`STEP ${m.sort_order}`.trim());
+        }
+        if (mLesson) unpassedTestIds.add(mLesson);
+        if (mUnit) {
+          unpassedTestIds.add(`${mUnit} - 単元確認テスト`);
+          unpassedTestIds.add(`cm-auto-ut-${m.subject}-${m.grade}-${mUnit}`);
+        }
+      }
+    } else {
+      // 算数や英語でテストアイテムがない単元の場合の自動生成テストIDも合否照合
+      const isMathOrEng = m.subject === '算数' || m.subject === '数学' || m.subject === '英語';
+      if (isMathOrEng && mUnit && mUnit !== '単元未設定') {
+        const autoTestKey = `${mUnit} - 単元確認テスト`;
+        const hasPassed = passedTestContents.has(mUnit) || passedTestContents.has(autoTestKey);
+        if (!hasPassed) {
+          unpassedTestIds.add(autoTestKey);
+          unpassedTestIds.add(`cm-auto-ut-${m.subject}-${m.grade}-${mUnit}`);
+          if (m.grade) {
+            unpassedTestIds.add(`cm-auto-ut-${m.subject}-${m.grade.replace(/小学|小/, '小')}-${mUnit}`);
+          }
         }
       }
     }
@@ -807,14 +842,20 @@ export function enforceUnitTestPassingGate(
                        passedTestContents.has('かずと　すうじ - 単元確認テスト') ||
                        passedTestContents.has('1章 かずとすうじ') ||
                        passedTestContents.has('1章 かずとすうじ - 単元確認テスト');
-  if (!isKazuPassed) {
-    [
-      '5', 'STEP 5', 'cm-kazu-test', 'cm-auto-ut-5', 
-      'cm-auto-ut-算数-小1-かずと すうじ', 'cm-auto-ut-算数-小1-かずと　すうじ',
-      'かずと すうじ - 単元確認テスト', 'かずと　すうじ - 単元確認テスト',
-      '1章 かずとすうじ - 単元確認テスト', 'cm-auto-ut-算数-小1-1章 かずとすうじ'
-    ].forEach(id => unpassedTestIds.add(id));
-  }
+  // 算数・英語等の主要単元確認テスト（STEP 5, 44, 62等）の未合格除外
+  const knownUnitTestStepIds = [
+    '5', 'STEP 5', 'cm-kazu-test', 'cm-auto-ut-5', 
+    'cm-auto-ut-算数-小1-かずと すうじ', 'cm-auto-ut-算数-小1-かずと　すうじ',
+    'かずと すうじ - 単元確認テスト', 'かずと　すうじ - 単元確認テスト',
+    '1章 かずとすうじ - 単元確認テスト', 'cm-auto-ut-算数-小1-1章 かずとすうじ',
+    '44', 'STEP 44', 'cm-auto-ut-44', '62', 'STEP 62', 'cm-auto-ut-62'
+  ];
+  knownUnitTestStepIds.forEach(id => {
+    const isStepPassed = (id === '5' || id.includes('かずと') || id.includes('kazu')) ? isKazuPassed : passedTestContents.has(id);
+    if (!isStepPassed) {
+      unpassedTestIds.add(id);
+    }
+  });
 
   return completedIds.filter(id => !unpassedTestIds.has(String(id).trim()));
 }
