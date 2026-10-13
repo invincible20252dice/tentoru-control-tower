@@ -80,6 +80,19 @@ export default function Home() {
       setStudentsList(db.getStudents());
       setIsInitializing(false);
 
+      // URLパラメータから日付・生徒の初期化
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
+        if (queryDate) {
+          setSelectedScheduleDate(queryDate);
+        }
+        const queryStudentId = urlParams.get('studentId') || urlParams.get('student_id');
+        if (queryStudentId) {
+          setSelectedStudentId(queryStudentId);
+        }
+      }
+
       try {
         const fetched = await db.fetchStudents();
         if (fetched && fetched.length > 0) {
@@ -195,6 +208,8 @@ export default function Home() {
           initialBranchId={session?.user?.branch_id || undefined}
           initialStudentId={selectedStudentId || undefined}
           initialDate={selectedScheduleDate || undefined}
+          targetDate={selectedScheduleDate || undefined}
+          onDateChange={(date: string) => setSelectedScheduleDate(date)}
           initialTab={teacherTab}
         />
       </div>

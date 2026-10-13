@@ -3538,6 +3538,46 @@ class DatabaseService {
       }
     }
     const list = this.getMiniTestResults();
+
+    // 同一生徒・同一日付・同一テスト（表記揺れ正規化を含む）の既存レコードを自動検出しID再利用で二重登録を完全根絶
+    const isSameSubject = (sub1?: string | null, sub2?: string | null) => {
+      if (!sub1 || !sub2) return true;
+      if (sub1 === sub2) return true;
+      if ((sub1 === '算数' && sub2 === '数学') || (sub1 === '数学' && sub2 === '算数')) return true;
+      return false;
+    };
+    const cleanContent = (c?: string | null) => (c || '')
+      .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .replace(/[\s\u3000]+/g, ' ')
+      .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
+      .trim()
+      .toLowerCase();
+
+    const existingMatch = list.find(r => {
+      if (r.id === sanitized.id) return true;
+      if (r.student_id === sanitized.student_id && r.date === sanitized.date && isSameSubject(r.subject, sanitized.subject)) {
+        if (r.test_content === sanitized.test_content) return true;
+        const c1 = cleanContent(r.test_content);
+        const c2 = cleanContent(sanitized.test_content);
+        if (c1 && c2 && (c1 === c2 || c1.includes(c2) || c2.includes(c1))) return true;
+        if (r.unit_name && sanitized.unit_name) {
+          const u1 = cleanContent(r.unit_name);
+          const u2 = cleanContent(sanitized.unit_name);
+          if (u1 && u2 && (u1 === u2 || u1.includes(u2) || u2.includes(u1))) return true;
+        }
+      }
+      return false;
+    });
+
+    if (existingMatch && existingMatch.id !== sanitized.id) {
+      sanitized.id = existingMatch.id;
+      if (sanitized.score === null && existingMatch.score !== null) sanitized.score = existingMatch.score;
+      if (sanitized.passed === null && existingMatch.passed !== null) sanitized.passed = existingMatch.passed;
+      if (!sanitized.status && existingMatch.status) sanitized.status = existingMatch.status;
+      sanitized.created_at = existingMatch.created_at;
+    }
+
     const idx = list.findIndex(r => r.id === sanitized.id);
     if (idx >= 0) list[idx] = sanitized;
     else list.push(sanitized);
@@ -5440,3 +5480,4 @@ class DatabaseService {
 }
 
 export const db = new DatabaseService();
+export { isMatchingUnitOrTest } from './scheduler';

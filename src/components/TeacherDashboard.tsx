@@ -101,6 +101,8 @@ interface TeacherDashboardProps {
   initialRole?: UserRole;
   initialBranchId?: string;
   initialDate?: string;
+  targetDate?: string;
+  onDateChange?: (date: string) => void;
 }
 
 const isValidUUID = (str?: string | null): boolean => {
@@ -304,7 +306,9 @@ export default function TeacherDashboard({
   teacherType: propTeacherType,
   initialRole,
   initialBranchId,
-  initialDate
+  initialDate,
+  targetDate,
+  onDateChange
 }: TeacherDashboardProps) {
   // State
   const [currentTeacherType, setCurrentTeacherType] = useState<'elementary' | 'junior_high' | 'high_school' | 'all'>(() => {
@@ -490,10 +494,21 @@ export default function TeacherDashboard({
   }, [initialTab]);
 
   useEffect(() => {
-    if (initialDate) {
-      setScheduleDate(initialDate);
+    const effectiveDate = targetDate || initialDate;
+    if (effectiveDate) {
+      setScheduleDate(effectiveDate);
     }
-  }, [initialDate]);
+  }, [targetDate, initialDate]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
+      if (queryDate && !targetDate && !initialDate) {
+        setScheduleDate(queryDate);
+      }
+    }
+  }, [targetDate, initialDate]);
 
   useEffect(() => {
     if (initialStudentId && students && students.length > 0) {
@@ -1124,7 +1139,16 @@ export default function TeacherDashboard({
   const [schoolUnits, setSchoolUnits] = useState<CurriculumUnit[]>([]);
 
   // Daily Scheduler State
-  const [scheduleDate, setScheduleDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
+  const [scheduleDate, setScheduleDate] = useState(() => {
+    if (targetDate) return targetDate;
+    if (initialDate) return initialDate;
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
+      if (queryDate) return queryDate;
+    }
+    return new Date().toISOString().split('T')[0];
+  });
   const [studentTasks, setStudentTasks] = useState<LearningTask[]>([]);
   const [applyScope, setApplyScope] = useState<'individual' | 'school' | 'grade' | 'level'>('individual');
   
@@ -2856,9 +2880,19 @@ export default function TeacherDashboard({
         // 複数のテスト結果 (MiniTestResult) を一括同期保存 (対象スコープ一括複製対応)
         const existingMiniResultsForToday = allMiniTestResults.filter(r => r.student_id === student.id && r.date === scheduleDate);
         const savedTestIds = new Set<string>();
-        for (const test of todayTests) {
-          if (!test.content.trim()) continue;
 
+        // 保存前に同一教科・同一テスト内容の重複を厳格に排除（二重登録バグ恒久根絶）
+        const deduplicatedTodayTests: typeof todayTests = [];
+        const seenTestKeys = new Set<string>();
+        for (const test of todayTests) {
+          if (!test.content || !test.content.trim() || test.content.includes('-- 単元テストマスタから選択 --')) continue;
+          const cleanKey = `${test.subject || ''}_${normalizeUnitName(test.content) || test.content.trim()}`;
+          if (seenTestKeys.has(cleanKey)) continue;
+          seenTestKeys.add(cleanKey);
+          deduplicatedTodayTests.push(test);
+        }
+
+        for (const test of deduplicatedTodayTests) {
           let relStudents = [student];
           if (test.targetScope === 'grade') {
             relStudents = students.filter(s => s.grade === student.grade);
@@ -2869,7 +2903,13 @@ export default function TeacherDashboard({
           }
 
           for (const relSt of relStudents) {
-            const relExisting = allMiniTestResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.test_content === test.content);
+            const relExisting = allMiniTestResults.find(r => 
+              r.student_id === relSt.id && 
+              r.date === scheduleDate && 
+              (r.test_content === test.content || 
+               isMatchingUnitOrTest(r.test_content, test.content) ||
+               (test.unitName && (r.unit_name === test.unitName || isMatchingUnitOrTest(r.unit_name, test.unitName))))
+            );
             const testData: MiniTestResult = {
               id: relExisting?.id || `mini-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               student_id: relSt.id,
@@ -2883,9 +2923,9 @@ export default function TeacherDashboard({
               target_scope: test.targetScope || 'individual',
               created_at: relExisting?.created_at || new Date().toISOString()
             };
-            await db.saveMiniTestResult(testData);
+            const savedResult = await db.saveMiniTestResult(testData);
             if (relSt.id === student.id) {
-              savedTestIds.add(testData.id);
+              savedTestIds.add(savedResult.id);
             }
           }
         }
@@ -9234,6 +9274,14 @@ export default function TeacherDashboard({
                   // タイムラインの現在地（📍マーク/青枠）はヘッダーで選択されている当日（対象日付: scheduleDate || sysTodayStr）のみに厳密限定（他日程の混入による分裂を完全防止）
                   const targetActiveDate = scheduleDate || sysTodayStr;
                   let activeTasks = uncompletedTasks.filter(t => t.scheduled_date === targetActiveDate && t.period !== null);
+                  if (activeTasks.length === 0) {
+                    const scheduledOnTarget = targetSubjectTasks.filter(t => t.scheduled_date === targetActiveDate && t.period !== null);
+                    if (scheduledOnTarget.length > 0) {
+                      activeTasks = scheduledOnTarget;
+                    } else {
+                      activeTasks = uncompletedTasks.filter(t => t.scheduled_date === studentActiveDate && t.period !== null);
+                    }
+                  }
 
                   // タイムライン内ユニットとの表記揺れ吸収マッチング関数
                   const matchesTimelineUnit = (u: any, query: string, queryId?: string): boolean => {
@@ -9414,6 +9462,9 @@ export default function TeacherDashboard({
                       });
                       if (matchedTestUnit) {
                         todayActiveLessonIds.add(String(matchedTestUnit.id));
+                        if ((matchedTestUnit as any).sort_order !== undefined) {
+                          todayActiveLessonIds.add(String((matchedTestUnit as any).sort_order));
+                        }
                       }
                     }
                   });
@@ -9985,8 +10036,36 @@ export default function TeacherDashboard({
                             </div>
                           )}
 
-                          <div style={{ fontSize: '0.9rem' }}>
-                            現在の日付: <strong style={{ color: '#4f46e5' }}>{scheduleDate}</strong>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '0.9rem' }}>
+                              現在の日付: <strong style={{ color: '#4f46e5' }} data-testid="timeline-current-date-text">{scheduleDate}</strong>
+                            </div>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>対象日付（コマ割り反映日）: </label>
+                            <input
+                              type="date"
+                              data-testid="timeline-schedule-date-picker"
+                              value={scheduleDate}
+                              onChange={e => {
+                                const newDate = e.target.value;
+                                setScheduleDate(newDate);
+                                if (onDateChange) onDateChange(newDate);
+                              }}
+                              className={styles.input}
+                              style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem' }}
+                            />
+                            <button
+                              type="button"
+                              data-testid="timeline-today-btn"
+                              onClick={() => {
+                                const todayStr = new Date().toISOString().split('T')[0];
+                                setScheduleDate(todayStr);
+                                if (onDateChange) onDateChange(todayStr);
+                              }}
+                              className={styles.btn}
+                              style={{ width: 'auto', padding: '4px 10px', fontSize: '0.8rem', background: '#4f46e5' }}
+                            >
+                              今日
+                            </button>
                           </div>
                         </div>
 
