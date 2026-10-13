@@ -3564,9 +3564,13 @@ export default function TeacherDashboard({
     const rangeTexts: string[] = [];
     Object.values(periodsObj).forEach((sel: any) => {
       if (!sel || (sel.subject !== sub && sel.subject !== normSub)) return;
-      const isTest = (sel.startLessonName && sel.startLessonName.includes('テスト')) ||
-                     (sel.endLessonName && sel.endLessonName.includes('テスト')) ||
-                     (sel.lessonRange && sel.lessonRange.includes('テスト'));
+      const isReviewOrCheck = (sel.startLessonName && (sel.startLessonName.includes('まとめテスト') || sel.startLessonName.toLowerCase().includes('check test'))) ||
+                              (sel.endLessonName && (sel.endLessonName.includes('まとめテスト') || sel.endLessonName.toLowerCase().includes('check test'))) ||
+                              (sel.lessonRange && (sel.lessonRange.includes('まとめテスト') || sel.lessonRange.toLowerCase().includes('check test')));
+      const isTest = !isReviewOrCheck && (
+                     (sel.startLessonName && (sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト'))) ||
+                     (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト'))) ||
+                     (sel.lessonRange && (sel.lessonRange.includes('単元確認テスト') || sel.lessonRange.includes('単元テスト'))));
       if (isTest) return;
 
       if (sel.lessonRange) {
@@ -6081,7 +6085,8 @@ export default function TeacherDashboard({
                               const allMasters = ensureMathEnglishUnitTests(curriculumMastersList);
                               const unitTestMasters = allMasters.filter(m => 
                                 !m.lesson_name?.includes('まとめテスト') &&
-                                (m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('テスト')) || Boolean(m.lesson_name?.includes('確認'))) &&
+                                !m.lesson_name?.toLowerCase().includes('check test') &&
+                                (m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('単元確認テスト')) || Boolean(m.lesson_name?.includes('単元テスト'))) &&
                                 (m.subject === testSub || (testSub === '算数' && m.subject === '数学') || (testSub === '数学' && m.subject === '算数'))
                               );
 
@@ -9242,16 +9247,18 @@ export default function TeacherDashboard({
                   };
 
                   const hasTasksScheduled = activeTasks.length > 0;
-                  activeTasks.forEach(task => {
-                    extractLessonIdsFromSlot(task).forEach(id => todayActiveLessonIds.add(id));
-                  });
+                  if (hasTasksScheduled) {
+                    activeTasks.forEach(task => {
+                      extractLessonIdsFromSlot(task).forEach(id => todayActiveLessonIds.add(id));
+                    });
 
-                  Object.values(periodSelections).forEach(p => {
-                    const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
-                    if (isTargetSub) {
-                      extractLessonIdsFromSlot(p).forEach(id => todayActiveLessonIds.add(id));
-                    }
-                  });
+                    Object.values(periodSelections).forEach(p => {
+                      const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
+                      if (isTargetSub) {
+                        extractLessonIdsFromSlot(p).forEach(id => todayActiveLessonIds.add(id));
+                      }
+                    });
+                  }
 
                   // 1-b. 単元テスト特化日（通常コマ0件でテスト枠のみの日）またはテスト枠に該当教科の単元テストがある場合の連動（当日のみ厳密限定）
                   const todayMiniTests = miniTestResultsList.filter(m => 

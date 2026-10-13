@@ -4,7 +4,8 @@ import {
   generateSlotsForSelectedSubjects, 
   CurriculumSkipViolationError,
   getDisplaySteps,
-  getLessonRangeStepIds
+  getLessonRangeStepIds,
+  findNextUncompletedLessonForSubject
 } from '../lib/scheduler';
 import { 
   db, 
@@ -256,6 +257,142 @@ describe('カリキュラム中抜き防止ガード & 単元テスト合否暗�
       });
       expect(steps.length).toBe(3);
       expect(steps.map(s => s.id)).toEqual(['cm-jp-1', 'cm-jp-2', 'cm-jp-3']);
+    });
+  });
+
+  describe('4. 受入基準 5大 Invariants 完全性検証', () => {
+    it('Invariant 1 & 5: 国語コマ3が「かきじゅん - まとめテスト(1)〜(3)」の3件を展開し、1件に丸め込まれないこと', () => {
+      const kakijunMasters: CurriculumMaster[] = [
+        { id: 'cm-auto-sum1-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'かきじゅん - まとめテスト(1)', sort_order: 8, item_type: 'lesson' },
+        { id: 'cm-auto-sum2-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'かきじゅん - まとめテスト(2)', sort_order: 9, item_type: 'lesson' },
+        { id: 'cm-auto-sum3-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'かきじゅん - まとめテスト(3)', sort_order: 10, item_type: 'lesson' }
+      ];
+
+      const jpTask3 = {
+        subject: '国語',
+        start_lesson_name: 'かきじゅん - まとめテスト(1)',
+        end_lesson_name: 'かきじゅん - まとめテスト(3)',
+        start_lesson_id: 'cm-auto-sum1-国語-小2-かきじゅん',
+        end_lesson_id: 'cm-auto-sum3-国語-小2-かきじゅん',
+        lesson_range: 'かきじゅん - まとめテスト(1) 〜 かきじゅん - まとめテスト(3)',
+        custom_unit_name: 'かきじゅん - まとめテスト(1) 〜 かきじゅん - まとめテスト(3)',
+        lesson_ids: ['cm-auto-sum1-国語-小2-かきじゅん', 'cm-auto-sum2-国語-小2-かきじゅん', 'cm-auto-sum3-国語-小2-かきじゅん']
+      };
+
+      const resolved = getDisplaySteps(jpTask3, {
+        curriculumMasters: kakijunMasters,
+        studentGrade: '小2'
+      });
+
+      expect(resolved.length).toBe(3);
+      expect(resolved[0].id).toBe('cm-auto-sum1-国語-小2-かきじゅん');
+      expect(resolved[1].id).toBe('cm-auto-sum2-国語-小2-かきじゅん');
+      expect(resolved[2].id).toBe('cm-auto-sum3-国語-小2-かきじゅん');
+      expect(resolved.every(s => !s.isUnitTest)).toBe(true);
+    });
+
+    it('Invariant 2: 国語タイムラインにおいて、STEP 8〜10 が現在地であり、STEP 8の手前に未完了が存在しないこと', () => {
+      const fullMasters: CurriculumMaster[] = [
+        ...Array.from({ length: 4 }, (_, i) => ({
+          id: `cm-1786672452619-${i + 1}`,
+          subject: '国語',
+          grade: '小1',
+          unit_name: 'ことばあそび',
+          lesson_name: `ことばあそび(${i + 1})`,
+          sort_order: i + 1,
+          item_type: 'lesson' as const
+        })),
+        { id: 'cm-1786672452619-5', subject: '国語', grade: '小1', unit_name: 'ことばあそび', lesson_name: 'まとめテスト（１）', sort_order: 5, item_type: 'lesson' as const },
+        { id: 'cm-1786672452619-6', subject: '国語', grade: '小1', unit_name: 'ことばあそび', lesson_name: 'まとめテスト（２）', sort_order: 6, item_type: 'lesson' as const },
+        { id: 'cm-1786672452619-7', subject: '国語', grade: '小1', unit_name: 'ことばあそび', lesson_name: 'まとめテスト（３）', sort_order: 7, item_type: 'lesson' as const },
+        { id: 'cm-auto-sum1-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'まとめテスト(1)', sort_order: 8, item_type: 'lesson' },
+        { id: 'cm-auto-sum2-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'まとめテスト(2)', sort_order: 9, item_type: 'lesson' },
+        { id: 'cm-auto-sum3-国語-小2-かきじゅん', subject: '国語', grade: '小2', unit_name: 'かきじゅん', lesson_name: 'まとめテスト(3)', sort_order: 10, item_type: 'lesson' },
+        { id: 'cm-1786672452619-11', subject: '国語', grade: '小2', unit_name: '次単元', lesson_name: '授業11', sort_order: 11, item_type: 'lesson' }
+      ];
+
+      // STEP 1〜7 が完了している生徒
+      const completedIds = Array.from({ length: 7 }, (_, i) => `cm-1786672452619-${i + 1}`);
+      const student: Student = {
+        ...sampleStudent,
+        completed_lesson_ids: completedIds
+      };
+
+      // 次の未完了ステップを探す
+      const next = findNextUncompletedLessonForSubject({
+        student,
+        subject: '国語',
+        tasks: [],
+        curriculumMasters: fullMasters
+      });
+
+      expect(next).toBeDefined();
+      expect(next?.lessonId).toBe('cm-auto-sum1-国語-小2-かきじゅん');
+      expect(next?.masterIndex).toBe(7); // STEP 8 (index 7)
+
+      // 手前（STEP 1〜7）に未完了が存在しないことの確認
+      for (let i = 0; i < 7; i++) {
+        expect(completedIds).toContain(fullMasters[i].id);
+      }
+    });
+
+    it('Invariant 3: 算数 STEP 5（単元確認テスト）が completed_lesson_ids に含まれていないこと', () => {
+      const mathStudentCompleted = [
+        'cm-1786673232230-1', 'cm-auto-ut-算数-小1-かずと すうじ', '5', 'STEP 5'
+      ];
+      const sanitized = enforceUnitTestPassingGate(
+        'std-math',
+        mathStudentCompleted,
+        [], // 合格記録なし
+        [
+          { id: 'cm-1786673232230-1', subject: '算数', grade: '小1', unit_name: 'かずとすうじ', lesson_name: '授業1', sort_order: 1, item_type: 'lesson' },
+          { id: 'cm-auto-ut-算数-小1-かずと すうじ', subject: '算数', grade: '小1', unit_name: 'かずとすうじ', lesson_name: 'かずと すうじ - 単元確認テスト', sort_order: 5, item_type: 'unit_test' }
+        ]
+      );
+
+      expect(sanitized).not.toContain('cm-auto-ut-算数-小1-かずと すうじ');
+      expect(sanitized).not.toContain('5');
+      expect(sanitized).not.toContain('STEP 5');
+      expect(sanitized).toEqual(['cm-1786673232230-1']);
+    });
+
+    it('Invariant 4: 英語コマ2が STEP 4 から開始され、Check Test へ飛ぶ乖離が発生しないこと', () => {
+      const engMasters: CurriculumMaster[] = [
+        { id: 'cm-1786672798566-1', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'I am ~. わたしは〜です。', sort_order: 1, item_type: 'lesson' },
+        { id: 'cm-1786672798566-2', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'I am 2', sort_order: 2, item_type: 'lesson' },
+        { id: 'cm-1786672798566-3', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'I am 3', sort_order: 3, item_type: 'lesson' },
+        { id: 'cm-1786672798566-4', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'I am ~. - I’m  a 〜. わたしは〜がくせい（学生）です。', sort_order: 4, item_type: 'lesson' },
+        { id: 'cm-1786672798566-5', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'I am not', sort_order: 5, item_type: 'lesson' },
+        { id: 'cm-auto-check-英語-小1-I am', subject: '英語', grade: '小1', unit_name: 'I am', lesson_name: 'Check Test', sort_order: 6, item_type: 'lesson' }
+      ];
+
+      const engStudent: Student = {
+        ...sampleStudent,
+        completed_lesson_ids: ['cm-1786672798566-1', 'cm-1786672798566-2', 'cm-1786672798566-3']
+      };
+
+      const nextEng = findNextUncompletedLessonForSubject({
+        student: engStudent,
+        subject: '英語',
+        tasks: [],
+        curriculumMasters: engMasters
+      });
+
+      expect(nextEng).toBeDefined();
+      expect(nextEng?.lessonId).toBe('cm-1786672798566-4');
+
+      const range = calculateLessonRangeForSlot({
+        subject: '英語',
+        startLessonId: nextEng!.lessonId,
+        lessonsPerSlot: 1,
+        curriculumMasters: engMasters,
+        student: engStudent,
+        enforceNoSkip: true
+      });
+
+      expect(range.start_lesson_id).toBe('cm-1786672798566-4');
+      expect(range.lesson_ids).toEqual(['cm-1786672798566-4']);
+      expect(range.start_lesson_name).toContain("I’m  a 〜");
     });
   });
 });

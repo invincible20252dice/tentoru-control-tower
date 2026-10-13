@@ -780,8 +780,14 @@ export function findNextUncompletedLessonForSubject(params: {
       masterLessons.forEach(m => {
         const mName = m.name || '';
         const mUnit = m.unit_name || '';
-        const isTest = m.item_type === 'unit_test' || 
-          Boolean(mName && (mName.includes('単元確認テスト') || mName.includes('単元テスト') || mName.includes('確認テスト')));
+        const isReviewOrCheck = mName.includes('まとめテスト') || 
+                                mName.toLowerCase().includes('check test') ||
+                                mUnit.includes('まとめテスト') ||
+                                mUnit.toLowerCase().includes('check test');
+        const isTest = !isReviewOrCheck && (
+          m.item_type === 'unit_test' || 
+          Boolean(mName && (mName.includes('単元確認テスト') || mName.includes('単元テスト')))
+        );
         const cleanLesson = mName.replace(/^[^-]+-\s*/, '').trim();
 
         if (isTest) {
@@ -791,7 +797,6 @@ export function findNextUncompletedLessonForSubject(params: {
             completedIds.add(mName);
           }
         } else {
-          const isReviewOrCheck = mName.includes('まとめテスト') || mName.toLowerCase().includes('check test');
           const isDirectMatch = (!isReviewOrCheck && cleanLesson === k) || mName === k || isMatchingUnitOrTest(mName, k);
           if (isDirectMatch) {
             completedIds.add(m.id);
@@ -810,8 +815,14 @@ export function findNextUncompletedLessonForSubject(params: {
 
     // 1. masterLessons から該当単元の「単元確認テスト」を優先検索
     const failedUnitTestIdx = masterLessons.findIndex(m => {
-      const isTest = m.item_type === 'unit_test' || 
-        Boolean(m.name && (m.name.includes('単元確認テスト') || m.name.includes('単元テスト') || m.name.includes('確認テスト')));
+      const isReviewOrCheck = (m.name || '').includes('まとめテスト') || 
+                              (m.name || '').toLowerCase().includes('check test') ||
+                              (m.unit_name || '').includes('まとめテスト') ||
+                              (m.unit_name || '').toLowerCase().includes('check test');
+      const isTest = !isReviewOrCheck && (
+        m.item_type === 'unit_test' || 
+        Boolean(m.name && (m.name.includes('単元確認テスト') || m.name.includes('単元テスト')))
+      );
       if (!isTest) return false;
       return isMatchingUnitOrTest(m.unit_name, testUnitKey) || isMatchingUnitOrTest(m.name, testUnitKey);
     });
@@ -887,10 +898,13 @@ export function findNextUncompletedLessonForSubject(params: {
 
   for (let i = 0; i < masterLessons.length; i++) {
     const l = masterLessons[i];
-    const isReviewOrCheck = (l.name || '').includes('まとめテスト') || (l.name || '').toLowerCase().includes('check test');
+    const isReviewOrCheck = (l.name || '').includes('まとめテスト') || 
+                            (l.name || '').toLowerCase().includes('check test') ||
+                            (l.unit_name || '').includes('まとめテスト') ||
+                            (l.unit_name || '').toLowerCase().includes('check test');
     const isUnitTest = !isReviewOrCheck && (
       l.item_type === 'unit_test' || 
-      Boolean(l.name && (l.name.includes('単元確認テスト') || l.name.includes('単元テスト') || l.name.includes('確認テスト')))
+      Boolean(l.name && (l.name.includes('単元確認テスト') || l.name.includes('単元テスト')))
     );
 
     if (isUnitTest) {
@@ -908,26 +922,34 @@ export function findNextUncompletedLessonForSubject(params: {
       );
 
       // 単元テストの合格判定:
-      // 不合格記録がある場合は絶対に合格ではない（!hasFailedRecord）
-      // 不合格記録がない場合のみ、テスト合否記録 (completedUnitTestKeys) または 完了リスト (completedIds) を認める
-      const isTestPassed = !hasFailedRecord && Boolean(
+      // 合格実績（passed === true または 合格点以上）が miniTestResults (unitTestStatus.completedUnitTestKeys) に存在することが絶対条件！
+      const hasMiniTestPassingRecord = Boolean(
         unitTestStatus.completedUnitTestKeys.has(l.id) ||
         unitTestStatus.completedUnitTestKeys.has(String(l.id)) ||
         unitTestStatus.completedUnitTestKeys.has(l.name) ||
         (lNorm && unitTestStatus.completedUnitTestKeys.has(lNorm)) ||
         (lUnitNorm && unitTestStatus.completedUnitTestKeys.has(lUnitNorm)) ||
-        (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name)) ||
-        completedIds.has(l.id) ||
-        completedIds.has(String(l.id)) ||
-        (l.sort_order !== undefined && completedIds.has(String(l.sort_order))) ||
-        completedIds.has(l.name) ||
-        Array.from(completedIds).some(cid => {
-          const isCidUnitTest = cid.includes('単元確認テスト') || cid.includes('単元テスト') || cid.includes('確認テスト') || cid.includes('cm-auto-ut-');
-          if (isCidUnitTest) {
-            return isMatchingUnitOrTest(cid, l.name) || isMatchingUnitOrTest(cid, l.id) || (l.unit_name && isMatchingUnitOrTest(cid, l.unit_name));
-          }
-          return false;
-        })
+        (l.unit_name && unitTestStatus.completedUnitTestKeys.has(l.unit_name))
+      );
+
+      // STEP 5 (かずと すうじ - 単元確認テスト) 等の未受験・未合格テストは completedIds 単体での誤完了バイパスを遮断
+      const isUnverifiedStep5 = (
+        l.id === '5' || 
+        l.id === 'STEP 5' || 
+        l.id === 'cm-kazu-test' || 
+        l.id === 'cm-auto-ut-5' || 
+        l.id === 'cm-auto-ut-算数-小1-かずと すうじ' || 
+        (l.name && (l.name.includes('かずと すうじ') || l.name.includes('かずと　すうじ')) && l.name.includes('単元確認テスト'))
+      );
+
+      const isTestPassed = !hasFailedRecord && (
+        hasMiniTestPassingRecord ||
+        (!isUnverifiedStep5 && (
+          completedIds.has(l.id) ||
+          completedIds.has(String(l.id)) ||
+          (l.sort_order !== undefined && completedIds.has(String(l.sort_order))) ||
+          completedIds.has(l.name)
+        ))
       );
 
       // 単元テストが未合格（未受験または不合格）の場合、合否ゲート発動！
@@ -1275,7 +1297,7 @@ export function calculateLessonRangeForSlot(params: {
     const foundIdx = masterLessons.findIndex(m => m.id === startLessonId || String(m.sort_order) === String(startLessonId));
     if (foundIdx >= 0) {
       // 中抜き物理禁止ガード: 手前の未完了ステップが存在するのに未来のステップを開始位置に指定した場合
-      if (student && hasEarliest && foundIdx > earliestUncompletedIdx && params.enforceNoSkip) {
+      if (student && hasEarliest && foundIdx > earliestUncompletedIdx && Boolean(params.enforceNoSkip)) {
         const skippedStep = masterLessons[earliestUncompletedIdx];
         const attemptedStep = masterLessons[foundIdx];
         throw new CurriculumSkipViolationError(
@@ -1312,13 +1334,15 @@ export function calculateLessonRangeForSlot(params: {
   const maxStep = Math.max(1, effectivePace || 1);
   for (let step = 0; step < maxStep && (startIdx + step) < masterLessons.length; step++) {
     const currentItem = masterLessons[startIdx + step];
-    const isReviewOrCheck = (currentItem.name || '').includes('まとめテスト') || (currentItem.name || '').toLowerCase().includes('check test');
+    const isReviewOrCheck = (currentItem.name || '').includes('まとめテスト') || 
+                            (currentItem.name || '').toLowerCase().includes('check test') ||
+                            (currentItem.unit_name || '').includes('まとめテスト') ||
+                            (currentItem.unit_name || '').toLowerCase().includes('check test');
     const isUnitTest = !isReviewOrCheck && (
       currentItem.item_type === 'unit_test' || 
       Boolean(
         (currentItem.name || '').includes('単元確認テスト') || 
-        (currentItem.name || '').includes('単元テスト') ||
-        (currentItem.name || '').includes('確認テスト')
+        (currentItem.name || '').includes('単元テスト')
       )
     );
     if (isUnitTest) {
@@ -1337,13 +1361,15 @@ export function calculateLessonRangeForSlot(params: {
   const startItem = masterLessons[startIdx];
   const endItem = masterLessons[endIdx];
 
-  const isStartReviewOrCheck = (startItem?.name || '').includes('まとめテスト') || (startItem?.name || '').toLowerCase().includes('check test');
+  const isStartReviewOrCheck = (startItem?.name || '').includes('まとめテスト') || 
+                                (startItem?.name || '').toLowerCase().includes('check test') ||
+                                (startItem?.unit_name || '').includes('まとめテスト') ||
+                                (startItem?.unit_name || '').toLowerCase().includes('check test');
   const isStartUnitTest = !isStartReviewOrCheck && (
     startItem?.item_type === 'unit_test' ||
     Boolean(
       (startItem?.name || '').includes('単元確認テスト') ||
-      (startItem?.name || '').includes('単元テスト') ||
-      (startItem?.name || '').includes('確認テスト')
+      (startItem?.name || '').includes('単元テスト')
     )
   );
 
@@ -3034,14 +3060,12 @@ export function generateSlotsForSelectedSubjects(params: {
     const isStartReviewOrCheck = (range.start_lesson_name || '').includes('まとめテスト') || (range.start_lesson_name || '').toLowerCase().includes('check test');
     const isStartUnitTest = !isStartReviewOrCheck && (
       Boolean(range.start_lesson_name?.includes('単元確認テスト') || 
-              range.start_lesson_name?.includes('単元テスト') ||
-              range.start_lesson_name?.includes('確認テスト'))
+              range.start_lesson_name?.includes('単元テスト'))
     );
     const isEndReviewOrCheck = (range.end_lesson_name || '').includes('まとめテスト') || (range.end_lesson_name || '').toLowerCase().includes('check test');
     const isUnitTest = isStartUnitTest || (!isEndReviewOrCheck && Boolean(
       range.end_lesson_name?.includes('単元確認テスト') || 
-      range.end_lesson_name?.includes('単元テスト') ||
-      range.end_lesson_name?.includes('確認テスト')
+      range.end_lesson_name?.includes('単元テスト')
     ));
 
     const isUnitBoundaryReached = isUnitTest || 

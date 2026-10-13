@@ -140,7 +140,18 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       const lesson_name = cells[lessonIdx] || '';
       const typeVal = typeIdx !== -1 ? cells[typeIdx] || '' : '';
       const passing_line = passingLineIdx !== -1 ? cells[passingLineIdx] || '' : undefined;
-      const isUnitTest = typeVal.includes('テスト') || typeVal.includes('test') || lesson_name.includes('テスト') || lesson_name.includes('確認');
+      const isReviewOrCheck = lesson_name.includes('まとめテスト') || 
+                              lesson_name.toLowerCase().includes('check test') ||
+                              typeVal.includes('まとめテスト') ||
+                              typeVal.toLowerCase().includes('check test');
+      const isUnitTest = !isReviewOrCheck && (
+        typeVal.includes('単元') ||
+        typeVal.toLowerCase().includes('unit_test') ||
+        lesson_name.includes('単元確認テスト') ||
+        lesson_name.includes('単元テスト') ||
+        (lesson_name.includes('確認') && !isReviewOrCheck) ||
+        (typeVal.includes('テスト') && !isReviewOrCheck)
+      );
       const item_type: 'lesson' | 'unit_test' = isUnitTest ? 'unit_test' : 'lesson';
 
       if (grade || subject || unit_name || lesson_name) {
@@ -344,7 +355,11 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
 
   // CSV Export for Unit Tests or All
   const exportUnitTestCsv = () => {
-    const unitTests = masters.filter(m => m.item_type === 'unit_test' || m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'));
+    const unitTests = masters.filter(m => 
+      !m.lesson_name?.includes('まとめテスト') &&
+      !m.lesson_name?.toLowerCase().includes('check test') &&
+      (m.item_type === 'unit_test' || m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト'))
+    );
     if (unitTests.length === 0) {
       showToast('エクスポート対象の単元テストマスタデータがありません。', 'error');
       return;
@@ -406,7 +421,11 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
     return true;
   });
 
-  const unitTestMasters = masters.filter(m => m.item_type === 'unit_test' || (m.lesson_name && (m.lesson_name.includes('テスト') || m.lesson_name.includes('確認'))));
+  const unitTestMasters = masters.filter(m => 
+    !m.lesson_name?.includes('まとめテスト') &&
+    !m.lesson_name?.toLowerCase().includes('check test') &&
+    (m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト'))))
+  );
 
   const uniqueGrades = Array.from(new Set(masters.map(m => m.grade))).filter(Boolean);
   const uniqueSubjects = Array.from(new Set(masters.map(m => m.subject))).filter(Boolean);

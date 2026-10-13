@@ -652,7 +652,6 @@ export function sanitizeLearningTaskForDB(task: Partial<LearningTask> & Record<s
     passing_line: sanitized.passing_line ?? null,
     actual_completed_date: sanitized.actual_completed_date ?? null,
     ...(sanitized.completed_lesson_ids ? { completed_lesson_ids: sanitized.completed_lesson_ids } : {}),
-    ...(sanitized.lesson_ids ? { lesson_ids: sanitized.lesson_ids } : {}),
     created_at: sanitized.created_at
   };
 }
@@ -780,10 +779,13 @@ export function enforceUnitTestPassingGate(
   const unpassedTestIds = new Set<string>();
 
   allMasters.forEach(m => {
-    const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
+    const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || 
+                            (m.lesson_name || '').toLowerCase().includes('check test') ||
+                            (m.unit_name || '').includes('まとめテスト') ||
+                            (m.unit_name || '').toLowerCase().includes('check test');
     const isUT = !isReviewOrCheck && (
       m.item_type === 'unit_test' || 
-      Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト') || m.lesson_name.includes('確認テスト')))
+      Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))
     );
     if (isUT) {
       const hasPassed = (m.lesson_name && passedTestContents.has(m.lesson_name.trim())) || 
@@ -799,9 +801,19 @@ export function enforceUnitTestPassingGate(
   });
 
   // 小1算数 STEP 5「かずと すうじ - 単元確認テスト」等の既知ID保護
-  const isKazuPassed = passedTestContents.has('かずと すうじ') || passedTestContents.has('かずと すうじ - 単元確認テスト');
+  const isKazuPassed = passedTestContents.has('かずと すうじ') || 
+                       passedTestContents.has('かずと すうじ - 単元確認テスト') ||
+                       passedTestContents.has('かずと　すうじ') ||
+                       passedTestContents.has('かずと　すうじ - 単元確認テスト') ||
+                       passedTestContents.has('1章 かずとすうじ') ||
+                       passedTestContents.has('1章 かずとすうじ - 単元確認テスト');
   if (!isKazuPassed) {
-    ['5', 'STEP 5', 'cm-kazu-test', 'cm-auto-ut-5', 'cm-auto-ut-算数-小1-かずと すうじ'].forEach(id => unpassedTestIds.add(id));
+    [
+      '5', 'STEP 5', 'cm-kazu-test', 'cm-auto-ut-5', 
+      'cm-auto-ut-算数-小1-かずと すうじ', 'cm-auto-ut-算数-小1-かずと　すうじ',
+      'かずと すうじ - 単元確認テスト', 'かずと　すうじ - 単元確認テスト',
+      '1章 かずとすうじ - 単元確認テスト', 'cm-auto-ut-算数-小1-1章 かずとすうじ'
+    ].forEach(id => unpassedTestIds.add(id));
   }
 
   return completedIds.filter(id => !unpassedTestIds.has(String(id).trim()));
