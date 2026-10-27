@@ -7598,7 +7598,7 @@ export default function TeacherDashboard({
                                 boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '185px', minWidth: '185px', flexShrink: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '215px', minWidth: '215px', flexShrink: 0 }}>
                                 <span 
                                   className={styles.cellNum} 
                                   style={{ 
@@ -7622,7 +7622,7 @@ export default function TeacherDashboard({
                                   value={currentConfig.subject || ''}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
-                                  style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', minWidth: '145px', flex: 1 }}
+                                  style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', minWidth: '175px', flex: 1 }}
                                 >
                                   <option value="">-- コマ割りなし --</option>
                                   {(() => {
@@ -7690,10 +7690,11 @@ export default function TeacherDashboard({
 
                                     return (
                                       <>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 0px', minWidth: 0 }}>
                                           <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>開始:</span>
                                           <select
                                             data-testid={`period-unit-select-${p}`}
+                                            title={selectedStartId ? (selectableLessons.find(l => l.id === selectedStartId)?.name || currentConfig.startLessonName || '') : ''}
                                             value={selectedStartId}
                                             onChange={e => handleStartLessonChange(p, e.target.value)}
                                             className={styles.select}
@@ -7713,10 +7714,11 @@ export default function TeacherDashboard({
                                           </select>
                                         </div>
                                         <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: '0.8rem', userSelect: 'none', flexShrink: 0 }}>→</span>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 0px', minWidth: 0 }}>
                                           <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>終了:</span>
                                           <select
                                             data-testid={`period-end-lesson-select-${p}`}
+                                            title={selectedEndId ? (selectableLessons.find(l => l.id === selectedEndId)?.name || formatTaskConfigDisplayName(currentConfig.startLessonName, currentConfig.endLessonName) || '') : ''}
                                             value={selectedEndId}
                                             onChange={e => handleEndLessonChange(p, e.target.value)}
                                             className={styles.select}
@@ -8041,7 +8043,7 @@ export default function TeacherDashboard({
                             <svg style={{ width: '18px', height: '18px', color: '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
                             </svg>
-                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1e293b', cursor: 'default' }}>宿題:</label>
+                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1e293b', cursor: 'default' }}>宿題: (教科別 ＋ 当日授業2回目演習自動入力 ＋ 自由記述):</label>
                           </div>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>自動生成・手動編集対応</span>
                         </div>
@@ -8157,7 +8159,7 @@ export default function TeacherDashboard({
                         </button>
                       </div>
 
-                      <div style={{ marginTop: '16px' }}>
+                      <div style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
                         <div style={{
                           display: 'flex',
                           alignItems: 'center',

@@ -1065,12 +1065,20 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
       expect(screen.getByTestId('period-subject-select-1')).toBeDefined();
     });
 
-    // 1. 文字見切れ解消の検証: 教科セレクトの親コンテナが width: 185px, minWidth: 185px、セレクトが minWidth: 145px に拡張されていること
-    const subjectSelect = screen.getByTestId('period-subject-select-1');
+    // 1. 文字見切れ解消の検証: 教科セレクトの親コンテナが width: 215px, minWidth: 215px、セレクトが minWidth: 175px に拡張されていること
+    const subjectSelect = screen.getByTestId('period-subject-select-1') as HTMLSelectElement;
     const subjectWrapper = subjectSelect.parentElement as HTMLElement;
-    expect(subjectWrapper.style.width).toBe('185px');
-    expect(subjectWrapper.style.minWidth).toBe('185px');
-    expect(subjectSelect.style.minWidth).toBe('145px');
+    expect(subjectWrapper.style.width).toBe('215px');
+    expect(subjectWrapper.style.minWidth).toBe('215px');
+    expect(subjectSelect.style.minWidth).toBe('175px');
+
+    // 授業コマ From/To セレクトボックスの flex 配分と title 属性の検証
+    const fromSelect = screen.getByTestId('period-unit-select-1') as HTMLSelectElement;
+    const toSelect = screen.getByTestId('period-end-lesson-select-1') as HTMLSelectElement;
+    expect((fromSelect.parentElement as HTMLElement).style.flex).toBe('1 1 0px');
+    expect((toSelect.parentElement as HTMLElement).style.flex).toBe('1 1 0px');
+    expect(fromSelect).toHaveAttribute('title');
+    expect(toSelect).toHaveAttribute('title');
 
     // 2. 4大セクション見出しのモダンUIデザイン（青背景・左ボーダー・SVGアイコン）の検証
     // ① コマ割り見出し
@@ -1088,18 +1096,22 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
     expect(testHeaderBlock.querySelector('svg')).toBeDefined();
 
     // ③ 宿題見出し
-    const homeworkHeaderLabel = screen.getByText(/^宿題:$/i);
+    const homeworkHeaderLabel = screen.getByText(/宿題: \(教科別 ＋ 当日授業2回目演習自動入力 ＋ 自由記述\):/i);
     const homeworkHeaderBlock = homeworkHeaderLabel.closest('div[style*="border-left"]') || homeworkHeaderLabel.parentElement?.parentElement as HTMLElement;
     expect(homeworkHeaderBlock.style.backgroundColor).toContain('rgba(239, 246, 255');
     expect(homeworkHeaderBlock.style.borderLeft).toContain('4px solid');
     expect(homeworkHeaderBlock.querySelector('svg')).toBeDefined();
 
-    // ④ 業務連絡見出し
+    // ④ 業務連絡見出し & カードデザイン
     const officeHeaderLabel = screen.getByText(/業務連絡 \(本日共通\):/i);
     const officeHeaderBlock = officeHeaderLabel.closest('div[style*="border-left"]') || officeHeaderLabel.parentElement as HTMLElement;
     expect(officeHeaderBlock.style.backgroundColor).toContain('rgba(239, 246, 255');
     expect(officeHeaderBlock.style.borderLeft).toContain('4px solid');
     expect(officeHeaderBlock.querySelector('svg')).toBeDefined();
+    // 外枠カードデザインの検証
+    const officeCard = officeHeaderBlock.parentElement as HTMLElement;
+    expect(officeCard.style.borderRadius).toBe('12px');
+    expect(officeCard.style.background).toContain('rgba(248, 250, 252');
 
     unmount();
   });

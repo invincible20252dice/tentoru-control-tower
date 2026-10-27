@@ -1399,9 +1399,6 @@ export function calculateLessonRangeForSlot(params: {
     const cleanUnitName = normalizeUnitName(rawLabel) || rawLabel.replace(/^[^-]+-\s*/, '').trim();
 
     // 不合格となった単元テストアイテムを startItem / endItem として確実に固定
-    const utItem = masterLessons[startIdx];
-    const utName = utItem?.name || `${cleanUnitName} - 単元確認テスト`;
-
     startName = `【再テスト対策・総復習】${cleanUnitName}`;
     endName = `【再テスト対策・総復習】${cleanUnitName}`;
     rangeStr = `【弱点補強】${cleanUnitName} 総復習＆再テスト対策`;
