@@ -23,6 +23,24 @@ interface CurriculumCsvImportProps {
   onImportCompleted?: () => void;
 }
 
+export function isCsvRowUnitTest(lessonName: string = '', typeVal: string = ''): boolean {
+  const isReview = lessonName.includes('まとめテスト') ||
+                   lessonName.toLowerCase().includes('check test') ||
+                   typeVal.includes('まとめテスト') ||
+                   typeVal.toLowerCase().includes('check test');
+  if (isReview) return false;
+  return typeVal.includes('単元') ||
+         typeVal.toLowerCase().includes('unit_test') ||
+         lessonName.includes('単元確認テスト') ||
+         lessonName.includes('単元テスト') ||
+         lessonName.includes('確認') ||
+         typeVal.includes('テスト');
+}
+
+export function resolveCsvFieldWithFallback(val?: string, fallback: string = ''): string {
+  return (val || '').trim() || fallback;
+}
+
 export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
   onBack,
   onImportCompleted
@@ -140,26 +158,15 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
       const lesson_name = cells[lessonIdx] || '';
       const typeVal = typeIdx !== -1 ? cells[typeIdx] || '' : '';
       const passing_line = passingLineIdx !== -1 ? cells[passingLineIdx] || '' : undefined;
-      const isReviewOrCheck = lesson_name.includes('まとめテスト') || 
-                              lesson_name.toLowerCase().includes('check test') ||
-                              typeVal.includes('まとめテスト') ||
-                              typeVal.toLowerCase().includes('check test');
-      const isUnitTest = !isReviewOrCheck && (
-        typeVal.includes('単元') ||
-        typeVal.toLowerCase().includes('unit_test') ||
-        lesson_name.includes('単元確認テスト') ||
-        lesson_name.includes('単元テスト') ||
-        (lesson_name.includes('確認') && !isReviewOrCheck) ||
-        (typeVal.includes('テスト') && !isReviewOrCheck)
-      );
+      const isUnitTest = isCsvRowUnitTest(lesson_name, typeVal);
       const item_type: 'lesson' | 'unit_test' = isUnitTest ? 'unit_test' : 'lesson';
 
       if (grade || subject || unit_name || lesson_name) {
         rows.push({
-          grade: grade || '小5',
-          subject: subject || '算数',
-          unit_name: unit_name || '単元未設定',
-          lesson_name: lesson_name || '授業名未設定',
+          grade: resolveCsvFieldWithFallback(grade, '小5'),
+          subject: resolveCsvFieldWithFallback(subject, '算数'),
+          unit_name: resolveCsvFieldWithFallback(unit_name, '単元未設定'),
+          lesson_name: resolveCsvFieldWithFallback(lesson_name, '授業名未設定'),
           item_type,
           passing_line: passing_line || (isUnitTest ? '80%以上' : undefined),
           sort_order: rows.length + 1
@@ -271,10 +278,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
 
   // Execute Import
   const handleExecuteImport = async () => {
-    if (parsedRows.length === 0) {
-      showToast('インポートするデータがありません。', 'error');
-      return;
-    }
+    if (parsedRows.length === 0) return;
 
     setImporting(true);
     try {
@@ -285,7 +289,7 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
         subject: row.subject,
         unit_name: row.unit_name,
         lesson_name: row.lesson_name,
-        item_type: row.item_type || 'lesson',
+        item_type: row.item_type,
         sort_order: idx + 1,
         created_at: now
       }));
@@ -954,6 +958,8 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
 
               {/* Grade filter */}
               <select
+                data-testid="filter-grade-select"
+                aria-label="学年フィルター"
                 value={filterGrade}
                 onChange={e => setFilterGrade(e.target.value)}
                 style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem', backgroundColor: '#fff' }}
@@ -966,6 +972,8 @@ export const CurriculumCsvImport: React.FC<CurriculumCsvImportProps> = ({
 
               {/* Subject filter */}
               <select
+                data-testid="filter-subject-select"
+                aria-label="教科フィルター"
                 value={filterSubject}
                 onChange={e => setFilterSubject(e.target.value)}
                 style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem', backgroundColor: '#fff' }}

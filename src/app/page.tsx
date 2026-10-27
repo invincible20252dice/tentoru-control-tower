@@ -8,6 +8,40 @@ import StudentDashboard from '../components/StudentDashboard';
 import LoginForm from '../components/LoginForm';
 import { LogOut, User, Building2, Moon, Sun, ArrowLeft, GraduationCap } from 'lucide-react';
 
+// 純粋関数: 学年カテゴリーによる生徒フィルタリング判定
+export function filterStudentByGradeCategory(
+  student: { grade?: string | null; grade_category?: string | null },
+  selectedGradeCategory: 'elementary' | 'junior_high' | 'high_school' | ''
+): boolean {
+  if (!selectedGradeCategory) return false;
+
+  const g = student.grade?.trim() || '';
+  const cat = student.grade_category?.trim() || '';
+
+  if (selectedGradeCategory === 'elementary') {
+    return cat === '小学生' || g === '園児' || g.startsWith('小');
+  }
+  if (selectedGradeCategory === 'junior_high') {
+    return cat === '中学生' || g.startsWith('中');
+  }
+  if (selectedGradeCategory === 'high_school') {
+    return cat === '高校生' || g.startsWith('高') || g === '既卒';
+  }
+  return false;
+}
+
+export function getSavedTeacherType(): 'elementary' | 'junior_high' | 'high_school' {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('tentoru_teacher_type');
+      if (saved === 'elementary' || saved === 'junior_high' || saved === 'high_school') {
+        return saved;
+      }
+    } catch {}
+  }
+  return 'junior_high';
+}
+
 export default function Home() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [currentView, setCurrentView] = useState<'login' | 'portal' | 'teacher' | 'student' | 'student-select'>('login');
@@ -17,54 +51,24 @@ export default function Home() {
   const [teacherTab, setTeacherTab] = useState<DashboardTabType | undefined>(undefined);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showTeacherTypeSelector, setShowTeacherTypeSelector] = useState(false);
-  const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('tentoru_teacher_type');
-      if (saved === 'elementary' || saved === 'junior_high' || saved === 'high_school') {
-        return saved;
-      }
-    }
-    return 'junior_high';
-  });
+  const [teacherType, setTeacherType] = useState<'elementary' | 'junior_high' | 'high_school'>(getSavedTeacherType);
   const [selectedGradeCategory, setSelectedGradeCategory] = useState<'elementary' | 'junior_high' | 'high_school' | ''>('');
   const [isInitializing, setIsInitializing] = useState(true);
 
   // Filter students based on selected grade category
-  const filteredStudentsForCategory = studentsList.filter(s => {
-    if (!selectedGradeCategory) return false;
-
-    const g = s.grade?.trim() || '';
-    const cat = s.grade_category?.trim() || '';
-
-    if (selectedGradeCategory === 'elementary') {
-      return (
-        cat === '小学生' ||
-        g === '園児' ||
-        g.startsWith('小') ||
-        ['園児', '小1', '小2', '小3', '小4', '小5', '小6'].includes(g)
-      );
-    }
-    if (selectedGradeCategory === 'junior_high') {
-      return (
-        cat === '中学生' ||
-        g.startsWith('中') ||
-        ['中1', '中2', '中3'].includes(g)
-      );
-    }
-    if (selectedGradeCategory === 'high_school') {
-      return (
-        cat === '高校生' ||
-        g.startsWith('高') ||
-        g === '既卒' ||
-        ['高1', '高2', '高3', '既卒'].includes(g)
-      );
-    }
-    return false;
-  });
+  const filteredStudentsForCategory = studentsList.filter(s => filterStudentByGradeCategory(s, selectedGradeCategory));
 
   const handleCategoryChange = (cat: 'elementary' | 'junior_high' | 'high_school' | '') => {
     setSelectedGradeCategory(cat);
     setSelectedStudentId('');
+  };
+
+  const handleSelectTeacherType = (type: 'elementary' | 'junior_high' | 'high_school') => {
+    setTeacherType(type);
+    try {
+      localStorage.setItem('tentoru_teacher_type', type);
+    } catch {}
+    setCurrentView('teacher');
   };
 
   // Initialize session and student list
@@ -81,7 +85,7 @@ export default function Home() {
       setIsInitializing(false);
 
       // URLパラメータから日付・生徒の初期化
-      if (typeof window !== 'undefined') {
+      try {
         const urlParams = new URLSearchParams(window.location.search);
         const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
         if (queryDate) {
@@ -91,7 +95,7 @@ export default function Home() {
         if (queryStudentId) {
           setSelectedStudentId(queryStudentId);
         }
-      }
+      } catch {}
 
       try {
         const fetched = await db.fetchStudents();
@@ -334,33 +338,21 @@ export default function Home() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
                   <button 
-                    onClick={() => { 
-                      setTeacherType('elementary'); 
-                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'elementary');
-                      setCurrentView('teacher'); 
-                    }} 
+                    onClick={() => handleSelectTeacherType('elementary')} 
                     style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-elementary"
                   >
                     小学生
                   </button>
                   <button 
-                    onClick={() => { 
-                      setTeacherType('junior_high'); 
-                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'junior_high');
-                      setCurrentView('teacher'); 
-                    }} 
+                    onClick={() => handleSelectTeacherType('junior_high')} 
                     style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-junior-high"
                   >
                     中学生
                   </button>
                   <button 
-                    onClick={() => { 
-                      setTeacherType('high_school'); 
-                      if (typeof window !== 'undefined') localStorage.setItem('tentoru_teacher_type', 'high_school');
-                      setCurrentView('teacher'); 
-                    }} 
+                    onClick={() => handleSelectTeacherType('high_school')} 
                     style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', padding: '10px 14px', width: '100%', fontSize: '0.85rem' }}
                     id="teacher-select-high-school"
                   >

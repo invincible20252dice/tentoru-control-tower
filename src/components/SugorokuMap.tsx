@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styles from './SugorokuMap.module.css';
 import { db, CurriculumUnit, LearningTask, CurriculumMaster, Student, MiniTestResult } from '../lib/db';
-import { getLatestUnitTestStatusForSubject, normalizeUnitName } from '../lib/scheduler';
+import { getLatestUnitTestStatusForSubject, normalizeUnitName, sortBySortOrder, sortBySequenceOrder, matchesFailedUnitTest } from '../lib/scheduler';
 
 export interface SugorokuMapProps {
   subject?: string;
@@ -14,6 +14,40 @@ export interface SugorokuMapProps {
   theme?: 'light' | 'dark';
   onSelectSubject?: (sub: string) => void;
 }
+
+export function resolveIndexRange(startIdx: number, endIdx: number): [number, number] | null {
+  if (startIdx >= 0 && endIdx >= 0) {
+    return [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
+  }
+  if (startIdx >= 0) return [startIdx, startIdx];
+  if (endIdx >= 0) return [endIdx, endIdx];
+  return null;
+}
+
+export const ZIGZAG_OFFSET_CLASSES = [
+  styles.offsetCenter,
+  styles.offsetLeft,
+  styles.offsetFarLeft,
+  styles.offsetLeft,
+  styles.offsetCenter,
+  styles.offsetRight,
+  styles.offsetFarRight,
+  styles.offsetRight
+];
+
+export const PATH_OFFSET_AND_TILT_CLASSES = [
+  `${styles.offsetRightHalf} ${styles.pathTiltLeft}`,
+  `${styles.offsetLeftHalf} ${styles.pathTiltLeft}`,
+  `${styles.offsetLeftHalf} ${styles.pathTiltLeft}`,
+  `${styles.offsetLeftHalf} ${styles.pathTiltRight}`,
+  `${styles.offsetLeftHalf} ${styles.pathTiltRight}`,
+  `${styles.offsetRightHalf} ${styles.pathTiltRight}`,
+  `${styles.offsetRightHalf} ${styles.pathTiltRight}`,
+  `${styles.offsetRightHalf} ${styles.pathTiltLeft}`
+];
+
+export const getZigzagOffsetClass = (index: number) => ZIGZAG_OFFSET_CLASSES[((index % 8) + 8) % 8];
+export const getPathOffsetAndTiltClass = (index: number) => PATH_OFFSET_AND_TILT_CLASSES[((index % 8) + 8) % 8];
 
 export default function SugorokuMap({
   subject,
@@ -69,11 +103,11 @@ export default function SugorokuMap({
   // curriculum_masters があればそれを優先、なければ units を使用
   const currentSubjectMasters = mastersList
     .filter(m => m.subject === activeSubject)
-    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    .sort(sortBySortOrder);
 
   const fallbackUnits = units
     .filter(u => u.subject === activeSubject)
-    .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+    .sort(sortBySequenceOrder);
 
   const useMasters = currentSubjectMasters.length > 0;
   const nodes = useMasters
@@ -139,12 +173,8 @@ export default function SugorokuMap({
       // 単元テストノードの場合:
       // 不合格記録がある場合は絶対に未完了
       const hasFailedRecord = Boolean(
-        unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest && (
-          isMatchingTest(node.name, unitTestStatus.failedUnitTest.unit_name) ||
-          isMatchingTest(node.name, unitTestStatus.failedUnitTest.test_content) ||
-          isMatchingTest(node.fullTitle, unitTestStatus.failedUnitTest.unit_name) ||
-          isMatchingTest(node.fullTitle, unitTestStatus.failedUnitTest.test_content)
-        )
+        unitTestStatus.hasFailedUnitTest &&
+        matchesFailedUnitTest(unitTestStatus.failedUnitTest, node.name, node.fullTitle)
       );
       if (hasFailedRecord) return false;
 
@@ -233,9 +263,9 @@ export default function SugorokuMap({
       }
     }
 
-    if (startIdx >= 0 || endIdx >= 0) {
-      const minI = startIdx >= 0 && endIdx >= 0 ? Math.min(startIdx, endIdx) : (startIdx >= 0 ? startIdx : endIdx);
-      const maxI = startIdx >= 0 && endIdx >= 0 ? Math.max(startIdx, endIdx) : (endIdx >= 0 ? endIdx : startIdx);
+    const range = resolveIndexRange(startIdx, endIdx);
+    if (range) {
+      const [minI, maxI] = range;
       for (let i = minI; i <= maxI; i++) {
         if (nodes[i]) todayNodeIds.add(nodes[i].id);
       }
@@ -330,43 +360,6 @@ export default function SugorokuMap({
     const timer = setTimeout(scrollToActive, 100);
     return () => clearTimeout(timer);
   }, [activeSubject, playerNodeId]);
-
-  // S字ジグザグのオフセットクラスを決定（Duolingo風パス）
-  const getZigzagOffsetClass = (index: number) => {
-    const pattern = index % 8;
-    switch (pattern) {
-      case 0: return styles.offsetCenter;
-      case 1: return styles.offsetLeft;
-      case 2: return styles.offsetFarLeft;
-      case 3: return styles.offsetLeft;
-      case 4: return styles.offsetCenter;
-      case 5: return styles.offsetRight;
-      case 6: return styles.offsetFarRight;
-      case 7: return styles.offsetRight;
-      default: return styles.offsetCenter;
-    }
-  };
-
-  // 前のノードと現在のノードを繋ぐ「太い道（Path）」の配置と傾き（チルト）
-  const getPathOffsetAndTiltClass = (index: number) => {
-    const pattern = index % 8;
-    switch (pattern) {
-      case 1:
-      case 2:
-        return `${styles.offsetLeftHalf} ${styles.pathTiltLeft}`;
-      case 3:
-      case 4:
-        return `${styles.offsetLeftHalf} ${styles.pathTiltRight}`;
-      case 5:
-      case 6:
-        return `${styles.offsetRightHalf} ${styles.pathTiltRight}`;
-      case 7:
-      case 0:
-        return `${styles.offsetRightHalf} ${styles.pathTiltLeft}`;
-      default:
-        return styles.offsetCenter;
-    }
-  };
 
   const containerClass = `${styles.container} ${theme === 'dark' ? styles.darkTheme : ''}`;
 

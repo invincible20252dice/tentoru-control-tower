@@ -120,13 +120,14 @@ describe("Borderless Clean UI Tests (枠線削減 & 背景面グルーピング�
       fireEvent.change(startSelect, { target: { value: "cm-clean-1" } });
     });
 
-    const badge = screen.getByTestId("period-lesson-range-badge-1") as HTMLElement;
-    expect(badge).toBeDefined();
-    expect(badge.textContent).toContain("授業進捗範囲:");
-    // 青いボーダー（1px solid #bfdbfe）が完全になく、背景も透明・薄いラベルであること
-    expect(badge.style.border).toBe("");
-    expect(badge.style.backgroundColor).toBe("");
-    expect(badge.style.color).toBe("rgb(100, 116, 139)");
+    // 重複・長文の進捗範囲バッジは完全削除されていること
+    expect(screen.queryByTestId("period-lesson-range-badge-1")).toBeNull();
+
+    // 終了授業 (To) セレクトボックスもborder-slate-200で正しくレンダリングされていること
+    const endSelect = screen.getByTestId("period-end-lesson-select-1") as HTMLElement;
+    expect(endSelect).toBeDefined();
+    expect(endSelect.style.border).toMatch(/e2e8f0|226, 232, 240/);
+    expect(endSelect.style.borderRadius).toBe("8px");
   });
 
   it("3. TeacherDashboard テスト・宿題エリア: 四角いボックス枠線が廃止され、下部薄仕切り線のRowデザインとborder-slate-200フォーム枠線になっていること", async () => {

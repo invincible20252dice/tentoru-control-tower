@@ -225,10 +225,10 @@ describe('単元テスト不合格時の次回授業再テスト割り当て & �
     const toSelect = screen.getByTestId('period-end-lesson-select-1') as HTMLSelectElement;
     expect(toSelect.value).toBe(unitTestItem.id);
 
-    // 3. 授業進捗範囲に再テストテキストが表示されていること
-    const rangeBadge = screen.getByTestId('period-lesson-range-badge-1');
-    expect(rangeBadge).toHaveTextContent(/再テスト/);
-    expect(rangeBadge).not.toHaveTextContent(/くりあがり/);
+    // 3. From/To セレクトボックスで再テスト（単元テスト）が選択されており新単元「くりあがり」が選ばれていないこと
+    expect(toSelect.selectedOptions[0]?.text || '').toMatch(/再テスト|単元確認テスト/);
+    expect(toSelect.selectedOptions[0]?.text || '').not.toContain('くりあがり');
+    expect(screen.queryByTestId('period-lesson-range-badge-1')).toBeNull();
 
     unmount();
   });

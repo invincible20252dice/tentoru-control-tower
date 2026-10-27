@@ -2,7 +2,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { CurriculumUnit, Student, LearningTask, MiniTestResult, sanitizeCorruptedCompletedLessonIds } from '../lib/db';
-import { isMatchingUnitOrTest } from '../lib/scheduler';
+import { isMatchingUnitOrTest, isMathSubject, isUnitTestMaster, matchesFailedUnitTest } from '../lib/scheduler';
+
+export function extractTaskLessonIds(task?: any): string[] {
+  if (!task) return [];
+  if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 0) {
+    return task.lesson_ids.map((id: any) => String(id));
+  }
+  const ids: string[] = [];
+  if (task.unit_id) ids.push(String(task.unit_id));
+  if (task.start_lesson_id) ids.push(String(task.start_lesson_id));
+  if (task.end_lesson_id) ids.push(String(task.end_lesson_id));
+  return ids;
+}
 
 export interface TimelineSubjectViewProps {
   student: Student;
@@ -71,30 +83,17 @@ export default function TimelineSubjectView({
   // 教科の一致判定（算数・数学の相互互換を含む）
   const isTargetSubject = (sub?: string) => {
     if (!sub) return false;
-    return sub === subject || 
-      (subject === '算数' && sub === '数学') || 
-      (subject === '数学' && sub === '算数');
+    if (sub === subject) return true;
+    return isMathSubject(sub) && isMathSubject(subject);
   };
 
   // 選択日（currentDate）のアクティブタスク・単元テストの抽出
   const targetTasks = studentTasks.filter(t => isTargetSubject(t.subject));
   const activeTasksOnDate = targetTasks.filter(t => t.scheduled_date === currentDate && t.period !== null && t.status !== 'completed' && !t.test_passed);
   
-  // スロットからレッスンIDを抽出
-  const extractLessonIds = (task: any): string[] => {
-    if (Array.isArray(task.lesson_ids) && task.lesson_ids.length > 0) {
-      return task.lesson_ids.map((id: any) => String(id));
-    }
-    const ids: string[] = [];
-    if (task.unit_id) ids.push(String(task.unit_id));
-    if (task.start_lesson_id) ids.push(String(task.start_lesson_id));
-    if (task.end_lesson_id) ids.push(String(task.end_lesson_id));
-    return ids;
-  };
-
   const todayActiveLessonIds = new Set<string>();
   activeTasksOnDate.forEach(task => {
-    extractLessonIds(task).forEach(id => todayActiveLessonIds.add(id));
+    extractTaskLessonIds(task).forEach(id => todayActiveLessonIds.add(id));
   });
 
   // 選択日の単元テスト枠（未合格のもの）
@@ -107,13 +106,8 @@ export default function TimelineSubjectView({
 
   activeMiniTests.forEach(test => {
     const matched = timelineUnits.find((u: any) => {
-      const isUT = u.item_type === 'unit_test' || 
-                   (u.lesson_name && (u.lesson_name.includes('単元確認テスト') || u.lesson_name.includes('単元テスト'))) ||
-                   (u.name && (u.name.includes('単元確認テスト') || u.name.includes('単元テスト')));
-      if (!isUT) return false;
-      if (test.unit_name && (u.unit_name === test.unit_name || u.name === test.unit_name || isMatchingUnitOrTest(u.unit_name, test.unit_name))) return true;
-      if (test.test_content && (u.lesson_name === test.test_content || u.name === test.test_content || isMatchingUnitOrTest(u.name, test.test_content))) return true;
-      return false;
+      if (!isUnitTestMaster(u)) return false;
+      return matchesFailedUnitTest(test, u);
     });
     if (matched) {
       todayActiveLessonIds.add(String(matched.id));
@@ -217,8 +211,7 @@ export default function TimelineSubjectView({
             const isCompleted = trulyCompletedStepIds.has(uIdStr) || (uOrderStr && trulyCompletedStepIds.has(uOrderStr));
             const isTodayActive = todayActiveLessonIds.has(uIdStr) || (uOrderStr && todayActiveLessonIds.has(uOrderStr));
             const isCurrent = !isCompleted && isTodayActive;
-            const isUnitTest = (unit as any).item_type === 'unit_test' || 
-                               (unit.name && (unit.name.includes('単元確認テスト') || unit.name.includes('単元テスト')));
+            const isUnitTest = isUnitTestMaster(unit);
 
             return (
               <div

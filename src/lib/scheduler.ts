@@ -18,11 +18,116 @@ export class CurriculumSkipViolationError extends Error {
  * 授業範囲文字列のフォーマット ("開始 〜 目標" または "開始")
  */
 export function formatLessonRange(startName?: string | null, endName?: string | null): string {
-  if (!startName && !endName) return '';
-  if (startName && endName && startName !== endName) {
-    return `${startName} 〜 ${endName}`;
+  const start = startName?.trim() || '';
+  const end = endName?.trim() || '';
+  if (!start) return end;
+  if (!end || start === end) return start;
+  return `${start} 〜 ${end}`;
+}
+
+/**
+ * 小学生学年判定ヘルパー (DRY化)
+ */
+export function isElementaryGrade(grade?: string | null): boolean {
+  if (!grade) return false;
+  return (grade.includes('年') && !grade.startsWith('中') && !grade.startsWith('高')) ||
+         grade.startsWith('小') ||
+         grade === '園児';
+}
+
+/**
+ * sort_order による昇順ソートヘルパー (DRY化)
+ */
+export function sortBySortOrder<T extends { sort_order?: number | null }>(a: T, b: T): number {
+  return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+}
+
+/**
+ * sequence_order による昇順ソートヘルパー (DRY化)
+ */
+export function sortBySequenceOrder<T extends { sequence_order?: number | null }>(a: T, b: T): number {
+  return (a.sequence_order ?? 0) - (b.sequence_order ?? 0);
+}
+
+/**
+ * 算数・数学の教科判定 (DRY化)
+ */
+export function isMathSubject(sub?: string | null): boolean {
+  return sub === '算数' || sub === '数学';
+}
+
+/**
+ * レッスン名からプレフィックス（"1- ", "2- " 等）を除去して整形
+ */
+export function cleanLessonName(rawName?: string | null): string {
+  if (!rawName) return '';
+  return rawName.replace(/^[^-]+-\s*/, '').trim();
+}
+
+/**
+ * 単元名とレッスン名を "単元名 - レッスン名" 形式に整形
+ */
+export function formatLessonTitle(unitName?: string | null, lessonName?: string | null): string {
+  const clean = cleanLessonName(lessonName);
+  if (unitName && unitName.trim()) {
+    return clean ? `${unitName.trim()} - ${clean}` : unitName.trim();
   }
-  return startName || endName || '';
+  return clean || (lessonName || '').trim();
+}
+
+/**
+ * レッスン群の最大 sort_order を解決
+ */
+export function resolveMaxLessonOrder(lessons: Array<{ sort_order?: number | null }>, fallbackOrder: number = 0): number {
+  if (!lessons || lessons.length === 0) return fallbackOrder;
+  return Math.max(...lessons.map(l => l.sort_order ?? 0));
+}
+
+/**
+ * 単元テスト用の表示名称を整形
+ */
+export function resolveFormattedUnitTestLessonName(rawLessonName?: string | null, unitName?: string | null): string {
+  const raw = rawLessonName || '単元確認テスト';
+  const clean = cleanLessonName(raw);
+  if (!unitName) return raw;
+  const isUt = clean.includes('単元確認テスト') || clean.includes('単元テスト') || (clean.includes('テスト') && !clean.includes('まとめテスト'));
+  return `${unitName} - ${isUt ? '単元確認テスト' : clean}`;
+}
+
+/**
+ * 単元テスト判定ヘルパー (DRY化)
+ */
+export function isUnitTestMaster(m?: { item_type?: string | null; lesson_name?: string | null; name?: string | null; unit_name?: string | null } | null): boolean {
+  if (!m) return false;
+  const lName = m.lesson_name || (m as any).name || '';
+  const isReviewOrCheck = lName.includes('まとめテスト') || lName.toLowerCase().includes('check test');
+  if (isReviewOrCheck) return false;
+  return m.item_type === 'unit_test' ||
+    lName.includes('単元確認テスト') ||
+    lName.includes('単元テスト') ||
+    lName.includes('確認テスト');
+}
+
+/**
+ * 不合格単元テストとステップの照合ヘルパー (DRY化)
+ */
+export function matchesFailedUnitTest(
+  failedTest?: { unit_name?: string | null; test_content?: string | null } | null,
+  lessonOrTarget?: string | { lesson_name?: string | null; unit_name?: string | null; name?: string | null } | null,
+  unitName?: string | null
+): boolean {
+  if (!failedTest) return false;
+  const targetLesson = typeof lessonOrTarget === 'string'
+    ? lessonOrTarget
+    : (lessonOrTarget?.lesson_name || lessonOrTarget?.name || null);
+  const targetUnit = typeof lessonOrTarget === 'object' && lessonOrTarget !== null
+    ? (lessonOrTarget.unit_name || lessonOrTarget.name || null)
+    : unitName;
+
+  return isMatchingUnitOrTest(failedTest.unit_name, targetUnit) ||
+         isMatchingUnitOrTest(failedTest.test_content, targetLesson) ||
+         isMatchingUnitOrTest(failedTest.unit_name, targetLesson) ||
+         isMatchingUnitOrTest(failedTest.test_content, targetUnit);
 }
 
 /**
@@ -38,6 +143,8 @@ export function normalizeUnitName(name?: string | null): string {
   let cleaned = name
     .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[Ａ-Ｚａ-ｚ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
     .replace(/[〜～~]/g, '~')
     .replace(/[\s\u3000]+/g, ' ')
     .trim()
@@ -66,9 +173,10 @@ export function normalizeUnitName(name?: string | null): string {
  * 単元名やテスト内容が同一単元・同一テストを指しているか判定する
  */
 export function isMatchingUnitOrTest(source?: string | null, target?: string | null): boolean {
-  if (!source || !target) return false;
+  if (typeof source !== 'string' || typeof target !== 'string') return false;
   const sRaw = source.replace(/[〜～~]/g, '~').replace(/[\s\u3000]+/g, ' ').trim();
   const tRaw = target.replace(/[〜～~]/g, '~').replace(/[\s\u3000]+/g, ' ').trim();
+  if (!sRaw || !tRaw) return false;
   if (sRaw === tRaw) return true;
 
   const sClean = sRaw.replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
@@ -244,16 +352,11 @@ export function getLatestUnitTestStatusForSubject(params: {
 
   // もし最新不合格テストが存在する場合、その単元キーが過去合格にあっても安全のため合格キーから除外
   if (failedUnitTest) {
-    const isFailedReviewOrCheck = failedUnitTest.test_content.includes('まとめテスト') || 
-                                  (failedUnitTest.unit_name && failedUnitTest.unit_name.includes('まとめテスト')) || 
-                                  failedUnitTest.test_content.toLowerCase().includes('check test') || 
-                                  (failedUnitTest.unit_name && failedUnitTest.unit_name.toLowerCase().includes('check test'));
-    const isFailedUT = !isFailedReviewOrCheck && (
-      failedUnitTest.test_type === 'unit_test' || 
-      failedUnitTest.test_content.includes('単元確認テスト') || 
-      failedUnitTest.test_content.includes('単元テスト') || 
-      (failedUnitTest.unit_name && (failedUnitTest.unit_name.includes('単元確認テスト') || failedUnitTest.unit_name.includes('単元テスト')))
-    );
+    const isFailedUT = isUnitTestMaster({
+      item_type: failedUnitTest.test_type as any,
+      lesson_name: failedUnitTest.test_content,
+      unit_name: failedUnitTest.unit_name
+    });
 
     if (isFailedUT) {
       const fNorm = normalizeUnitName(failedUnitTest.unit_name || failedUnitTest.test_content);
@@ -317,6 +420,34 @@ export function normalizeGrade(grade?: string): string {
 }
 
 /**
+ * 小学生向け「まとめテスト（１）〜（３）」補完純粋ヘルパー (DRY化)
+ */
+export function appendElementarySummaryTests(
+  lessons: CurriculumMaster[],
+  firstItem: CurriculumMaster,
+  effectiveGrade: string,
+  lastLessonOrder: number
+): void {
+  for (let step = 1; step <= 3; step++) {
+    const kanjiNum = step === 1 ? '１' : step === 2 ? '２' : '３';
+    const regex = new RegExp(`まとめテスト\\s*[（(]?\\s*[${step}${kanjiNum}]\\s*[)）]?`);
+    const exists = lessons.some(l => Boolean(l.lesson_name && regex.test(l.lesson_name)));
+    if (!exists) {
+      lessons.push({
+        id: `cm-auto-sum${step}-${firstItem.subject}-${effectiveGrade}-${firstItem.unit_name}`,
+        grade: effectiveGrade,
+        subject: firstItem.subject,
+        unit_name: firstItem.unit_name,
+        lesson_name: `まとめテスト（${kanjiNum}）`,
+        sort_order: lastLessonOrder + step * 0.1,
+        item_type: 'lesson',
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+}
+
+/**
  * 算数・英語などの全単元末尾に単元テストが未設置の場合、自動的に単元確認テストアイテムを補完・組み込む
  * 重複したテスト（STEP 2, 3, 4等に複数並ぶ不具合）を徹底排除してユニーク化する
  */
@@ -336,16 +467,14 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
   });
 
   for (const [, group] of unitGroups.entries()) {
-    group.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    group.sort(sortBySortOrder);
 
     const firstItem = group[0];
     const normGrade = normalizeGrade(firstItem.grade);
     const isTargetSubject = firstItem.subject === '算数' || firstItem.subject === '数学' || firstItem.subject === '英語';
 
-    const isElem = normGrade.startsWith('小') || 
-                   /^[1-6]年生?$/.test(normGrade) || 
-                   normGrade === '園児' || 
-                   (firstItem.grade ? (firstItem.grade.startsWith('小') || /^[1-6]年生?$/.test(firstItem.grade) || firstItem.grade === '園児') : false) ||
+    const isElem = isElementaryGrade(normGrade) || 
+                   isElementaryGrade(firstItem.grade) || 
                    (!firstItem.grade && firstItem.subject === '算数');
 
     // 授業アイテムとテストアイテムを分離
@@ -377,107 +506,23 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
 
     // 小学生の全単元に対する「まとめテスト」および「Check Test」の通常授業アイテム補完
     if (isElem && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
-      const lastLessonOrder = lessons.length > 0 ? (lessons[lessons.length - 1].sort_order ?? 0) : (firstItem.sort_order ?? 0);
+      const lastLessonOrder = resolveMaxLessonOrder(lessons, firstItem.sort_order ?? 0);
+      const effectiveGrade = normGrade || firstItem.grade || 'elem';
 
-      // 1. 算数（全単元）: 「まとめテスト（１）」「まとめテスト（２）」「まとめテスト（３）」
-      if (firstItem.subject === '算数' || firstItem.subject === '数学') {
-        const hasSummary1 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[1１]\s*[)）]?/.test(l.lesson_name)));
-        const hasSummary2 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[2２]\s*[)）]?/.test(l.lesson_name)));
-        const hasSummary3 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[3３]\s*[)）]?/.test(l.lesson_name)));
-
-        if (!hasSummary1) {
-          lessons.push({
-            id: `cm-auto-sum1-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（１）',
-            sort_order: lastLessonOrder + 0.1,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-        if (!hasSummary2) {
-          lessons.push({
-            id: `cm-auto-sum2-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（２）',
-            sort_order: lastLessonOrder + 0.2,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-        if (!hasSummary3) {
-          lessons.push({
-            id: `cm-auto-sum3-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（３）',
-            sort_order: lastLessonOrder + 0.3,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-      }
-
-      // 2. 英語（全単元）: 「Check Test」
-      if (firstItem.subject === '英語') {
+      // 1. 算数・数学・国語（全単元）: 「まとめテスト（１）」「まとめテスト（２）」「まとめテスト（３）」
+      if (firstItem.subject === '算数' || firstItem.subject === '数学' || firstItem.subject === '国語') {
+        appendElementarySummaryTests(lessons, firstItem, effectiveGrade, lastLessonOrder);
+      } else if (firstItem.subject === '英語') {
+        // 2. 英語（全単元）: 「Check Test」
         const hasCheck = lessons.some(l => l.lesson_name?.toLowerCase().includes('check test'));
         if (!hasCheck) {
           lessons.push({
-            id: `cm-auto-check-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
+            id: `cm-auto-check-${firstItem.subject}-${effectiveGrade}-${firstItem.unit_name}`,
+            grade: effectiveGrade,
             subject: firstItem.subject,
             unit_name: firstItem.unit_name,
             lesson_name: 'Check Test',
             sort_order: lastLessonOrder + 0.1,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-      }
-
-      // 3. 国語（全単元）: 各単元の最後に「まとめテスト（１）」「まとめテスト（２）」「まとめテスト（３）」
-      if (firstItem.subject === '国語') {
-        const hasSummary1 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[1１]\s*[)）]?/.test(l.lesson_name)));
-        const hasSummary2 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[2２]\s*[)）]?/.test(l.lesson_name)));
-        const hasSummary3 = lessons.some(l => Boolean(l.lesson_name && /まとめテスト\s*[（(]?\s*[3３]\s*[)）]?/.test(l.lesson_name)));
-
-        if (!hasSummary1) {
-          lessons.push({
-            id: `cm-auto-sum1-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（１）',
-            sort_order: lastLessonOrder + 0.1,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-        if (!hasSummary2) {
-          lessons.push({
-            id: `cm-auto-sum2-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（２）',
-            sort_order: lastLessonOrder + 0.2,
-            item_type: 'lesson',
-            created_at: new Date().toISOString()
-          });
-        }
-        if (!hasSummary3) {
-          lessons.push({
-            id: `cm-auto-sum3-${firstItem.subject}-${normGrade || 'elem'}-${firstItem.unit_name}`,
-            grade: normGrade || firstItem.grade,
-            subject: firstItem.subject,
-            unit_name: firstItem.unit_name,
-            lesson_name: 'まとめテスト（３）',
-            sort_order: lastLessonOrder + 0.3,
             item_type: 'lesson',
             created_at: new Date().toISOString()
           });
@@ -491,14 +536,10 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
     if (unitTests.length > 0) {
       // 既にテストアイテムがある場合は最初の1件のみ採用（二重三重の重複を完全デデュプリケーション）
       const primaryTest = unitTests[0];
-      const rawLessonName = primaryTest.lesson_name || '単元確認テスト';
-      const cleanName = rawLessonName.replace(/^[^-]+-\s*/, '').trim();
-      const formattedLessonName = primaryTest.unit_name 
-        ? `${primaryTest.unit_name} - ${cleanName.includes('単元確認テスト') || cleanName.includes('単元テスト') || (cleanName.includes('テスト') && !cleanName.includes('まとめテスト')) ? '単元確認テスト' : cleanName}`
-        : rawLessonName;
+      const formattedLessonName = resolveFormattedUnitTestLessonName(primaryTest.lesson_name, primaryTest.unit_name);
 
       // 単元テストの sort_order は通常授業アイテム（まとめテスト等含む）より後に配置されるように調整
-      const maxLessonOrder = lessons.length > 0 ? Math.max(...lessons.map(l => l.sort_order ?? 0)) : (primaryTest.sort_order ?? 0);
+      const maxLessonOrder = resolveMaxLessonOrder(lessons, primaryTest.sort_order ?? 0);
       const testSortOrder = Math.max(primaryTest.sort_order ?? 0, maxLessonOrder + 0.1);
 
       result.push({
@@ -509,7 +550,7 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
       });
     } else if (isTargetSubject && firstItem.unit_name && firstItem.unit_name !== '単元未設定' && group.length >= 1) {
       // テストアイテムが存在しない算数・英語単元には末尾に1件のみ自動生成
-      const maxLessonOrder = lessons.length > 0 ? Math.max(...lessons.map(l => l.sort_order ?? 0)) : (firstItem.sort_order ?? 0);
+      const maxLessonOrder = resolveMaxLessonOrder(lessons, firstItem.sort_order ?? 0);
       const autoUnitTest: CurriculumMaster = {
         id: `cm-auto-ut-${firstItem.subject}-${normGrade}-${firstItem.unit_name}`,
         grade: normGrade || firstItem.grade,
@@ -525,7 +566,7 @@ export function ensureMathEnglishUnitTests(masters: CurriculumMaster[]): Curricu
     }
   }
 
-  return result.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  return result.sort(sortBySortOrder);
 }
 
 /**
@@ -560,22 +601,18 @@ export function findNextUncompletedLessonForSubject(params: {
     masterLessons: directMasterLessons
   } = params;
 
-  const miniTestResults = (rawMiniTestResults && rawMiniTestResults.length > 0)
+  const miniTestResults = Array.isArray(rawMiniTestResults)
     ? rawMiniTestResults
     : (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults());
 
-  const isElem = Boolean(
-    student?.grade?.startsWith('小') || 
-    (student?.grade?.includes('年') && !student?.grade?.startsWith('中') && !student?.grade?.startsWith('高')) ||
-    student?.grade === '園児'
-  );
+  const isElem = isElementaryGrade(student?.grade);
   const isJunior = Boolean(student?.grade?.startsWith('中'));
   const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
   let ensuredMasters: CurriculumMaster[] = [];
   let masterLessons: Array<{ id: string; name: string; sort_order: number; unit_name?: string; item_type?: string }> = [];
 
-  if (directMasterLessons && directMasterLessons.length > 0) {
+  if (Array.isArray(directMasterLessons)) {
     masterLessons = directMasterLessons.map(m => ({
       id: String(m.id),
       name: m.name,
@@ -600,7 +637,7 @@ export function findNextUncompletedLessonForSubject(params: {
         const isMasterJunior = (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
         if (!isMasterJunior) return false;
         if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
-          return m.subject === '数学' || m.subject === '算数';
+          return isMathSubject(m.subject);
         }
         return m.subject === subject;
       } else if (isHigh) {
@@ -608,8 +645,8 @@ export function findNextUncompletedLessonForSubject(params: {
         if (!isMasterHigh) return false;
         return m.subject === subject;
       }
-      if (subject === '算数' || subject === '数学' || subject.toLowerCase() === 'math') {
-        return m.subject === '算数' || m.subject === '数学';
+      if (isMathSubject(subject) || subject.toLowerCase() === 'math') {
+        return isMathSubject(m.subject);
       }
       return m.subject === subject;
     });
@@ -617,7 +654,7 @@ export function findNextUncompletedLessonForSubject(params: {
     ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
     if (ensuredMasters.length > 0) {
       masterLessons = ensuredMasters
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .sort(sortBySortOrder)
         .map(m => ({
           id: m.id,
           name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
@@ -634,7 +671,7 @@ export function findNextUncompletedLessonForSubject(params: {
 
     if (matchingSchoolUnits.length > 0) {
       masterLessons = matchingSchoolUnits
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .sort(sortBySequenceOrder)
         .map(u => ({
           id: u.id,
           name: u.name,
@@ -644,7 +681,7 @@ export function findNextUncompletedLessonForSubject(params: {
       const fallbackUnits = curriculumUnits
         .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
                      (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject))
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .sort(sortBySequenceOrder)
         .map(u => ({
           id: u.id,
           name: u.name,
@@ -898,14 +935,7 @@ export function findNextUncompletedLessonForSubject(params: {
 
   for (let i = 0; i < masterLessons.length; i++) {
     const l = masterLessons[i];
-    const isReviewOrCheck = (l.name || '').includes('まとめテスト') || 
-                            (l.name || '').toLowerCase().includes('check test') ||
-                            (l.unit_name || '').includes('まとめテスト') ||
-                            (l.unit_name || '').toLowerCase().includes('check test');
-    const isUnitTest = !isReviewOrCheck && (
-      l.item_type === 'unit_test' || 
-      Boolean(l.name && (l.name.includes('単元確認テスト') || l.name.includes('単元テスト')))
-    );
+    const isUnitTest = isUnitTestMaster(l);
 
     if (isUnitTest) {
       if (i < startThresholdIdx) continue;
@@ -913,12 +943,8 @@ export function findNextUncompletedLessonForSubject(params: {
       const lUnitNorm = normalizeUnitName(l.unit_name);
 
       const hasFailedRecord = Boolean(
-        unitTestStatus.hasFailedUnitTest && unitTestStatus.failedUnitTest && (
-          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.unit_name, l.unit_name) ||
-          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.test_content, l.name) ||
-          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.unit_name, l.name) ||
-          isMatchingUnitOrTest(unitTestStatus.failedUnitTest.test_content, l.unit_name)
-        )
+        unitTestStatus.hasFailedUnitTest &&
+        matchesFailedUnitTest(unitTestStatus.failedUnitTest, l.name, l.unit_name)
       );
 
       // 単元テストの合格判定:
@@ -940,12 +966,13 @@ export function findNextUncompletedLessonForSubject(params: {
       // 単元テストが未合格（未受験または不合格）の場合、合否ゲート発動！
       // この単元テストで進行を強制ストップし、以降の授業（新単元等）への進行を厳格に禁止する。
       if (!isTestPassed) {
+        const hasFailed = Boolean(hasFailedRecord || unitTestStatus.hasFailedUnitTest);
         return {
           lessonId: l.id,
           lessonName: l.name,
           masterIndex: i,
-          hasFailedUnitTest: hasFailedRecord || unitTestStatus.hasFailedUnitTest,
-          failedUnitTest: hasFailedRecord ? unitTestStatus.failedUnitTest : (unitTestStatus.hasFailedUnitTest ? unitTestStatus.failedUnitTest : null)
+          hasFailedUnitTest: hasFailed,
+          failedUnitTest: hasFailed ? (unitTestStatus.failedUnitTest ?? null) : null
         };
       }
     } else {
@@ -1140,11 +1167,7 @@ export function calculateLessonRangeForSlot(params: {
     ? rawMiniTestResults
     : (student?.id ? db.getMiniTestResults(student.id) : db.getMiniTestResults());
 
-  const isElem = Boolean(
-    student?.grade?.startsWith('小') || 
-    (student?.grade?.includes('年') && !student?.grade?.startsWith('中') && !student?.grade?.startsWith('高')) ||
-    student?.grade === '園児'
-  );
+  const isElem = isElementaryGrade(student?.grade);
   const isJunior = Boolean(student?.grade?.startsWith('中'));
   const isHigh = Boolean(student?.grade?.startsWith('高') || student?.grade === '既卒');
 
@@ -1180,7 +1203,7 @@ export function calculateLessonRangeForSlot(params: {
   const ensuredMasters = ensureMathEnglishUnitTests(filteredMasters);
   if ((isElem || (rawMasters && rawMasters.length > 0)) && ensuredMasters.length > 0) {
     masterLessons = ensuredMasters
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .sort(sortBySortOrder)
       .map(m => ({
         id: m.id,
         name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
@@ -1196,7 +1219,7 @@ export function calculateLessonRangeForSlot(params: {
 
     if (matchingSchoolUnits.length > 0) {
       masterLessons = matchingSchoolUnits
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .sort(sortBySequenceOrder)
         .map(u => ({
           id: u.id,
           name: u.name,
@@ -1204,10 +1227,10 @@ export function calculateLessonRangeForSlot(params: {
         }));
     } else if (ensuredMasters.length > 0) {
       masterLessons = ensuredMasters
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .sort(sortBySortOrder)
         .map(m => ({
           id: m.id,
-          name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+          name: formatLessonTitle(m.unit_name, m.lesson_name),
           sort_order: m.sort_order ?? 0,
           unit_name: m.unit_name,
           item_type: m.item_type
@@ -1216,7 +1239,7 @@ export function calculateLessonRangeForSlot(params: {
       const fallbackUnits = curriculumUnits
         .filter(u => (!schoolId || u.school_id === schoolId || !u.school_id) && 
                      (isElem ? ((subject === '算数' || subject === '数学') ? (u.subject === '算数' || u.subject === '数学') : u.subject === subject) : u.subject === subject))
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .sort(sortBySequenceOrder)
         .map(u => ({
           id: u.id,
           name: u.name,
@@ -1255,19 +1278,17 @@ export function calculateLessonRangeForSlot(params: {
       lessonProgressList,
       miniTestResults
     });
+    let foundIndex = -1;
     if (nextUncompleted.lessonId || nextUncompleted.lessonName) {
-      const idx = masterLessons.findIndex(m => 
+      foundIndex = masterLessons.findIndex(m => 
         m.id === nextUncompleted.lessonId || 
         String(m.sort_order) === String(nextUncompleted.lessonId) ||
         m.name === nextUncompleted.lessonName
       );
-      if (idx >= 0) {
-        earliestUncompletedIdx = idx;
-        hasEarliest = true;
-      } else if (nextUncompleted.masterIndex >= 0 && (!rawMasters || rawMasters.length === 0)) {
-        earliestUncompletedIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
-        hasEarliest = true;
-      }
+    }
+    if (foundIndex >= 0) {
+      earliestUncompletedIdx = foundIndex;
+      hasEarliest = true;
     } else if (nextUncompleted.masterIndex >= 0 && (!rawMasters || rawMasters.length === 0)) {
       earliestUncompletedIdx = Math.min(nextUncompleted.masterIndex, masterLessons.length - 1);
       hasEarliest = true;
@@ -1376,14 +1397,16 @@ export function calculateLessonRangeForSlot(params: {
     paceReason = `単元テスト不合格のため新単元進行をストップし、${cleanUnitName}の総復習を割り当てました`;
   }
 
-  const slicedLessons = (hasFailed && failedTestObj)
+  const isFailedMode = Boolean(hasFailed && failedTestObj);
+  const effectiveEndItem = isFailedMode ? startItem : (endItem || startItem);
+  const slicedLessons = isFailedMode
     ? (startItem ? [startItem] : [])
     : masterLessons.slice(startIdx, endIdx + 1);
   const lessonIds = slicedLessons.map(m => String(m.id));
 
   return {
     start_lesson_id: startItem?.id || null,
-    end_lesson_id: (hasFailed && failedTestObj) ? (startItem?.id || null) : (endItem?.id || startItem?.id || null),
+    end_lesson_id: effectiveEndItem?.id || null,
     start_lesson_name: startName,
     end_lesson_name: endName,
     lesson_range: rangeStr || null,
@@ -1476,11 +1499,7 @@ export function getLessonRangeStepIds(params: {
   } = params;
 
   const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
-  const isElem = Boolean(
-    studentGrade?.startsWith('小') ||
-    (studentGrade?.includes('年') && !studentGrade?.startsWith('中') && !studentGrade?.startsWith('高')) ||
-    studentGrade === '園児'
-  );
+  const isElem = isElementaryGrade(studentGrade);
   const isJunior = Boolean(studentGrade?.startsWith('中'));
   const isHigh = Boolean(studentGrade?.startsWith('高') || studentGrade === '既卒');
 
@@ -1537,11 +1556,7 @@ export function getLessonRangeStepIds(params: {
       .map((id, idx) => {
         const m = map.get(String(id));
         if (m) {
-          const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
-          const isUT = !isReviewOrCheck && (
-            m.item_type === 'unit_test' ||
-            Boolean((m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト') || (m.lesson_name || '').includes('確認テスト'))
-          );
+          const isUT = isUnitTestMaster(m);
           const cleanLesson = (m.lesson_name || m.name || '').replace(/^[^-]+-\s*/, '').trim();
           return {
             id: String(m.id),
@@ -1612,18 +1627,11 @@ export function getLessonRangeStepIds(params: {
   for (const rawMastersList of masterListsToTry) {
     const ensuredMasters = ensureMathEnglishUnitTests(rawMastersList);
     const masterLessons = ensuredMasters
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .sort(sortBySortOrder)
       .map(m => {
-        const isReviewOrCheck = (m.lesson_name || '').includes('まとめテスト') || (m.lesson_name || '').toLowerCase().includes('check test');
-        const isUT = !isReviewOrCheck && (
-          m.item_type === 'unit_test' ||
-          Boolean(
-            (m.lesson_name || '').includes('単元確認テスト') ||
-            (m.lesson_name || '').includes('単元テスト') ||
-            (m.lesson_name || '').includes('確認テスト')
-          )
-        );
-        const cleanLesson = m.lesson_name.replace(/^[^-]+-\s*/, '').trim();
+        const isUT = isUnitTestMaster(m);
+        const rawLessonName = m.lesson_name || (m as any).name || '';
+        const cleanLesson = rawLessonName.replace(/^[^-]+-\s*/, '').trim();
         return {
           id: String(m.id),
           name: cleanLesson || m.unit_name || '',
@@ -1870,7 +1878,17 @@ export function getLessonRangeStepIds(params: {
     ];
   }
 
-  const fallbackTitle = fromStr || toStr || rangeText || '授業';
+  let fallbackTitle = fromStr || toStr || rangeText;
+  if (!fallbackTitle && (startLessonId || endLessonId) && params.curriculumUnits) {
+    const targetId = startLessonId || endLessonId;
+    const foundUnit = params.curriculumUnits.find(u => String(u.id) === String(targetId));
+    if (foundUnit) {
+      fallbackTitle = foundUnit.name;
+    }
+  }
+  if (!fallbackTitle) {
+    fallbackTitle = '授業';
+  }
   return [{
     id: startLessonId || endLessonId || 'lesson-fallback',
     name: fallbackTitle,
@@ -2013,14 +2031,10 @@ export function getFirstAttendanceDate(
   }
 
   const check = new Date(baseDate.getTime());
-  for (let i = 0; i < 14; i++) {
-    if (targetDayNums.has(check.getDay())) {
-      return check.toISOString().split('T')[0];
-    }
+  while (!targetDayNums.has(check.getDay())) {
     check.setDate(check.getDate() + 1);
   }
-
-  return baseDate.toISOString().split('T')[0];
+  return check.toISOString().split('T')[0];
 }
 
 /**
@@ -2129,7 +2143,7 @@ export function parseStartUnitSetting(rawSetting: string): { gradeText: string |
 /**
  * 生徒の教科ごとのスタート位置（単元ID / 設定文字列）を取得するヘルパー関数
  */
-export function getStudentStartUnitIdForSubject(student?: Student | null, subject?: string): string | null {
+export function getStudentStartUnitIdForSubject(student?: Partial<Student> | Student | null, subject?: string): string | null {
   if (!student || !subject) return null;
   const sub = subject.trim();
 
@@ -2792,11 +2806,7 @@ export function calculateSubjectProgressRate(params: {
   const curriculumMasters = (rawMasters && rawMasters.length > 0) ? rawMasters : db.getCurriculumMasters();
   const curriculumUnits = (rawUnits && rawUnits.length > 0) ? rawUnits : db.getCurriculumUnits();
 
-  const isElem = Boolean(
-    student.grade?.startsWith('小') || 
-    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
-    student.grade === '園児'
-  );
+  const isElem = isElementaryGrade(student.grade);
 
   // 対象教科のマスタレッスン一覧
   const filteredMasters = curriculumMasters.filter(m => {
@@ -2810,8 +2820,8 @@ export function calculateSubjectProgressRate(params: {
   let totalLessons: Array<{ id: string; name: string; sort_order: number }> = [];
   if (isElem && filteredMasters.length > 0) {
     totalLessons = filteredMasters
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map(m => ({ id: m.id, name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name, sort_order: m.sort_order ?? 0 }));
+      .sort(sortBySortOrder)
+      .map(m => ({ id: m.id, name: formatLessonTitle(m.unit_name, m.lesson_name), sort_order: m.sort_order ?? 0 }));
   } else {
     const matchingUnits = curriculumUnits.filter(u => 
       (student.school_id ? u.school_id === student.school_id : true) &&
@@ -2819,12 +2829,12 @@ export function calculateSubjectProgressRate(params: {
     );
     if (matchingUnits.length > 0) {
       totalLessons = matchingUnits
-        .sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .sort(sortBySequenceOrder)
         .map(u => ({ id: u.id, name: u.name, sort_order: u.sequence_order ?? 0 }));
     } else if (filteredMasters.length > 0) {
       totalLessons = filteredMasters
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(m => ({ id: m.id, name: m.unit_name ? `${m.unit_name} - ${m.lesson_name}` : m.lesson_name, sort_order: m.sort_order ?? 0 }));
+        .sort(sortBySortOrder)
+        .map(m => ({ id: m.id, name: formatLessonTitle(m.unit_name, m.lesson_name), sort_order: m.sort_order ?? 0 }));
     }
   }
 
@@ -2895,6 +2905,26 @@ export const SUBJECT_PRIORITY: Record<string, number> = {
 };
 
 /**
+ * 教科の固定優先度 (算数・数学=1, 英語=2, 国語=3, 理科=4, 社会=5, その他=99)
+ */
+export function getSubjectPriority(subject?: string | null): number {
+  if (!subject) return 99;
+  const trimmed = subject.trim();
+  return SUBJECT_PRIORITY[trimmed] ?? SUBJECT_PRIORITY[trimmed.toLowerCase()] ?? 99;
+}
+
+/**
+ * コマ番号に応じた対象教科のローテーション解決
+ */
+export function resolveSubByPeriod(sortedSubjs: string[], p: number): string {
+  if (!sortedSubjs || sortedSubjs.length === 0) return '算数';
+  if (p <= sortedSubjs.length) {
+    return sortedSubjs[p - 1] || sortedSubjs[0] || '算数';
+  }
+  return sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0] || '算数';
+}
+
+/**
  * 選択教科 (selected_subjects) を「算数/数学(1)・英語(2)」最優先 ＋ 進捗率順にソートする
  */
 export function getSortedSubjectsByProgressRate(params: {
@@ -2914,11 +2944,7 @@ export function getSortedSubjectsByProgressRate(params: {
     lessonProgressList = []
   } = params;
 
-  const isElem = Boolean(
-    student.grade?.startsWith('小') || 
-    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
-    student.grade === '園児'
-  );
+  const isElem = isElementaryGrade(student.grade);
   const defaultSubjs = isElem ? ['算数', '英語'] : ['数学', '英語'];
   const subjectsToUse = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : defaultSubjs;
 
@@ -2931,7 +2957,7 @@ export function getSortedSubjectsByProgressRate(params: {
       tasks,
       lessonProgressList
     });
-    const priority = SUBJECT_PRIORITY[sub] ?? SUBJECT_PRIORITY[sub.toLowerCase()] ?? 99;
+    const priority = getSubjectPriority(sub);
     return { subject: sub, rate: progressRate, priority, originalIdx };
   });
 
@@ -2997,11 +3023,7 @@ export function generateSlotsForSelectedSubjects(params: {
     lessonProgressList
   });
 
-  const isElem = Boolean(
-    student.grade?.startsWith('小') || 
-    (student.grade?.includes('年') && !student.grade?.startsWith('中') && !student.grade?.startsWith('高')) ||
-    student.grade === '園児'
-  );
+  const isElem = isElementaryGrade(student.grade);
   const defaultSubjs = isElem ? ['英語', '算数'] : ['数学', '英語'];
   const userSubjs = (selectedSubjects && selectedSubjects.length > 0) ? selectedSubjects : (student.selected_subjects && student.selected_subjects.length > 0 ? student.selected_subjects : defaultSubjs);
 
@@ -3010,12 +3032,7 @@ export function generateSlotsForSelectedSubjects(params: {
   const accumulatedLessonsBySubject = new Map<string, string[]>();
 
   for (let p = 1; p <= periodCount; p++) {
-    let sub = '';
-    if (p <= sortedSubjs.length) {
-      sub = sortedSubjs[p - 1];
-    } else {
-      sub = sortedSubjs[(p - 1) % sortedSubjs.length] || sortedSubjs[0] || '算数';
-    }
+    const sub = resolveSubByPeriod(sortedSubjs, p);
 
     // 当日の学習ストッパー: すでに当日単元テストに到達している教科は、同日に次単元を先入れせずテスト・復習位置を維持
     const alreadyTestedToday = subjectReachedUnitTest.has(sub);

@@ -152,6 +152,22 @@ describe('Elementary Timeline Slot Synchronization and Individual Student Progre
       score: 100
     });
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    await db.saveLearningTasks([{
+      id: 'task-b-4',
+      student_id: 'student-elem-isolate-b',
+      scheduled_date: todayStr,
+      subject: '国語',
+      period: 1,
+      unit_id: 'cm-kokugo-4',
+      start_lesson_name: 'たちつてと',
+      end_lesson_name: 'たちつてと',
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    }]);
+
     const { unmount } = render(<TeacherDashboard onLogout={() => {}} teacherType="elementary" />);
 
     await waitFor(() => {
@@ -199,6 +215,22 @@ describe('Elementary Timeline Slot Synchronization and Individual Student Progre
       created_at: new Date().toISOString()
     };
     await db.saveStudent(studentC);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    await db.saveLearningTasks([{
+      id: 'task-c-1',
+      student_id: 'student-elem-isolate-c',
+      scheduled_date: todayStr,
+      subject: '国語',
+      period: 1,
+      unit_id: 'cm-kokugo-1',
+      start_lesson_name: 'あいうえお',
+      end_lesson_name: 'あいうえお',
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    }]);
 
     const { unmount } = render(<TeacherDashboard onLogout={() => {}} teacherType="elementary" />);
 

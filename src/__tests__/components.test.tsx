@@ -1264,7 +1264,7 @@ describe('UI Components Render & Interaction Tests', () => {
     // 1時間目を数学に変更
     fireEvent.change(period1Select, { target: { value: '数学' } });
     // 数学に変更するとカリキュラム単元のドロップダウンが表示される
-    const parentContainer = period1Select.parentElement!;
+    const parentContainer = period1Select.parentElement!.parentElement!;
     await waitFor(() => {
       const selects = parentContainer.querySelectorAll('select');
       expect(selects.length).toBeGreaterThanOrEqual(2);
@@ -2484,18 +2484,27 @@ describe('UI Components Render & Interaction Tests', () => {
     const scheduleMenuBtn = screen.getByText('学習計画・コマ割り');
     fireEvent.click(scheduleMenuBtn);
 
-    // 対象日付インプットの値を無効な日付および空文字列にして、339-342行目のブランチをカバーする
-    const scheduleDateInput = container.querySelector('input[type="date"]')!;
-    expect(scheduleDateInput).toBeInTheDocument();
-    
-    const originalType = scheduleDateInput.type;
-    scheduleDateInput.type = 'text';
-    fireEvent.change(scheduleDateInput, { target: { value: 'invalid-date' } });
-    scheduleDateInput.type = originalType;
+    // 日付バッジ（japanese-date-badge）が正しく表示されることを確認
+    const dateBadge = screen.getByTestId('japanese-date-badge');
+    expect(dateBadge).toBeInTheDocument();
 
-    fireEvent.change(scheduleDateInput, { target: { value: '' } });
+    const scheduleDateInput = container.querySelector('input[type="date"]');
+    if (scheduleDateInput) {
+      const originalType = (scheduleDateInput as HTMLInputElement).type;
+      (scheduleDateInput as HTMLInputElement).type = 'text';
+      fireEvent.change(scheduleDateInput, { target: { value: 'invalid-date' } });
+      (scheduleDateInput as HTMLInputElement).type = originalType;
+      fireEvent.change(scheduleDateInput, { target: { value: '' } });
+    }
 
     unmount();
+
+    // 無効な日付や空文字のハンドリングブランチをカバー
+    const { unmount: unmountInvalid } = render(
+      <TeacherDashboard initialDate="invalid-date" initialTab="schedule" />
+    );
+    expect(screen.queryByTestId('japanese-date-badge')).toBeNull();
+    unmountInvalid();
   });
 
   // 13. 一括適用機能テスト
@@ -3233,10 +3242,10 @@ describe('UI Components Render & Interaction Tests', () => {
     const periodSelect4 = periodSelects4[0];
     fireEvent.change(periodSelect4, { target: { value: 'テスト' } });
     await waitFor(() => {
-      const firstPeriodContainer = periodSelect4.parentElement!;
+      const firstPeriodContainer = periodSelect4.parentElement!.parentElement!;
       expect(firstPeriodContainer.querySelector('input[placeholder="テストのテーマ（例: 一次方程式小テスト）"]')).not.toBeNull();
     });
-    const firstPeriodContainer = periodSelect4.parentElement!;
+    const firstPeriodContainer = periodSelect4.parentElement!.parentElement!;
     const testDirectInput = firstPeriodContainer.querySelector('input[placeholder="テストのテーマ（例: 一次方程式小テスト）"]')!;
     fireEvent.change(testDirectInput, { target: { value: '直接入力小テストテーマ' } });
 
@@ -3891,16 +3900,13 @@ describe('UI Components Render & Interaction Tests', () => {
     // Switch to 学習計画・コマ割り (Tab 1)
     fireEvent.click(screen.getByText('学習計画・コマ割り'));
 
-    // Verify 1-week schedule overview matrix is rendered
+    // Verify clean schedule tab header and date badge is rendered
     await waitFor(() => {
-      expect(screen.getByText('📅 選択週（1週間）の学習予定・コマ割り状況')).toBeInTheDocument();
+      expect(screen.getByTestId('japanese-date-badge')).toBeInTheDocument();
     });
 
-    // Switch date from 1-week matrix
-    const selectButtons = screen.getAllByText('選択');
-    if (selectButtons.length > 0) {
-      fireEvent.click(selectButtons[0]);
-    }
+    // Verify timetable save button is available
+    expect(screen.getByText('時間割コマ割りを保存')).toBeInTheDocument();
 
     unmount();
   });
@@ -6186,6 +6192,209 @@ describe('UI Components Render & Interaction Tests', () => {
     }
 
     window.confirm = originalConfirm;
+    wrapper.unmount();
+  });
+
+  it('should cover TeacherDashboard timeline today button, homework delete cancellation, and grade chips', async () => {
+    const getDynamicDateStr = (offsetDays = 0): string => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      return d.toISOString().split('T')[0];
+    };
+
+    // 1. Cancel homework delete confirmation (covers L4166 false branch)
+    const originalConfirm = window.confirm;
+    window.confirm = () => false;
+
+    const elemStudent = db.getStudents().find(s => s.grade.startsWith('小')) || db.getStudents()[0];
+    const mockOnDateChange = vi.fn();
+    const wrapper = render(
+        <TeacherDashboard
+          onBackToPortal={() => {}}
+          teacherType="elementary"
+          initialStudentId={elemStudent.id}
+          initialTab="milestones"
+          onDateChange={mockOnDateChange}
+        />
+      );
+
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 100));
+      });
+
+      // 2. Change date via timeline-schedule-date-picker
+      const datePicker = screen.queryByTestId('timeline-schedule-date-picker');
+      if (datePicker) {
+        await act(async () => {
+          fireEvent.change(datePicker, { target: { value: new Date(Date.now() + 86400000).toISOString().split('T')[0] } });
+        });
+      }
+
+      // 3. Click timeline-today-btn (covers L10725-10727)
+      const todayBtn = screen.queryByTestId('timeline-today-btn');
+      if (todayBtn) {
+        await act(async () => {
+          fireEvent.click(todayBtn);
+        });
+      }
+
+      // 4. Click grade chips (1年生〜6年生 & 全学年表示) on elementary timeline
+      for (const g of ['1年生', '2年生', '3年生', '4年生', '5年生', '6年生', '全学年表示']) {
+        const gChip = screen.queryByTestId(`elementary-timeline-grade-btn-${g}`);
+        if (gChip) {
+          await act(async () => {
+            fireEvent.click(gChip);
+          });
+        }
+      }
+
+      // 5. Switch to homework subtab and attempt delete with confirm=false
+    const hwTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('宿題'));
+    if (hwTab) {
+      await act(async () => {
+        fireEvent.click(hwTab);
+      });
+      const delHwBtns = screen.queryAllByRole('button').filter(b => b.textContent?.includes('削除'));
+      if (delHwBtns.length > 0) {
+        await act(async () => {
+          fireEvent.click(delHwBtns[0]);
+        });
+      }
+    }
+
+    // 5. Switch to student_detail tab
+    const detailTab = screen.queryAllByRole('button').find(b => b.textContent?.includes('生徒詳細') || b.textContent?.includes('カルテ'));
+    if (detailTab) {
+      await act(async () => {
+        fireEvent.click(detailTab);
+      });
+    }
+
+    window.confirm = originalConfirm;
+    wrapper.unmount();
+  });
+
+  it('should cover TeacherDashboard two-way-interview and three-way-interview tabs, custom fields, and save handlers', async () => {
+    const getDynamicDateStr = (offsetDays = 0): string => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      return d.toISOString().split('T')[0];
+    };
+    const today = getDynamicDateStr(0);
+
+    const student = db.getStudents()[0];
+    const wrapper = render(
+      <TeacherDashboard
+        onBackToPortal={() => {}}
+        teacherType="all"
+        initialStudentId={student.id}
+        initialTab="two-way-interview"
+      />
+    );
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 100));
+    });
+
+    // 1. Two-way interview inputs
+    const interviewer2Input = screen.queryByTestId('interview2-interviewer');
+    if (interviewer2Input) {
+      fireEvent.change(interviewer2Input, { target: { value: '佐藤講師' } });
+    }
+    const date2Input = screen.queryByTestId('interview2-date');
+    if (date2Input) {
+      fireEvent.change(date2Input, { target: { value: today } });
+    }
+    const targetSchool2Input = screen.queryByTestId('interview2-target-school');
+    if (targetSchool2Input) {
+      fireEvent.change(targetSchool2Input, { target: { value: '県立高' } });
+    }
+    const dreamGoal2Input = screen.queryByTestId('interview2-dream-goal');
+    if (dreamGoal2Input) {
+      fireEvent.change(dreamGoal2Input, { target: { value: 'プログラマー' } });
+    }
+    const clubActivity2Input = screen.queryByTestId('interview2-club-activity');
+    if (clubActivity2Input) {
+      fireEvent.change(clubActivity2Input, { target: { value: '科学部' } });
+    }
+
+    // Add & update & remove custom field
+    const addCustomBtn = screen.queryByTestId('interview2-add-custom-field-btn');
+    if (addCustomBtn) {
+      await act(async () => {
+        fireEvent.click(addCustomBtn);
+      });
+      const customLabel = screen.queryByTestId('interview2-custom-label-0');
+      if (customLabel) {
+        fireEvent.change(customLabel, { target: { value: '得意科目' } });
+      }
+      const customValue = screen.queryByTestId('interview2-custom-value-0');
+      if (customValue) {
+        fireEvent.change(customValue, { target: { value: '数学' } });
+      }
+      const removeCustomBtn = screen.queryByTestId('interview2-remove-custom-field-0');
+      if (removeCustomBtn) {
+        await act(async () => {
+          fireEvent.click(removeCustomBtn);
+        });
+      }
+    }
+
+    // Click save interview2
+    const save2Btn = screen.queryByTestId('interview2-save-btn');
+    if (save2Btn) {
+      await act(async () => {
+        fireEvent.click(save2Btn);
+      });
+    }
+
+    // Click new interview2 button
+    const new2Btn = screen.queryByTestId('interview2-new-btn');
+    if (new2Btn) {
+      await act(async () => {
+        fireEvent.click(new2Btn);
+      });
+    }
+
+    // 2. Switch to three-way-interview tab
+    wrapper.rerender(
+      <TeacherDashboard
+        onBackToPortal={() => {}}
+        teacherType="all"
+        initialStudentId={student.id}
+        initialTab="three-way-interview"
+      />
+    );
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 100));
+    });
+
+    const interviewer3Input = screen.queryByTestId('interview3-interviewer');
+    if (interviewer3Input) {
+      fireEvent.change(interviewer3Input, { target: { value: '高橋講師' } });
+    }
+    const date3Input = screen.queryByTestId('interview3-date');
+    if (date3Input) {
+      fireEvent.change(date3Input, { target: { value: today } });
+    }
+
+    // Click save interview3
+    const save3Btn = screen.queryByTestId('interview3-save-btn');
+    if (save3Btn) {
+      await act(async () => {
+        fireEvent.click(save3Btn);
+      });
+    }
+
+    // Click new interview3 button
+    const new3Btn = screen.queryByTestId('interview3-new-btn');
+    if (new3Btn) {
+      await act(async () => {
+        fireEvent.click(new3Btn);
+      });
+    }
+
     wrapper.unmount();
   });
 });

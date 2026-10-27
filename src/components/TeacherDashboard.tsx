@@ -70,7 +70,9 @@ import {
   normalizeUnitName,
   ensureMathEnglishUnitTests,
   isMatchingUnitOrTest,
-  getLessonRangeStepIds
+  matchesFailedUnitTest,
+  getLessonRangeStepIds,
+  sortBySortOrder
 } from '../lib/scheduler';
 import html2canvas from 'html2canvas';
 import { 
@@ -105,12 +107,12 @@ interface TeacherDashboardProps {
   onDateChange?: (date: string) => void;
 }
 
-const isValidUUID = (str?: string | null): boolean => {
+export const isValidUUID = (str?: string | null): boolean => {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 };
 
-function normalizeGrade(g?: string): string {
+export function normalizeGrade(g?: string): string {
   if (!g) return '';
   const trimmed = g.trim();
   if (trimmed.startsWith('中') || trimmed.startsWith('高') || trimmed === '園児' || trimmed === '既卒') {
@@ -121,6 +123,1560 @@ function normalizeGrade(g?: string): string {
     return `${num}年生`;
   }
   return trimmed;
+}
+
+export function resolveMiniTestPassedStatus(status?: string | null, passed?: boolean | null): 'passed' | 'failed' | 'unstarted' {
+  if (status === 'passed' || status === '合格' || passed === true) return 'passed';
+  if (status === 'failed' || status === '不合格' || passed === false) return 'failed';
+  return 'unstarted';
+}
+
+export function resolveMiniTestPassedStatusWithFallback(
+  status?: string | null,
+  passed?: boolean | null,
+  score?: number | null,
+  tempStatus?: string
+): 'passed' | 'failed' | 'unstarted' {
+  if (tempStatus) return tempStatus as any;
+  const effectivePassed = passed !== undefined && passed !== null ? passed : (score !== null && score !== undefined ? score >= 70 : null);
+  return resolveMiniTestPassedStatus(status, effectivePassed);
+}
+
+export function resolveInterviewerName(interviewer?: string | null, teacherInCharge?: string | null, fallback: string = '担当講師'): string {
+  return (interviewer || '').trim() || (teacherInCharge || '').trim() || fallback;
+}
+
+export function resolveStudentPersonalities(student?: Partial<Student> | null, form?: Partial<Student> | null): string[] {
+  const tags = form?.personalities || (form as any)?.personality_tags || student?.personalities || student?.personality_tags;
+  return Array.isArray(tags) ? tags : [];
+}
+
+export function resolveTimetableRangeAndTheme(params: {
+  config: { startLessonName?: string; endLessonName?: string; lessonRange?: string; customTheme?: string };
+  selectedUnit?: { name: string } | null;
+  selectedMaster?: { unit_name?: string; lesson_name: string } | null;
+  studentId: string;
+  scheduleDate: string;
+  period: number;
+  targetUnitId?: string;
+}): {
+  startLessonName: string;
+  endLessonName: string;
+  rangeString: string;
+  customUnitId: string;
+  customThemeName: string;
+} {
+  const { config, selectedUnit, selectedMaster, studentId, scheduleDate, period, targetUnitId } = params;
+  let startLessonName = config.startLessonName || '';
+  if (!startLessonName) {
+    if (selectedUnit?.name) {
+      startLessonName = selectedUnit.name;
+    } else if (selectedMaster) {
+      startLessonName = selectedMaster.unit_name
+        ? `${selectedMaster.unit_name} - ${selectedMaster.lesson_name}`
+        : selectedMaster.lesson_name;
+    }
+  }
+
+  const endLessonName = config.endLessonName || startLessonName;
+  const rangeString = config.lessonRange || formatLessonRange(startLessonName, endLessonName);
+  const customUnitId = targetUnitId || `custom-${studentId}-${scheduleDate}-${period}`;
+  const customThemeName = rangeString || startLessonName || config.customTheme || '';
+
+  return {
+    startLessonName,
+    endLessonName,
+    rangeString,
+    customUnitId,
+    customThemeName
+  };
+}
+
+export function resolveDefaultSubject(grade?: string, subject?: string): string {
+  if (subject && subject.trim() !== '') return subject;
+  return (grade && grade.startsWith('中')) ? '数学' : '算数';
+}
+
+export function parseWeeklyAttendanceLimit(freqText?: string): number | null {
+  if (!freqText) return 2;
+  if (freqText.includes('無制限') || freqText.includes('自由')) return null;
+  const match = freqText.match(/[2-5]/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+export function formatErrorMessage(err: unknown): string {
+  if (!err) return '不明なエラーが発生しました';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const errorObj = err as any;
+    if (errorObj.message) {
+      return errorObj.code ? `${errorObj.message} (${errorObj.code})` : errorObj.message;
+    }
+    if (errorObj.details) return String(errorObj.details);
+    try {
+      return JSON.stringify(err, Object.getOwnPropertyNames(err));
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
+export function matchesTimelineUnit(u: any, query: string, queryId?: string): boolean {
+  if (!u) return false;
+  if (!query && !queryId) return false;
+  if (queryId && (String(u.id) === String(queryId) || (u.sort_order !== undefined && String(u.sort_order) === String(queryId)))) {
+    return true;
+  }
+  if (!query) return false;
+  if (u.lesson_name === query || u.name === query) return true;
+  return isMatchingUnitOrTest(u.name, query) || isMatchingUnitOrTest(u.lesson_name, query);
+}
+
+export function resolveStudentSchoolName(schools?: any[], schoolId?: string, fallbackName?: string): string {
+  if (schoolId && Array.isArray(schools)) {
+    const found = schools.find(s => s.id === schoolId);
+    if (found?.name) return String(found.name).trim();
+  }
+  return (fallbackName || '').trim();
+}
+
+export function resolveFormInputSchoolName(
+  inputSchoolName?: string | null,
+  formSchoolName?: string | null,
+  schools?: any[],
+  formSchoolId?: string | null,
+  studentSchoolName?: string | null
+): string {
+  if (inputSchoolName !== undefined && inputSchoolName !== null) {
+    return inputSchoolName.trim();
+  }
+  if (formSchoolName !== undefined && formSchoolName !== null) {
+    return formSchoolName.trim();
+  }
+  return resolveStudentSchoolName(schools, formSchoolId || undefined, studentSchoolName || undefined);
+}
+
+export function resolvePeriodSlotFromTask(
+  t: {
+    unit_id?: string | null;
+    start_lesson_name?: string | null;
+    end_lesson_name?: string | null;
+    subject?: string | null;
+    start_lesson_id?: string | null;
+    end_lesson_id?: string | null;
+    lesson_range?: string | null;
+    custom_unit_name?: string | null;
+  },
+  listUnits: CurriculumUnit[],
+  listMasters: CurriculumMaster[]
+): {
+  subject: string;
+  unitId: string;
+  customTheme: string;
+  startLessonId: string;
+  endLessonId: string;
+  startLessonName: string;
+  endLessonName: string;
+  lessonRange: string;
+} | null {
+  const unit = listUnits.find(u => u.id === t.unit_id);
+  const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
+  const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
+  const endName = t.end_lesson_name || startName;
+
+  if (unit || master) {
+    return {
+      subject: resolvePeriodSubject(t.subject, unit?.subject, master?.subject, '数学'),
+      unitId: t.unit_id!,
+      customTheme: '',
+      startLessonId: t.start_lesson_id || t.unit_id!,
+      endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id!,
+      startLessonName: startName,
+      endLessonName: endName,
+      lessonRange: t.lesson_range || formatLessonRange(startName, endName)
+    };
+  } else if (t.subject || t.custom_unit_name) {
+    return {
+      subject: t.subject || 'テスト',
+      unitId: '',
+      customTheme: t.custom_unit_name || '',
+      startLessonId: t.start_lesson_id || '',
+      endLessonId: t.end_lesson_id || '',
+      startLessonName: t.start_lesson_name || t.custom_unit_name || '',
+      endLessonName: t.end_lesson_name || t.custom_unit_name || '',
+      lessonRange: t.lesson_range || t.custom_unit_name || ''
+    };
+  }
+  return null;
+}
+
+export function isMatchingSubjectGroup(subj?: string, targetSubject?: string): boolean {
+  if (!subj || !targetSubject) return false;
+  const s = subj.trim().toLowerCase();
+  const target = targetSubject.trim().toLowerCase();
+
+  if (s === '数学' || s === '算数' || s === 'math') {
+    return target === '算数' || target === '数学' || target === 'math';
+  }
+  if (s === '英語' || s === 'english') {
+    return target === '英語' || target === 'english';
+  }
+  if (s === '理科' || s === 'science') {
+    return target === '理科' || target === 'science';
+  }
+  if (s === '社会' || s === '歴史' || s === '地理' || s === '公民' || s === 'social') {
+    return ['社会', '歴史', '地理', '公民', 'social'].includes(target);
+  }
+  if (s === '国語' || s === 'japanese') {
+    return target === '国語' || target === 'japanese';
+  }
+  return target === s;
+}
+
+export function matchesGradeCategory(grade?: string | null, gradeFilter?: string | null): boolean {
+  if (!gradeFilter || gradeFilter === 'all') return true;
+  if (!grade) return false;
+  if (gradeFilter === '小学生') return grade.startsWith('小') || grade === '園児';
+  if (gradeFilter === '中学生') return grade.startsWith('中');
+  if (gradeFilter === '高校生') return grade.startsWith('高') || grade === '既卒';
+  return grade === gradeFilter;
+}
+
+export function matchesSubjectFilter(itemSubject?: string | null, itemContent?: string | null, subjectFilter?: string | null): boolean {
+  if (!subjectFilter || subjectFilter === 'all') return true;
+  return isMatchingSubjectGroup(itemSubject || undefined, subjectFilter) || Boolean(itemContent && itemContent.includes(subjectFilter));
+}
+
+export function filterMiniTestResults(
+  results: MiniTestResult[],
+  students: Student[],
+  gradeFilter: string,
+  subjectFilter: string,
+  searchQuery: string
+): MiniTestResult[] {
+  return results.filter(r => {
+    const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
+    const studentName = r.students?.name || student?.name || '';
+    const studentGrade = student?.grade || r.students?.grade || '';
+
+    if (!matchesGradeCategory(studentGrade, gradeFilter)) return false;
+    if (!matchesSubjectFilter(r.subject, r.test_content, subjectFilter)) return false;
+    return matchesMiniTestQuery(r, studentName, searchQuery);
+  });
+}
+
+export function filterHomeworkResults(
+  results: HomeworkResult[],
+  students: Student[],
+  gradeFilter: string,
+  subjectFilter: string,
+  searchQuery: string
+): HomeworkResult[] {
+  return results.filter(r => {
+    const student = students.find(s => s.id === r.student_id);
+    const studentName = student ? student.name : '';
+    const studentGrade = student ? student.grade : '';
+
+    if (gradeFilter !== 'all') {
+      if (!student) return false;
+      if (!matchesGradeCategory(studentGrade, gradeFilter)) return false;
+    }
+    if (!matchesSubjectFilter(r.subject, r.homework_content, subjectFilter)) return false;
+    return matchesHomeworkQuery(r, studentName, searchQuery);
+  });
+}
+
+export function filterFutureUncompletedTasks(allTasks: LearningTask[], todayStr: string): LearningTask[] {
+  return allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
+}
+
+export function matchesMiniTestUnitId(record: any, uId: string): boolean {
+  if (!record || !uId) return false;
+  return (Boolean(record.unit_id) && String(record.unit_id) === uId) || (Boolean(record.lesson_id) && String(record.lesson_id) === uId);
+}
+
+export function resolveFailedUnitTestKey(fut?: { unit_name?: string | null; test_content?: string | null } | null): string {
+  if (!fut) return '';
+  return fut.unit_name || fut.test_content || '';
+}
+
+export function evaluateTimelineStepCompletion(
+  step: any,
+  completedLessonIdSet: Set<string>,
+  miniTestPassedIdSet: Set<string>
+): boolean {
+  const stepIdStr = String(step.id);
+  const stepOrderStr = step.sort_order !== undefined ? String(step.sort_order) : '';
+  const stepName = step.lesson_name || step.name || '';
+  const isReviewOrCheck = stepName.includes('まとめテスト') ||
+                          stepName.toLowerCase().includes('check test') ||
+                          (step.unit_name || '').includes('まとめテスト') ||
+                          (step.unit_name || '').toLowerCase().includes('check test');
+  const isUnitTest = !isReviewOrCheck && (
+    step.item_type === 'unit_test' ||
+    stepName.includes('単元確認テスト') ||
+    stepName.includes('単元テスト')
+  );
+
+  if (isUnitTest) {
+    return miniTestPassedIdSet.has(stepIdStr) || (Boolean(stepOrderStr) && miniTestPassedIdSet.has(stepOrderStr));
+  }
+  return completedLessonIdSet.has(stepIdStr) || (Boolean(stepOrderStr) && completedLessonIdSet.has(stepOrderStr));
+}
+
+export function buildUniqueUnitOptionsForSubject(
+  curriculumMasters: CurriculumMaster[],
+  schoolUnits: CurriculumUnit[],
+  subject: string,
+  curGrade: string
+): Array<{ id: string; name: string; lessonIds: string[]; sort_order: number }> {
+  const mastersForSubject = curriculumMasters.filter(m => isMatchingSubjectGroup(m.subject, subject));
+  const filteredMasters = mastersForSubject.length > 0
+    ? mastersForSubject.filter(m => {
+        const g = m.grade_level || m.grade || '';
+        return g === curGrade ||
+               normalizeGrade(g) === normalizeGrade(curGrade) ||
+               normalizeStandardGrade(g) === normalizeStandardGrade(curGrade);
+      }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+    : [];
+
+  const uniqueUnitOptions: Array<{ id: string; name: string; lessonIds: string[]; sort_order: number }> = [];
+  const seenUnitNames = new Set<string>();
+
+  if (filteredMasters.length > 0) {
+    for (const m of filteredMasters) {
+      const rawName = (m.unit_name || m.lesson_name || '').trim();
+      if (!rawName) continue;
+      if (!seenUnitNames.has(rawName)) {
+        seenUnitNames.add(rawName);
+        uniqueUnitOptions.push({
+          id: m.id,
+          name: rawName,
+          lessonIds: [m.id],
+          sort_order: m.sort_order || 0
+        });
+      } else {
+        const existing = uniqueUnitOptions.find(u => u.name === rawName);
+        existing?.lessonIds.push(m.id);
+      }
+    }
+  } else {
+    for (const u of schoolUnits) {
+      const rawName = (((u as any).unit_name || u.name) || '').trim();
+      if (!rawName) continue;
+      if (!seenUnitNames.has(rawName)) {
+        seenUnitNames.add(rawName);
+        uniqueUnitOptions.push({
+          id: u.id,
+          name: rawName,
+          lessonIds: [u.id],
+          sort_order: u.sequence_order || 0
+        });
+      }
+    }
+  }
+
+  return uniqueUnitOptions;
+}
+
+export function resolveLessonsPace(
+  paceInfo?: { estimatedLessonsPerSlot?: number } | null,
+  branchRules?: { lessons_per_slot?: number } | null,
+  fallback: number = 2
+): number {
+  return paceInfo?.estimatedLessonsPerSlot || branchRules?.lessons_per_slot || fallback;
+}
+
+export function resolveEffectiveGrade(
+  grade?: string | null,
+  studentGrade?: string | null,
+  fallback: string = '小5'
+): string {
+  return grade || studentGrade || fallback;
+}
+
+export function formatRankDisplay(rank?: number | string | null): string {
+  return rank ? `${rank}位` : 'ー位';
+}
+
+export function formatStudentNameWithGrade(student?: Partial<Student> | null): string {
+  return `${student?.name || '生徒'} (${student?.grade || ''})`;
+}
+
+export function sortTasksByPeriod(tasks: LearningTask[]): LearningTask[] {
+  return [...tasks].sort((a, b) => (a.period || 0) - (b.period || 0));
+}
+
+export function resolveSyncLog(seedResLog?: string | null, dbLastSyncLog?: string | null, fallback: string = '全過去データ（生徒・年間計画・学習計画・テスト・宿題・面談記録）の完全復元完了'): string {
+  return seedResLog || dbLastSyncLog || fallback;
+}
+
+export function formatRescheduleErrorMessage(err: any): string {
+  return `自動リスケジュール処理中にエラーが発生しました: ${err?.message || err}`;
+}
+
+export function resolveMatchedSchoolForStudent(
+  student: Student | null | undefined,
+  currentSchools: any[],
+  matchedSchool?: any
+): string | undefined {
+  if (matchedSchool?.id) return matchedSchool.id;
+  if (!student) return undefined;
+  if (student.grade?.startsWith('小') || student.grade === '園児') {
+    return currentSchools.find(s => s.type === 'elementary')?.id;
+  }
+  if (student.grade?.startsWith('中')) {
+    return currentSchools.find(s => s.type === 'junior_high')?.id;
+  }
+  if (student.grade?.startsWith('高')) {
+    return currentSchools.find(s => s.type === 'high_school')?.id;
+  }
+  return undefined;
+}
+
+export function resolveStudentPreferredSubject(
+  student: Student | null | undefined,
+  currentSelectedSubject?: string
+): string {
+  if (!student) return currentSelectedSubject || '数学';
+  const isJuniorHigh = student.grade?.startsWith('中');
+  const isElementary = student.grade?.startsWith('小') || student.grade === '園児';
+
+  if (isJuniorHigh) {
+    const juniorSubjects = ['数学', '英語', '理科', '歴史', '地理', '国語', '社会'];
+    const pref = student.selected_subjects?.find(sub => juniorSubjects.includes(sub));
+    if (pref && (!currentSelectedSubject || !juniorSubjects.includes(currentSelectedSubject))) {
+      return pref;
+    }
+    if (!currentSelectedSubject || !juniorSubjects.includes(currentSelectedSubject)) {
+      return '数学';
+    }
+    return currentSelectedSubject;
+  }
+
+  if (isElementary) {
+    const elemSubjects = ['算数', '国語', '英語', '理科', '社会'];
+    const pref = student.selected_subjects?.find(sub => elemSubjects.includes(sub));
+    if (pref && (!currentSelectedSubject || !elemSubjects.includes(currentSelectedSubject))) {
+      return pref;
+    }
+    if (!currentSelectedSubject || !elemSubjects.includes(currentSelectedSubject)) {
+      return '算数';
+    }
+    return currentSelectedSubject;
+  }
+
+  // 高校生等
+  const highSubjects = ['数学', '英語', '国語', '理科', '社会'];
+  const pref = student.selected_subjects?.find(sub => highSubjects.includes(sub));
+  if (pref && (!currentSelectedSubject || !highSubjects.includes(currentSelectedSubject))) {
+    return pref;
+  }
+  if (!currentSelectedSubject || !highSubjects.includes(currentSelectedSubject)) {
+    return '数学';
+  }
+  return currentSelectedSubject;
+}
+
+export function resolveInitialMonthFilter(scheduleDate?: string): number | 'all' {
+  if (!scheduleDate) return 'all';
+  const currentMonth = new Date(scheduleDate).getMonth() + 1;
+  const validMonths = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+  return validMonths.includes(currentMonth) ? currentMonth : 'all';
+}
+
+export function applyTranscriptFieldsToInterview2(
+  parsed: any,
+  currentNotes?: string
+): {
+  interviewer?: string;
+  target_school?: string;
+  dream_goal?: string;
+  club_activity?: string;
+  club_members_count?: string;
+  close_friends?: string;
+  study_anxiety?: string;
+  self_evaluation?: string;
+  student_challenges?: string;
+  required_actions?: string;
+  expectations?: string;
+  target_rank?: string;
+  target_score?: string;
+  updatedNotes?: string;
+} {
+  const result: any = {};
+  if (parsed.interviewer) result.interviewer = parsed.interviewer;
+  if (parsed.target_school) result.target_school = parsed.target_school;
+  if (parsed.dream_goal) result.dream_goal = parsed.dream_goal;
+  if (parsed.club_activity) result.club_activity = parsed.club_activity;
+  if (parsed.club_members_count) result.club_members_count = parsed.club_members_count;
+  if (parsed.close_friends) result.close_friends = parsed.close_friends;
+  if (parsed.study_anxiety) result.study_anxiety = parsed.study_anxiety;
+  if (parsed.self_evaluation) result.self_evaluation = parsed.self_evaluation;
+  if (parsed.student_challenges) result.student_challenges = parsed.student_challenges;
+  if (parsed.required_actions) result.required_actions = parsed.required_actions;
+  if (parsed.expectations) result.expectations = parsed.expectations;
+  if (parsed.target_rank) result.target_rank = parsed.target_rank;
+  if (parsed.target_score) result.target_score = parsed.target_score;
+  if (parsed.notes) {
+    result.updatedNotes = currentNotes ? `${currentNotes}\n\n${parsed.notes}` : parsed.notes;
+  }
+  return result;
+}
+
+export function applyTranscriptFieldsToInterview3(
+  parsed: any,
+  currentNotes?: string
+): {
+  interviewer?: string;
+  parent_anxieties?: string;
+  discussed_content?: string;
+  updatedNotes?: string;
+} {
+  const result: any = {};
+  if (parsed.interviewer) result.interviewer = parsed.interviewer;
+  if (parsed.parent_anxieties) result.parent_anxieties = parsed.parent_anxieties;
+  if (parsed.discussed_content) result.discussed_content = parsed.discussed_content;
+  if (parsed.notes) {
+    result.updatedNotes = currentNotes ? `${currentNotes}\n\n${parsed.notes}` : parsed.notes;
+  }
+  return result;
+}
+
+export function buildInterview2Payload(params: {
+  selectedInterview2Id?: string | null;
+  studentId: string;
+  teacherInCharge?: string;
+  interviewer?: string;
+  interviewDate: string;
+  dreamGoal?: string;
+  targetSchool?: string;
+  clubActivity?: string;
+  clubMembersCount?: string;
+  closeFriends?: string;
+  studyAnxiety?: string;
+  selfEvaluation?: string;
+  studentChallenges?: string;
+  requiredActions?: string;
+  expectations?: string;
+  targetRank?: string;
+  targetScore?: string;
+  notes?: string;
+  customFields?: any[];
+  interviewSummary?: string;
+  audioTranscript?: string;
+  createdAt?: string;
+}): StudentInterview2 {
+  return {
+    id: params.selectedInterview2Id || `interview2-${params.studentId}-${Date.now()}`,
+    student_id: params.studentId,
+    interviewer: resolveInterviewerName(params.interviewer, params.teacherInCharge),
+    interview_date: params.interviewDate,
+    dream_goal: params.dreamGoal || '',
+    target_school: params.targetSchool || '',
+    club_activity: params.clubActivity || '',
+    club_members_count: params.clubMembersCount || '',
+    close_friends: params.closeFriends || '',
+    study_anxiety: params.studyAnxiety || '',
+    self_evaluation: params.selfEvaluation || '',
+    student_challenges: params.studentChallenges || '',
+    required_actions: params.requiredActions || '',
+    expectations: params.expectations || '',
+    target_rank: params.targetRank || '',
+    target_score: params.targetScore || '',
+    notes: params.notes || '',
+    custom_fields: params.customFields || [],
+    interview_summary: params.interviewSummary || '',
+    ai_coaching_advice: params.interviewSummary || '',
+    audio_transcript: params.audioTranscript || '',
+    created_at: params.createdAt || new Date().toISOString()
+  };
+}
+
+export function buildInterview3Payload(params: {
+  selectedInterview3Id?: string | null;
+  studentId: string;
+  teacherInCharge?: string;
+  interviewer?: string;
+  interviewDate: string;
+  parentType?: string;
+  parentAnxieties?: string;
+  discussedContent?: string;
+  futureDirectionAgreed?: boolean | 'yes' | 'no' | string;
+  notes?: string;
+  customFields?: any[];
+  interviewSummary?: string;
+  audioTranscript?: string;
+  createdAt?: string;
+}): StudentInterview3 {
+  return {
+    id: params.selectedInterview3Id || `interview3-${params.studentId}-${Date.now()}`,
+    student_id: params.studentId,
+    interviewer: resolveInterviewerName(params.interviewer, params.teacherInCharge),
+    interview_date: params.interviewDate,
+    parent_type: params.parentType || '保護者',
+    parent_anxieties: params.parentAnxieties || '',
+    discussed_content: params.discussedContent || '',
+    future_direction_agreed: params.futureDirectionAgreed ?? false,
+    notes: params.notes || '',
+    custom_fields: params.customFields || [],
+    interview_summary: params.interviewSummary || '',
+    ai_coaching_advice: params.interviewSummary || '',
+    audio_transcript: params.audioTranscript || '',
+    created_at: params.createdAt || new Date().toISOString()
+  };
+}
+
+export function resolveSavedStudentPeriodCount(savedSlots?: number | null, savedPeriodCount?: number | null, newSlots?: number | null, fallback: number = 2): number {
+  return savedSlots || savedPeriodCount || newSlots || fallback;
+}
+
+export function resolveTestContentName(lessonRange?: string | null, startLessonName?: string | null, defaultSubject: string = '数学'): string {
+  if (lessonRange && lessonRange.trim() !== '') return lessonRange.trim();
+  if (startLessonName && startLessonName.trim() !== '') return startLessonName.trim();
+  return `${defaultSubject} 単元確認テスト`;
+}
+
+export function extractUnitTestUnitName(lessonName?: string | null): string {
+  if (!lessonName || lessonName.trim() === '') return '単元テスト';
+  const trimmed = lessonName.trim();
+  if (trimmed.includes(' - ')) {
+    return trimmed.split(' - ')[0].trim();
+  }
+  return trimmed.split(' ')[0].trim();
+}
+
+export function resolveEffectiveUnitId(unitId?: string | null, startLessonId?: string | null): string {
+  return unitId || startLessonId || '';
+}
+
+export function resolveLessonTestContent(
+  startLessonName?: string | null,
+  endLessonName?: string | null,
+  lessonRange?: string | null
+): string {
+  return (isLessonUnitTest(endLessonName) ? (endLessonName || '') : (startLessonName || '')) || lessonRange || '';
+}
+
+export function resolveDisplayHomeworkStatus(
+  tempStatus?: string | null,
+  status?: string | null
+): string {
+  return tempStatus || status || 'incomplete';
+}
+
+export function formatStudentDebugSummary(students: Array<Partial<Student>>): string {
+  return students.map(s => {
+    const cleanName = (s.name || '').replace(/\s+/g, '');
+    const gradeText = s.grade || '学年未設定';
+    const schoolText = s.school_name || (s as any).classroom || '未設定';
+    return `[${cleanName}](${gradeText}/${schoolText})`;
+  }).join(', ');
+}
+
+export function formatTaskConfigDisplayName(
+  startLessonName?: string | null,
+  endLessonName?: string | null
+): string {
+  return endLessonName || startLessonName || '単元確認テスト';
+}
+
+export function isTaskConfigured(task?: Partial<LearningTask> | null): boolean {
+  if (!task || !task.period) return false;
+  return Boolean(task.subject || task.unit_id || task.start_lesson_id || task.custom_unit_name);
+}
+
+export function resolveFallbackThemeNames(
+  config: { startLessonName?: string | null; endLessonName?: string | null; lessonRange?: string | null },
+  customThemeName: string
+): { startLessonName: string; endLessonName: string; lessonRange: string } {
+  return {
+    startLessonName: config.startLessonName || customThemeName,
+    endLessonName: config.endLessonName || customThemeName,
+    lessonRange: config.lessonRange || customThemeName
+  };
+}
+
+export function getGradeOrder(g?: string | null): number {
+  if (!g) return 99;
+  const norm = normalizeGrade(g);
+  if (norm === '小1' || /^[1１]年生?$/.test(norm)) return 1;
+  if (norm === '小2' || /^[2２]年生?$/.test(norm)) return 2;
+  if (norm === '小3' || /^[3３]年生?$/.test(norm)) return 3;
+  if (norm === '小4' || /^[4４]年生?$/.test(norm)) return 4;
+  if (norm === '小5' || /^[5５]年生?$/.test(norm)) return 5;
+  if (norm === '小6' || /^[6６]年生?$/.test(norm)) return 6;
+  if (norm === '中1' || /^[7７]年生?$/.test(norm)) return 7;
+  if (norm === '中2' || /^[8８]年生?$/.test(norm)) return 8;
+  if (norm === '中3' || /^[9９]年生?$/.test(norm)) return 9;
+  if (norm.startsWith('高1')) return 10;
+  if (norm.startsWith('高2')) return 11;
+  if (norm.startsWith('高3')) return 12;
+  return 99;
+}
+
+export function calcUnitMinOrderMap(items: Array<{ grade?: string | null; unit_name?: string | null; sort_order?: number | null }>): Map<string, number> {
+  const map = new Map<string, number>();
+  items.forEach(m => {
+    const key = `${m.grade || ''}_${m.unit_name || ''}`;
+    const current = map.get(key) ?? Infinity;
+    const order = m.sort_order ?? 0;
+    if (order < current) map.set(key, order);
+  });
+  return map;
+}
+
+export function sortCurriculumMasterUnits<T extends { grade?: string | null; unit_name?: string | null; sort_order?: number | null }>(units: T[]): T[] {
+  const unitMinMap = calcUnitMinOrderMap(units);
+  return [...units].sort((a, b) => {
+    const ga = getGradeOrder(a.grade);
+    const gb = getGradeOrder(b.grade);
+    if (ga !== gb) return ga - gb;
+    const keyA = `${a.grade || ''}_${a.unit_name || ''}`;
+    const keyB = `${b.grade || ''}_${b.unit_name || ''}`;
+    const minA = unitMinMap.get(keyA)!;
+    const minB = unitMinMap.get(keyB)!;
+    if (minA !== minB) return minA - minB;
+    if (a.unit_name !== b.unit_name) return (a.unit_name || '').localeCompare(b.unit_name || '');
+    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  });
+}
+
+export function extractRegularTestScoresFromReportCard(res: any): {
+  testName?: string;
+  scoreJapanese?: string;
+  scoreMath?: string;
+  scoreEnglish?: string;
+  scoreSocial?: string;
+  scoreScience?: string;
+  scoreTotal?: string;
+  classRank?: string;
+  schoolRank?: string;
+  deviation?: string;
+} {
+  return {
+    testName: res?.test_name || undefined,
+    scoreJapanese: res?.score_japanese !== null && res?.score_japanese !== undefined ? String(res.score_japanese) : undefined,
+    scoreMath: res?.score_math !== null && res?.score_math !== undefined ? String(res.score_math) : undefined,
+    scoreEnglish: res?.score_english !== null && res?.score_english !== undefined ? String(res.score_english) : undefined,
+    scoreSocial: res?.score_social !== null && res?.score_social !== undefined ? String(res.score_social) : undefined,
+    scoreScience: res?.score_science !== null && res?.score_science !== undefined ? String(res.score_science) : undefined,
+    scoreTotal: res?.score_total !== null && res?.score_total !== undefined ? String(res.score_total) : undefined,
+    classRank: res?.class_rank !== null && res?.class_rank !== undefined ? String(res.class_rank) : undefined,
+    schoolRank: res?.school_rank !== null && res?.school_rank !== undefined ? String(res.school_rank) : undefined,
+    deviation: res?.deviation_value !== null && res?.deviation_value !== undefined ? String(res.deviation_value) : undefined
+  };
+}
+
+export function generateSecureUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `id-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+export function getGradeFilterValue(rawGrade: string | undefined): string | null {
+  if (!rawGrade) return null;
+  const match = rawGrade.match(/^[小]?([1-6])/);
+  if (match) return `小${match[1]}`;
+  const numMatch = rawGrade.match(/([1-6])年生?/);
+  if (numMatch) return `小${numMatch[1]}`;
+  if (rawGrade === '園児') return '小1';
+  return null;
+}
+
+export function calculateUnitTestMasterPlacement(params: {
+  curriculumMasters: CurriculumMaster[];
+  targetSubject: string;
+  targetGrade: string;
+  unitName: string;
+  testName: string;
+  passingLine: string;
+  editingUnitTestId?: string | null;
+}): {
+  masterPayload: CurriculumMaster;
+  mastersToSave: CurriculumMaster[];
+} {
+  const { curriculumMasters, targetSubject, targetGrade, unitName, testName, passingLine, editingUnitTestId } = params;
+  const sameSubMasters = curriculumMasters
+    .map(m => ({ ...m }))
+    .filter(m => m.subject === targetSubject || (targetSubject === '算数' && m.subject === '数学') || (targetSubject === '数学' && m.subject === '算数'))
+    .sort(sortBySortOrder);
+
+  let targetSortOrder = sameSubMasters.length > 0 ? (sameSubMasters[sameSubMasters.length - 1].sort_order ?? 0) + 1 : 1;
+
+  const selectedUnitName = unitName.trim();
+  if (selectedUnitName) {
+    const sameUnitItems = sameSubMasters.filter(m => m.unit_name === selectedUnitName);
+    if (sameUnitItems.length > 0) {
+      const lastUnitItem = sameUnitItems[sameUnitItems.length - 1];
+      const lastSort = lastUnitItem.sort_order ?? 0;
+      targetSortOrder = lastSort + 1;
+
+      sameSubMasters.forEach(m => {
+        const currentSort = m.sort_order ?? 0;
+        if (currentSort >= targetSortOrder && m.id !== editingUnitTestId) {
+          m.sort_order = currentSort + 1;
+        }
+      });
+    }
+  }
+
+  const rawTestName = testName.trim();
+  const formattedTestName = rawTestName.includes('テスト') || rawTestName.includes('確認')
+    ? rawTestName
+    : `${rawTestName} 単元確認テスト`;
+
+  const masterPayload: CurriculumMaster = {
+    id: editingUnitTestId || `cm-ut-${Date.now()}`,
+    grade: targetGrade,
+    subject: targetSubject,
+    unit_name: selectedUnitName || '単元未設定',
+    lesson_name: formattedTestName,
+    sort_order: editingUnitTestId ? (curriculumMasters.find(m => m.id === editingUnitTestId)?.sort_order || targetSortOrder) : targetSortOrder,
+    item_type: 'unit_test',
+    passing_line: passingLine || '80%以上',
+    created_at: new Date().toISOString()
+  };
+
+  const mastersToSave = editingUnitTestId ? [masterPayload] : [masterPayload, ...sameSubMasters.filter(m => m.id !== masterPayload.id)];
+  return { masterPayload, mastersToSave };
+}
+
+export function resolveStaffName(
+  interactionStaff?: string,
+  formTeacher?: string,
+  studentTeacher?: string,
+  defaultStaff: string = '福田'
+): string {
+  const staff = (interactionStaff || '').trim() || (formTeacher || '').trim() || (studentTeacher || '').trim();
+  return staff || defaultStaff;
+}
+
+export function resolveMiniTestScoreDisplay(
+  score: number | null | undefined,
+  tempScore?: string,
+  overrideScore?: string
+): string {
+  if (overrideScore !== undefined) return overrideScore;
+  if (tempScore !== undefined) return tempScore;
+  if (score !== null && score !== undefined) return String(score);
+  return '';
+}
+
+export function resolveMiniTestStatusDisplay(
+  status?: string | null,
+  passed?: boolean | null,
+  tempStatus?: string,
+  overrideStatus?: string
+): string {
+  if (overrideStatus !== undefined) return overrideStatus;
+  if (tempStatus !== undefined && tempStatus !== '') return tempStatus;
+  const canonical = resolveMiniTestPassedStatus(status, passed);
+  if (canonical === 'passed') return '合格';
+  if (canonical === 'failed') return '不合格';
+  return '未受講';
+}
+
+export function resolvePassingScoreByLevel(level?: string): number {
+  if (level === 'A') return 90;
+  if (level === 'B') return 80;
+  return 70;
+}
+
+export function resolvePassingLineDisplay(passingLine?: string | null, level?: string): string {
+  const stLevel = level || 'A';
+  const passScore = resolvePassingScoreByLevel(stLevel);
+  if (passingLine) {
+    return passingLine.includes('レベル') ? passingLine : `レベル${stLevel} (${passScore}点)`;
+  }
+  return `レベル${stLevel} (${passScore}点)`;
+}
+
+export function formatStudentsSummary(students?: any[] | null): string {
+  if (!students || students.length === 0) return '0件（データなし）';
+  return students
+    .map((s: any) => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.school_branch || s.classroom || '校舎未設定'})`)
+    .join(', ');
+}
+
+export function resolveDefaultSubjectsForGrade(grade?: string, teacherType?: string): string[] {
+  const isElem = (grade || '').startsWith('小') || grade === '園児' || teacherType === 'elementary';
+  const isHigh = (grade || '').startsWith('高') || grade === '既卒' || teacherType === 'high_school';
+  if (isElem) return ['算数', '国語', '英語'];
+  if (isHigh) return ['数学', '国語', '英語'];
+  return ['数学', '国語', '英語', '理科', '社会'];
+}
+
+export function resolveSelectedSchoolId(
+  schools?: { id: string; name?: string }[] | null,
+  currentSelectedId?: string | null,
+  targetStudent?: Partial<Student> | null
+): string | undefined {
+  if (currentSelectedId) return currentSelectedId;
+  if (!schools || schools.length === 0) return undefined;
+  if (targetStudent) {
+    const matched = schools.find(s => 
+      (targetStudent.school_id && s.id === targetStudent.school_id) ||
+      (targetStudent.school_name && s.name === targetStudent.school_name)
+    );
+    if (matched) return matched.id;
+  }
+  return schools[0].id;
+}
+
+export function resolvePeriodSlots(periodCount?: any, defaultSlots?: any, fallback: number = 2): number {
+  return parseInt(String(periodCount || defaultSlots || fallback), 10) || fallback;
+}
+
+export function resolveFormArrayWithFallback<T>(formArr?: T[] | null, studentArr?: T[] | null, fallbackArr: T[] = []): T[] {
+  if (Array.isArray(formArr) && formArr.length > 0) return formArr;
+  if (Array.isArray(studentArr) && studentArr.length > 0) return studentArr;
+  return fallbackArr;
+}
+
+export function resolvePeriodSubject(
+  taskSubject?: string | null,
+  unitSubject?: string | null,
+  masterSubject?: string | null,
+  fallback: string = '数学'
+): string {
+  return taskSubject || unitSubject || masterSubject || fallback;
+}
+
+export function resolveSchoolTypeForStudent(
+  grade?: string,
+  teacherType?: string,
+  schoolName?: string
+): 'elementary' | 'high_school' | 'junior_high' {
+  if (schoolName) {
+    const s = schoolName.trim();
+    if (s.includes('小') && !s.includes('中') && !s.includes('高')) return 'elementary';
+    if (s.includes('高') || s.includes('高校')) return 'high_school';
+    if (s.includes('中')) return 'junior_high';
+  }
+  const g = grade || '';
+  if (g.startsWith('小') || g === '園児' || teacherType === 'elementary') return 'elementary';
+  if (g.startsWith('高') || g === '既卒' || teacherType === 'high_school') return 'high_school';
+  return 'junior_high';
+}
+
+export function resolveStudentSortName(recordStudentName?: string | null, studentObj?: Partial<Student> | null): string {
+  return recordStudentName || studentObj?.name_kana || studentObj?.name || '';
+}
+
+export function resolveTestType(testType?: string, content: string = ''): 'unit_test' | 'custom' | string {
+  if (testType) return testType;
+  return content.includes('単元') ? 'unit_test' : 'custom';
+}
+
+export function resolveHomeworkType(hwType?: string, content: string = ''): 'drill_2nd' | 'custom' | string {
+  if (hwType) return hwType;
+  return content.includes('2回目演習') ? 'drill_2nd' : 'custom';
+}
+
+export function matchesMiniTestQuery(
+  r: { test_content?: string | null; subject?: string | null; passing_line?: any },
+  studentName: string,
+  queryStr: string
+): boolean {
+  if (!queryStr.trim()) return true;
+  const query = queryStr.toLowerCase().trim();
+  return Boolean(
+    (r.test_content && r.test_content.toLowerCase().includes(query)) ||
+    (r.subject && r.subject.toLowerCase().includes(query)) ||
+    (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
+    studentName.toLowerCase().includes(query)
+  );
+}
+
+export function sortMiniTestResults<T extends { id: string; date: string; student_id: string; score?: any; passed?: any; status?: any; students?: { name?: string | null } | null }>(
+  results: T[],
+  sortOrder: 'date_desc' | 'date_asc' | 'name_asc' | 'unsubmitted_first' | 'passed_first' | string,
+  students: Student[],
+  tempScores: Record<string, any> = {},
+  tempPassedStatuses: Record<string, any> = {}
+): T[] {
+  return [...results].sort((a, b) => {
+    const studentA = students.find(s => s.id === a.student_id || s.student_id === a.student_id);
+    const studentB = students.find(s => s.id === b.student_id || s.student_id === b.student_id);
+
+    if (sortOrder === 'date_asc') {
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    }
+    if (sortOrder === 'name_asc') {
+      const nameA = resolveStudentSortName(a.students?.name, studentA);
+      const nameB = resolveStudentSortName(b.students?.name, studentB);
+      return nameA.localeCompare(nameB, 'ja');
+    }
+    if (sortOrder === 'unsubmitted_first') {
+      const isUnsubmittedA = (r: any) => (r.score === null || r.score === undefined) && !tempScores[r.id];
+      const scoreAUnset = isUnsubmittedA(a);
+      const scoreBUnset = isUnsubmittedA(b);
+      if (scoreAUnset && !scoreBUnset) return -1;
+      if (!scoreAUnset && scoreBUnset) return 1;
+    }
+    if (sortOrder === 'passed_first') {
+      const statusA = resolveMiniTestPassedStatusWithFallback(a.status, a.passed, a.score, tempPassedStatuses[a.id]);
+      const statusB = resolveMiniTestPassedStatusWithFallback(b.status, b.passed, b.score, tempPassedStatuses[b.id]);
+      if (statusA === 'passed' && statusB !== 'passed') return -1;
+      if (statusA !== 'passed' && statusB === 'passed') return 1;
+    }
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
+}
+
+export function matchesHomeworkQuery(
+  r: { homework_content?: string | null; subject?: string | null; homework_deadline?: string | null },
+  studentName: string,
+  queryStr: string
+): boolean {
+  if (!queryStr.trim()) return true;
+  const query = queryStr.toLowerCase().trim();
+  return Boolean(
+    (r.homework_content && r.homework_content.toLowerCase().includes(query)) ||
+    (r.subject && r.subject.toLowerCase().includes(query)) ||
+    (r.homework_deadline && r.homework_deadline.toLowerCase().includes(query)) ||
+    studentName.toLowerCase().includes(query)
+  );
+}
+
+export function sortHomeworkResults<T extends { id: string; date: string; student_id: string; status?: any }>(
+  results: T[],
+  sortOrder: 'date_desc' | 'date_asc' | 'name_asc' | 'unsubmitted_first' | 'completed_first' | string,
+  students: Student[],
+  tempHomeworkStatuses: Record<string, any> = {}
+): T[] {
+  return [...results].sort((a, b) => {
+    const studentA = students.find(s => s.id === a.student_id);
+    const studentB = students.find(s => s.id === b.student_id);
+
+    if (sortOrder === 'date_asc') {
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    }
+    if (sortOrder === 'name_asc') {
+      const nameA = studentA?.name_kana || studentA?.name || '';
+      const nameB = studentB?.name_kana || studentB?.name || '';
+      return nameA.localeCompare(nameB, 'ja');
+    }
+    if (sortOrder === 'unsubmitted_first') {
+      const statusA = tempHomeworkStatuses[a.id] || a.status;
+      const statusB = tempHomeworkStatuses[b.id] || b.status;
+      const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
+      const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
+      if (!isSubA && isSubB) return -1;
+      if (isSubA && !isSubB) return 1;
+    }
+    if (sortOrder === 'completed_first') {
+      const statusA = tempHomeworkStatuses[a.id] || a.status;
+      const statusB = tempHomeworkStatuses[b.id] || b.status;
+      const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
+      const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
+      if (isSubA && !isSubB) return -1;
+      if (!isSubA && isSubB) return 1;
+    }
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
+}
+
+export function sortMilestonePlans(plans: MilestonePlan[]): MilestonePlan[] {
+  return [...plans].sort((a, b) => {
+    const monthOrder = (m: number) => m >= 3 ? m : m + 12;
+    const am = monthOrder(a.month);
+    const bm = monthOrder(b.month);
+    if (am !== bm) return am - bm;
+    return a.week_number - b.week_number;
+  });
+}
+
+export function adjustTasksForStartUnits(
+  tasks: LearningTask[],
+  schoolUnits: CurriculumUnit[],
+  startUnitsBySubject: Record<string, CurriculumUnit | undefined | null>
+): LearningTask[] {
+  return tasks.map(task => {
+    const unit = schoolUnits.find(u => u.id === task.unit_id);
+    if (!unit) return task;
+
+    let activeStartUnit = null;
+    if (unit.subject === '数学' || unit.subject === '算数') activeStartUnit = startUnitsBySubject['math'];
+    else if (unit.subject === '英語') activeStartUnit = startUnitsBySubject['english'];
+    else if (unit.subject === '理科') activeStartUnit = startUnitsBySubject['science'];
+    else if (unit.subject === '社会') activeStartUnit = startUnitsBySubject['social'];
+    else if (unit.subject === '国語') activeStartUnit = startUnitsBySubject['japanese'];
+
+    if (activeStartUnit) {
+      if (unit.sequence_order < activeStartUnit.sequence_order) {
+        if (task.status === 'unstarted') {
+          return {
+            ...task,
+            status: 'skipped' as const,
+            office_note: '開始位置指定によりスキップ'
+          };
+        }
+      } else if (task.status === 'skipped') {
+        return {
+          ...task,
+          status: 'unstarted' as const,
+          office_note: ''
+        };
+      }
+    }
+    return task;
+  });
+}
+
+export function isUnitTestCurriculumItem(item: { name?: string | null; lesson_name?: string | null; item_type?: string | null }): boolean {
+  const name = item.name || item.lesson_name || '';
+  const isReviewOrCheck = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
+  return !isReviewOrCheck && (
+    item.item_type === 'unit_test' ||
+    name.includes('単元確認テスト') ||
+    name.includes('単元テスト')
+  );
+}
+
+export interface ResolveSavedStudentEditFormParams {
+  saved: Partial<Student> & Record<string, any>;
+  finalizedSchoolName?: string;
+  newSlots?: number;
+  personalityList?: string[];
+  currentAssignedTeachers?: string[];
+  currentSelectedSubjects?: string[];
+  fallbackSelectedDays?: string[];
+  cleanTargetSchools?: any[];
+}
+
+export function resolveSavedStudentEditForm(params: ResolveSavedStudentEditFormParams) {
+  const {
+    saved,
+    finalizedSchoolName = '',
+    newSlots = 2,
+    personalityList = [],
+    currentAssignedTeachers = ['福田 尚弘'],
+    currentSelectedSubjects = ['算数', '国語', '英語', '数学'],
+    fallbackSelectedDays = ['tuesday', 'friday'],
+    cleanTargetSchools = []
+  } = params;
+
+  const resolvedSchool = saved.school_name || (saved as any).school || (saved as any).elementary_school || finalizedSchoolName;
+  const resolvedSlots = saved.default_slots || saved.period_count || newSlots;
+  const resolvedPersonalities = saved.personalities || saved.personality_tags || personalityList;
+  const assignedTeachers = saved.assigned_teachers || currentAssignedTeachers;
+  const teacherInCharge = saved.teacher_in_charge || (assignedTeachers.length > 0 ? assignedTeachers[0] : '福田 尚弘');
+  const selectedSubjects = saved.selected_subjects || currentSelectedSubjects;
+  const selectedDays = saved.selected_days || fallbackSelectedDays;
+  const targetSchools = (saved as any).target_schools || cleanTargetSchools;
+
+  return {
+    resolvedSchool,
+    resolvedSlots,
+    editForm: {
+      ...saved,
+      enrollment_date: saved.enrollment_date || null,
+      withdrawal_date: saved.withdrawal_date || null,
+      personalities: resolvedPersonalities,
+      personality_tags: resolvedPersonalities,
+      school_name: resolvedSchool,
+      assigned_teachers: assignedTeachers,
+      teacher_in_charge: teacherInCharge,
+      selected_subjects: selectedSubjects,
+      weekly_sessions_count: saved.weekly_sessions_count || '2回',
+      weekly_duration_minutes: saved.weekly_duration_minutes || '120分',
+      selected_days: selectedDays,
+      default_slots: resolvedSlots,
+      period_count: resolvedSlots,
+      target_schools: targetSchools
+    } as any
+  };
+}
+
+export interface BuildDailyTaskParams {
+  student: Student;
+  scheduleDate: string;
+  period: number;
+  config: any;
+  targetUnitId: string;
+  selectedUnit?: any;
+  selectedMaster?: any;
+  commonOfficeNote?: string;
+  curriculumMastersList: any[];
+  allCurriculumUnits: any[];
+}
+
+export function buildDailyTaskFromTimetableConfig(params: BuildDailyTaskParams): LearningTask {
+  const {
+    student,
+    scheduleDate,
+    period: p,
+    config,
+    targetUnitId,
+    selectedUnit,
+    selectedMaster,
+    commonOfficeNote = '',
+    curriculumMastersList,
+    allCurriculumUnits
+  } = params;
+
+  if (config.unitId || config.startLessonId) {
+    const {
+      startLessonName,
+      endLessonName,
+      rangeString,
+      customUnitId,
+      customThemeName
+    } = resolveTimetableRangeAndTheme({
+      config,
+      selectedUnit,
+      selectedMaster,
+      studentId: student.id,
+      scheduleDate,
+      period: p,
+      targetUnitId
+    });
+
+    const effectiveStartId = config.startLessonId || targetUnitId || '';
+    const effectiveEndId = config.endLessonId || effectiveStartId;
+
+    let extractedLessonIds: string[] = [];
+    if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
+      extractedLessonIds = config.lesson_ids.map(String);
+    } else {
+      const stepLessons = getLessonRangeStepIds({
+        subject: config.subject,
+        startLessonId: effectiveStartId,
+        endLessonId: effectiveEndId,
+        startLessonName,
+        endLessonName,
+        lessonRange: rangeString,
+        customUnitName: customThemeName,
+        lessonIds: config.lesson_ids,
+        curriculumMasters: curriculumMastersList,
+        curriculumUnits: allCurriculumUnits,
+        studentGrade: student.grade
+      });
+      extractedLessonIds = stepLessons.map(s => String(s.id));
+    }
+    if (extractedLessonIds.length === 0 && effectiveStartId) {
+      extractedLessonIds = [String(effectiveStartId)];
+    }
+
+    return {
+      id: `task-${student.id}-${scheduleDate}-${p}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      student_id: student.id,
+      unit_id: customUnitId,
+      scheduled_date: scheduleDate,
+      period: p,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: config.subject,
+      custom_unit_name: customThemeName,
+      start_lesson_id: effectiveStartId,
+      end_lesson_id: effectiveEndId,
+      start_lesson_name: startLessonName,
+      end_lesson_name: endLessonName,
+      lesson_range: rangeString,
+      lesson_ids: extractedLessonIds,
+      office_note: commonOfficeNote,
+      created_at: new Date().toISOString()
+    };
+  } else {
+    // カスタムテーマ指定の場合
+    const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
+    const customThemeName = config.customTheme || config.subject || '';
+    const fallbackNames = resolveFallbackThemeNames(config, customThemeName);
+
+    let customLessonIds: string[] = [];
+    if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
+      customLessonIds = config.lesson_ids.map(String);
+    } else if (config.startLessonId || config.endLessonId) {
+      const stepLessons = getLessonRangeStepIds({
+        subject: config.subject,
+        startLessonId: config.startLessonId,
+        endLessonId: config.endLessonId,
+        startLessonName: fallbackNames.startLessonName,
+        endLessonName: fallbackNames.endLessonName,
+        lessonRange: fallbackNames.lessonRange,
+        customUnitName: customThemeName,
+        curriculumMasters: curriculumMastersList,
+        studentGrade: student.grade
+      });
+      customLessonIds = stepLessons.map(s => String(s.id));
+    }
+    if (customLessonIds.length === 0 && customUnitId) {
+      customLessonIds = [customUnitId];
+    }
+
+    return {
+      id: `task-custom-${Date.now()}-${p}-${student.id}-${Math.random().toString(36).substr(2, 5)}`,
+      student_id: student.id,
+      unit_id: customUnitId,
+      scheduled_date: scheduleDate,
+      period: p,
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      subject: config.subject,
+      custom_unit_name: customThemeName,
+      start_lesson_id: config.startLessonId || '',
+      end_lesson_id: config.endLessonId || '',
+      start_lesson_name: config.startLessonName || customThemeName,
+      end_lesson_name: config.endLessonName || customThemeName,
+      lesson_range: config.lessonRange || customThemeName,
+      lesson_ids: customLessonIds,
+      office_note: commonOfficeNote,
+      created_at: new Date().toISOString()
+    };
+  }
+}
+
+export function resolveCandidateUnitsFromPeriodSelections(
+  combinedMap: Map<string, any>,
+  periodSelections: Record<string, any> | null | undefined,
+  matchSubject: (s?: string) => boolean,
+  isUnitTest: (item: any) => boolean = isUnitTestCurriculumItem
+): void {
+  if (!periodSelections) return;
+  Object.values(periodSelections).forEach(sel => {
+    if (sel && sel.subject && matchSubject(sel.subject)) {
+      if (sel.startLessonId && !combinedMap.has(sel.startLessonId)) {
+        const candidateName = sel.startLessonName || sel.lessonRange || '';
+        if (!isUnitTest({ name: candidateName })) {
+          combinedMap.set(sel.startLessonId, {
+            id: sel.startLessonId,
+            name: candidateName,
+            sort_order: 999,
+            isStartUnit: false
+          });
+        }
+      }
+      if (sel.endLessonId && !combinedMap.has(sel.endLessonId)) {
+        const candidateName = sel.endLessonName || sel.startLessonName || '';
+        if (!isUnitTest({ name: candidateName })) {
+          combinedMap.set(sel.endLessonId, {
+            id: sel.endLessonId,
+            name: candidateName,
+            sort_order: 999,
+            isStartUnit: false
+          });
+        }
+      }
+    }
+  });
+}
+
+export function lookupLessonById(
+  id: string,
+  rawMasters: any[],
+  allCurriculumUnits: any[],
+  subject?: string
+): { id: string; name: string; sort_order: number; subject?: string } | null {
+  if (!id) return null;
+  const allEnsuredMasters = ensureMathEnglishUnitTests(rawMasters);
+  const m = allEnsuredMasters.find(item =>
+    item.id === id ||
+    String(item.sort_order) === String(id) ||
+    item.lesson_name === id ||
+    `${item.unit_name} - ${item.lesson_name}` === id ||
+    `${item.unit_name} - ${item.lesson_name.replace(/^[^-]+-\s*/, '')}` === id
+  );
+  if (m) {
+    return {
+      id: m.id,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+      sort_order: m.sort_order ?? 0,
+      subject: m.subject
+    };
+  }
+  const u = allCurriculumUnits.find(item => item.id === id || item.name === id);
+  if (u) {
+    return {
+      id: u.id,
+      name: u.name,
+      sort_order: u.sequence_order ?? 0,
+      subject: u.subject
+    };
+  }
+  return null;
+}
+
+export function evaluateAutoPassStatus(scoreVal: number, passingLine?: string | null, level?: string): 'passed' | 'failed' | 'unstarted' {
+  if (isNaN(scoreVal)) return 'unstarted';
+  const passScore = resolvePassingScoreByLevel(level);
+  let autoPassed = scoreVal >= passScore;
+  if (passingLine) {
+    const matchNum = passingLine.match(/\d+/);
+    if (matchNum) {
+      const limit = parseInt(matchNum[0], 10);
+      if (passingLine.includes('%') || passingLine.includes('割')) {
+        const threshold = passingLine.includes('割') ? limit * 10 : limit;
+        autoPassed = scoreVal >= threshold;
+      } else if (passingLine.includes('点')) {
+        autoPassed = scoreVal >= limit;
+      }
+    }
+  }
+  return autoPassed ? 'passed' : 'failed';
+}
+
+export function isReviewOrCheckTest(name?: string | null): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return lower.includes('まとめテスト') || lower.includes('check test');
+}
+
+export function isLessonUnitTest(name?: string | null): boolean {
+  if (!name || isReviewOrCheckTest(name)) return false;
+  return name.includes('単元確認テスト') || name.includes('単元テスト') || name.includes('確認テスト');
+}
+
+export function resolveTargetScopeStudents(
+  targetScope?: string,
+  baseStudent?: Student,
+  allStudents?: Student[]
+): Student[] {
+  if (!baseStudent) return [];
+  const studentsList = allStudents || [];
+  if (targetScope === 'grade') {
+    return studentsList.filter(s => s.grade === baseStudent.grade);
+  }
+  if (targetScope === 'school') {
+    return studentsList.filter(s => s.school_id === baseStudent.school_id);
+  }
+  if (targetScope === 'level') {
+    return studentsList.filter(s => s.level === baseStudent.level);
+  }
+  return [baseStudent];
+}
+
+export function resolveTargetSchoolsWithFallback(
+  targetSchools?: Array<{ school_name?: string; course_name?: string }> | null,
+  defaultSchool?: string | null
+): Array<{ school_name: string; course_name: string }> {
+  if (Array.isArray(targetSchools) && targetSchools.length > 0) {
+    return targetSchools.map(s => ({
+      school_name: s?.school_name || '',
+      course_name: s?.course_name || ''
+    }));
+  }
+  return [{ school_name: defaultSchool || '', course_name: '' }];
+}
+
+export function resolvePeriodSlotFromCorrectedRange(correctedRange: any, task: any, sub: string) {
+  const startId = correctedRange?.start_lesson_id || task?.start_lesson_id || task?.unit_id || '';
+  const endId = correctedRange?.end_lesson_id || correctedRange?.start_lesson_id || task?.end_lesson_id || task?.unit_id || startId;
+  const startName = correctedRange?.start_lesson_name || '';
+  const endName = correctedRange?.end_lesson_name || startName;
+
+  return {
+    subject: sub,
+    unitId: correctedRange?.start_lesson_id || task?.unit_id || '',
+    customTheme: '',
+    startLessonId: startId,
+    endLessonId: endId,
+    startLessonName: startName,
+    endLessonName: endName,
+    lessonRange: correctedRange?.lesson_range || ''
+  };
+}
+
+export function finalizeSchoolNameAndType(rawName: string, grade: string): { finalizedName: string; type: 'elementary' | 'high_school' | 'junior_high' } {
+  const isElem = grade.startsWith('小') || grade === '園児';
+  const isHigh = grade.startsWith('高') || grade === '既卒';
+  const type: 'elementary' | 'high_school' | 'junior_high' = isElem ? 'elementary' : isHigh ? 'high_school' : 'junior_high';
+  const suffix = isElem ? '小学校' : isHigh ? '高校' : '中学校';
+  
+  let finalizedName = rawName.trim();
+  if (!finalizedName.endsWith('小学校') && !finalizedName.endsWith('中学校') && !finalizedName.endsWith('高校') && !finalizedName.endsWith('学校')) {
+    finalizedName += suffix;
+  }
+  return { finalizedName, type };
+}
+
+export function resolveStudentSaveDefaults(
+  editForm: any,
+  selectedStudent: any,
+  currentAssignedTeachers: string[]
+) {
+  return {
+    teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
+    weekly_sessions_count: editForm.weekly_sessions_count || selectedStudent.weekly_sessions_count || '2回',
+    weekly_duration_minutes: editForm.weekly_duration_minutes || selectedStudent.weekly_duration_minutes || '120分',
+    selected_days: editForm.selected_days || selectedStudent.selected_days || ['tuesday', 'friday']
+  };
+}
+
+export function isUnitCheckTestStep(stepId: string, timelineUnits: any[]): boolean {
+  if (!timelineUnits || timelineUnits.length === 0) return false;
+  const u = timelineUnits.find((unit: any) => 
+    String(unit.id) === String(stepId) || 
+    ((unit as any).sort_order !== undefined && String((unit as any).sort_order) === String(stepId))
+  );
+  if (!u) return false;
+  const uName = u.lesson_name || u.name || '';
+  const uUnit = u.unit_name || '';
+  if (isReviewOrCheckTest(uName) || isReviewOrCheckTest(uUnit)) return false;
+  return (u as any).item_type === 'unit_test' || isLessonUnitTest(uName) || isLessonUnitTest(uUnit);
+}
+
+export function extractLessonIdsFromTimelineSlot(
+  slot: any,
+  timelineUnits: any[],
+  curriculumMastersList?: CurriculumMaster[],
+  studentGrade?: string,
+  targetSubject?: string
+): string[] {
+  if (!slot) return [];
+  if (Array.isArray(slot.lesson_ids) && slot.lesson_ids.length > 0) {
+    return slot.lesson_ids.map((id: any) => String(id));
+  }
+
+  if (curriculumMastersList && curriculumMastersList.length > 0) {
+    const steps = getLessonRangeStepIds({
+      subject: slot.subject || targetSubject || '数学',
+      startLessonId: slot.start_lesson_id || slot.startLessonId,
+      endLessonId: slot.end_lesson_id || slot.endLessonId,
+      startLessonName: slot.start_lesson_name || slot.startLessonName,
+      endLessonName: slot.end_lesson_name || slot.endLessonName,
+      lessonRange: slot.lesson_range || slot.lessonRange,
+      customUnitName: slot.custom_unit_name || slot.customTheme,
+      curriculumMasters: curriculumMastersList,
+      studentGrade: studentGrade
+    });
+    if (steps && steps.length > 0 && steps[0].id !== 'lesson-fallback') {
+      return steps.map(s => String(s.id));
+    }
+  }
+
+  if (!timelineUnits || timelineUnits.length === 0) return [];
+  const fromStr = slot.start_lesson_name || slot.startLessonName || slot.theme;
+  const toStr = slot.end_lesson_name || slot.endLessonName;
+  const rangeText = slot.lesson_range || slot.lessonRange;
+  const ids: string[] = [];
+
+  const sIdx = fromStr ? timelineUnits.findIndex((u: any) => matchesTimelineUnit(u, fromStr)) : -1;
+  const eIdx = toStr ? timelineUnits.findIndex((u: any) => matchesTimelineUnit(u, toStr)) : -1;
+
+  if (sIdx >= 0 && eIdx >= 0) {
+    const minI = Math.min(sIdx, eIdx);
+    const maxI = Math.max(sIdx, eIdx);
+    for (let i = minI; i <= maxI; i++) {
+      ids.push(String(timelineUnits[i].id));
+    }
+  } else if (sIdx >= 0) {
+    ids.push(String(timelineUnits[sIdx].id));
+  } else if (eIdx >= 0) {
+    ids.push(String(timelineUnits[eIdx].id));
+  } else if (rangeText) {
+    timelineUnits.forEach((u: any) => {
+      if (matchesTimelineUnit(u, rangeText)) {
+        ids.push(String(u.id));
+      }
+    });
+  }
+  return Array.from(new Set(ids));
 }
 
 export function determineActiveGradeForSubject(
@@ -143,16 +1699,6 @@ export function determineActiveGradeForSubject(
     if (s === '数学' && targetSubj === '算数') return '算数';
     if (s === '算数' && targetSubj === '数学') return '数学';
     return s;
-  };
-
-  const getGradeFilterValue = (rawGrade: string | undefined): string | null => {
-    if (!rawGrade) return null;
-    const match = rawGrade.match(/^[小]?([1-6])/);
-    if (match) return `小${match[1]}`;
-    const numMatch = rawGrade.match(/([1-6])年生?/);
-    if (numMatch) return `小${numMatch[1]}`;
-    if (rawGrade === '園児') return '小1';
-    return null;
   };
 
   const allMasters = (masters && masters.length > 0) ? masters : db.getCurriculumMasters();
@@ -248,7 +1794,7 @@ export function determineActiveGradeForSubject(
         const isSub = m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj;
         return isSub && getGradeFilterValue(m.grade) === studentGradeNorm;
       })
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      .sort(sortBySortOrder);
 
     const firstInGrade = gradeMasters.find(m => !completedSet.has(String(m.id)) && (!m.sort_order || !completedSet.has(String(m.sort_order))));
     if (firstInGrade?.grade) {
@@ -275,7 +1821,7 @@ export function determineActiveGradeForSubject(
 
   const subjectMasters = allMasters
     .filter(m => m.subject === targetSubj || normalizeSubject(m.subject) === targetSubj)
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    .sort(sortBySortOrder);
 
   const firstUncompleted = subjectMasters.find(m => !completedSet.has(String(m.id)) && (!m.sort_order || !completedSet.has(String(m.sort_order))));
   if (firstUncompleted?.grade) {
@@ -289,6 +1835,429 @@ export function determineActiveGradeForSubject(
     if (gFilter) return gFilter;
   }
   return '小1';
+}
+
+export function resolveNextAttendanceDateForStudent(baseDateStr?: string, st?: Partial<Student> | null): string {
+  const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
+  if (!st) return validBase;
+  const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
+  const futureDates = generateAttendanceDates(validBase, days, 5).filter(d => d > validBase);
+  if (futureDates.length > 0) return futureDates[0];
+  const d = new Date(validBase);
+  d.setDate(d.getDate() + 7);
+  return d.toISOString().split('T')[0];
+}
+
+export function resolveAutoDrillHomeworkText(
+  sub: string,
+  periodsObj: { [key: number]: any } | null | undefined,
+  studentGrade?: string
+): string {
+  if (!periodsObj) return '';
+  const isElem = studentGrade ? (studentGrade.startsWith('小') || studentGrade === '園児') : false;
+  const isMath = sub === '算数' || sub === '数学';
+  const normSub = isMath ? (isElem ? '算数' : '数学') : '英語';
+
+  const rangeTexts: string[] = [];
+  Object.values(periodsObj).forEach((sel: any) => {
+    if (!sel || !sel.subject) return;
+    const isSelMath = sel.subject === '算数' || sel.subject === '数学';
+    if (isMath ? !isSelMath : sel.subject !== '英語') return;
+    const isReviewOrCheck = isReviewOrCheckTest(sel.startLessonName) || isReviewOrCheckTest(sel.endLessonName) || isReviewOrCheckTest(sel.lessonRange);
+    const isTest = !isReviewOrCheck && (isLessonUnitTest(sel.startLessonName) || isLessonUnitTest(sel.endLessonName) || isLessonUnitTest(sel.lessonRange));
+    if (isTest) return;
+
+    if (sel.lessonRange) {
+      rangeTexts.push(sel.lessonRange);
+    } else if (sel.startLessonName) {
+      rangeTexts.push(formatLessonRange(sel.startLessonName, sel.endLessonName));
+    }
+  });
+
+  if (rangeTexts.length === 0) return '';
+  const firstParts = rangeTexts[0].split(/〜|~|～/);
+  const lastParts = rangeTexts[rangeTexts.length - 1].split(/〜|~|～/);
+  const startStr = firstParts[0].trim() || rangeTexts[0];
+  const endStr = (lastParts.length > 1 ? lastParts[1].trim() : '') || rangeTexts[rangeTexts.length - 1];
+  const combinedRange = startStr === endStr ? startStr : `${startStr} 〜 ${endStr}`;
+  return `${normSub}: ${combinedRange}（2回目演習）`;
+}
+
+export function isUnitTestCompletedForStudent(
+  st: Partial<Student> | null | undefined,
+  testTitleOrName: string,
+  subject?: string,
+  masters?: CurriculumMaster[],
+  miniTestResults?: MiniTestResult[]
+): boolean {
+  if (!st || !testTitleOrName) return false;
+  const completed = (st.completed_lesson_ids || []).map(String);
+  const cleanTestTitle = testTitleOrName.trim();
+
+  // 1. completed_lesson_ids に ID や正確なテスト名が完全一致で含まれているか
+  if (completed.some(idOrName => idOrName && (idOrName === cleanTestTitle || idOrName.trim() === cleanTestTitle))) {
+    return true;
+  }
+
+  // 2. カリキュラムマスタから当該単元確認テストの ID を特定し、その ID が completed_lesson_ids に存在するか
+  const allMasters = (masters && masters.length > 0) ? masters : db.getCurriculumMasters();
+  const matchingMaster = allMasters.find(m => 
+    m.item_type === 'unit_test' && 
+    (!subject || m.subject === subject) &&
+    (m.lesson_name === cleanTestTitle || cleanTestTitle.endsWith(m.lesson_name) || cleanTestTitle === `${m.unit_name} - ${m.lesson_name}`)
+  );
+  if (matchingMaster && completed.includes(String(matchingMaster.id))) {
+    return true;
+  }
+
+  // 3. DBの mini_test_results で過去に本生徒が合格(passed === true または score >= 80) している記録が存在するか
+  const results = miniTestResults || db.getMiniTestResults();
+  const studentMiniResults = results.filter(r => r.student_id === st.id);
+  const passedMini = studentMiniResults.some(r => 
+    (r.passed === true || (r.score !== null && r.score !== undefined && r.score >= 80)) &&
+    (r.test_content === cleanTestTitle || (r.test_content && r.test_content.trim() === cleanTestTitle))
+  );
+  if (passedMini) return true;
+
+  return false;
+}
+
+export function sortGradeOptions(grades: string[]): string[] {
+  const gradeOrder = ['小1', '小2', '小3', '小4', '小5', '小6', '中1', '中2', '中3', '高1', '高2', '高3', '既卒'];
+  return [...grades].sort((a, b) => {
+    const ia = gradeOrder.indexOf(a);
+    const ib = gradeOrder.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b, 'ja');
+  });
+}
+
+export function inferSelectedStartGrade(
+  currentSelectedGrade: string | undefined | null,
+  startVal: string | undefined | null,
+  masters: CurriculumMaster[]
+): string {
+  if (currentSelectedGrade) return currentSelectedGrade;
+  if (!startVal) return '';
+  const foundMaster = masters.find(m => m.id === startVal || String(m.sort_order) === String(startVal) || m.unit_name === startVal || m.lesson_name === startVal);
+  if (foundMaster) {
+    return normalizeGrade(foundMaster.grade_level || foundMaster.grade);
+  }
+  return '';
+}
+
+export function calculateStudentMilestoneSeq(
+  completedSubjectTasks: LearningTask[],
+  subjectUnits: CurriculumUnit[],
+  selectedStudent?: Partial<Student> | null
+): number {
+  if (completedSubjectTasks.length > 0) {
+    const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
+    const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
+    return Math.max(0, ...completedUnits.map(u => u.sequence_order));
+  }
+  if (selectedStudent && selectedStudent.start_unit_id) {
+    const startUnit = subjectUnits.find(u => u.id === selectedStudent.start_unit_id);
+    if (startUnit) {
+      return startUnit.sequence_order - 1;
+    }
+  }
+  return 0;
+}
+
+export interface AutoTestConfigItem {
+  id: string;
+  subject: string;
+  testType: string;
+  unitName: string;
+  content: string;
+  passingLine: string;
+  targetScope: string;
+}
+
+export function resolveAutoTestConfigForPeriod(
+  sel: any,
+  st: Partial<Student> | null | undefined,
+  masters: CurriculumMaster[] = [],
+  existingTests: Array<{ subject?: string; content?: string }> = [],
+  isCompletedFn?: (st: Partial<Student> | null | undefined, testTitle: string, subject?: string) => boolean
+): AutoTestConfigItem | null {
+  if (!sel || !sel.subject) return null;
+
+  const startMaster = masters.find(m => m.id === sel.startLessonId || m.lesson_name === sel.startLessonName);
+  const endMaster = masters.find(m => m.id === sel.endLessonId || m.lesson_name === sel.endLessonName);
+
+  const isTestNode = (startMaster && startMaster.item_type === 'unit_test') ||
+                     (endMaster && endMaster.item_type === 'unit_test') ||
+                     (sel.startLessonName && (sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト'))) ||
+                     (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト'))) ||
+                     (sel.lessonRange && (sel.lessonRange.includes('単元確認テスト') || sel.lessonRange.includes('単元テスト')));
+
+  if (!isTestNode) return null;
+
+  const testContent = resolveTestContentName(sel.lessonRange, sel.startLessonName, sel.subject);
+  const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+
+  let fullContent = testContent;
+  if (startMaster && startMaster.unit_name) {
+    fullContent = `${startMaster.unit_name} - ${startMaster.lesson_name}`;
+  } else if (endMaster && endMaster.unit_name) {
+    fullContent = `${endMaster.unit_name} - ${endMaster.lesson_name}`;
+  } else if (sel.customTheme) {
+    fullContent = `${sel.customTheme} - ${cleanContent}`;
+  }
+
+  const checkCompleted = isCompletedFn || ((s, title, subj) => isUnitTestCompletedForStudent(s, title, subj, masters));
+  if (checkCompleted(st, fullContent, sel.subject) || checkCompleted(st, cleanContent, sel.subject)) {
+    return null;
+  }
+
+  const exists = existingTests.some(t => t.subject === sel.subject && (t.content === fullContent || t.content === testContent || t.content === cleanContent));
+  if (exists) {
+    return null;
+  }
+
+  return {
+    id: `auto-test-${sel.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+    subject: sel.subject,
+    testType: 'unit_test',
+    unitName: startMaster?.unit_name || sel.customTheme || sel.startLessonName?.split(' ')[0] || '',
+    content: fullContent,
+    passingLine: '80%以上',
+    targetScope: 'individual'
+  };
+}
+
+export function resolveAutoTestsFromPeriods(
+  currentPeriods: { [key: number]: any } | any[],
+  st: Partial<Student> | null | undefined,
+  masters: CurriculumMaster[] = [],
+  existingTests: Array<{ subject?: string; content?: string }> = [],
+  isCompletedFn?: (st: Partial<Student> | null | undefined, testTitle: string, subject?: string) => boolean
+): AutoTestConfigItem[] {
+  const newTests: AutoTestConfigItem[] = [];
+  const combinedExisting = [...existingTests];
+
+  const slots = Array.isArray(currentPeriods) ? currentPeriods : Object.values(currentPeriods || {});
+  slots.forEach(sel => {
+    const config = resolveAutoTestConfigForPeriod(sel, st, masters, combinedExisting, isCompletedFn);
+    if (config) {
+      newTests.push(config);
+      combinedExisting.push(config);
+    }
+  });
+
+  return newTests;
+}
+
+export function resolveAutoDrillHomeworks(
+  currentPeriods: { [key: number]: any } | any[],
+  studentGrade: string | undefined,
+  nextAttendanceDate: string,
+  existingHomeworks: Array<{ id?: string; subject?: string; type?: string; content?: string; deadline?: string; targetScope?: string }> = []
+): Array<{ id: string; subject: string; type: string; content: string; deadline: string; targetScope: string }> {
+  const updatedHomeworks = [...existingHomeworks.filter(h => h.content && h.content.trim() !== '')];
+  const isElem = studentGrade ? (studentGrade.startsWith('小') || studentGrade === '園児') : false;
+  const mathSub = isElem ? '算数' : '数学';
+  const targetSubjects = [mathSub, '英語'];
+
+  targetSubjects.forEach(normalizedSub => {
+    const autoText = resolveAutoDrillHomeworkText(normalizedSub, currentPeriods as any, studentGrade);
+    if (autoText) {
+      const isMath = normalizedSub === '算数' || normalizedSub === '数学';
+      const existingIdx = updatedHomeworks.findIndex(h => h.type === 'drill_2nd' && (
+        h.subject === normalizedSub ||
+        (isMath && (h.subject === '算数' || h.subject === '数学')) ||
+        (h.content && (h.content.startsWith(`${normalizedSub}:`) || (isMath && (h.content.startsWith('算数:') || h.content.startsWith('数学:')))))
+      ));
+      if (existingIdx !== -1) {
+        updatedHomeworks[existingIdx] = {
+          ...updatedHomeworks[existingIdx],
+          id: updatedHomeworks[existingIdx].id || `auto-hw-${normalizedSub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          subject: normalizedSub,
+          type: 'drill_2nd',
+          content: autoText,
+          deadline: updatedHomeworks[existingIdx].deadline || nextAttendanceDate,
+          targetScope: updatedHomeworks[existingIdx].targetScope || 'individual'
+        };
+      } else {
+        updatedHomeworks.push({
+          id: `auto-hw-${normalizedSub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          subject: normalizedSub,
+          type: 'drill_2nd',
+          content: autoText,
+          deadline: nextAttendanceDate,
+          targetScope: 'individual'
+        });
+      }
+    }
+  });
+
+  return updatedHomeworks as Array<{ id: string; subject: string; type: string; content: string; deadline: string; targetScope: string }>;
+}
+
+export function resolveSubjectIcon(sub?: string | null): string {
+  if (!sub) return '📚';
+  if (sub.includes('算数') || sub.includes('数学')) return '🧮';
+  if (sub.includes('国語')) return '📖';
+  if (sub.includes('英語')) return '🌍';
+  if (sub.includes('理科') || sub.includes('物理') || sub.includes('化学') || sub.includes('生物')) return '🧪';
+  if (sub.includes('社会') || sub.includes('歴史') || sub.includes('地理') || sub.includes('日本史') || sub.includes('世界史')) return '🏛️';
+  return '📚';
+}
+
+export function resolveAvailableSubjectsForStudent(selectedStudent?: Partial<Student> | null, isElementary: boolean = false): string[] {
+  const baseSubjs = isElementary
+    ? ['算数', '国語', '英語', '理科', '社会']
+    : (selectedStudent?.grade || '').startsWith('中')
+      ? ['数学', '英語', '理科', '社会', '国語']
+      : ['数学', '英語', '国語', '理科', '社会'];
+
+  const studentSubjs = selectedStudent?.selected_subjects && selectedStudent.selected_subjects.length > 0
+    ? selectedStudent.selected_subjects
+    : baseSubjs;
+
+  return Array.from(new Set([...studentSubjs, ...baseSubjs]));
+}
+
+export function resolveChapterSortIndex(chapter: string | undefined | null, chaptersList: string[]): number {
+  const index = chapter ? chaptersList.indexOf(chapter) : -1;
+  return index === -1 ? 999 : index;
+}
+
+export interface ResolveLessonsForSubjectParams {
+  subject: string;
+  selectedStudent?: Partial<Student> | null;
+  currentTeacherType?: 'elementary' | 'junior_high' | 'high_school' | 'all';
+  allCurriculumUnits?: CurriculumUnit[];
+  curriculumMastersList?: CurriculumMaster[];
+  periodSelections?: Record<string, any> | null;
+}
+
+export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams): Array<{
+  id: string;
+  name: string;
+  sort_order: number;
+  isStartUnit: boolean;
+  item_type?: string;
+}> {
+  const {
+    subject: subj,
+    selectedStudent,
+    allCurriculumUnits = [],
+    curriculumMastersList = [],
+    periodSelections = null
+  } = params;
+
+  // 教科のマッチング判定関数（他教科のカリキュラム混入を完全防ぐ）
+  const matchSubject = (targetSubject?: string) => isMatchingSubjectGroup(subj, targetSubject);
+
+  // 単元確認テスト（is_unit_test）判定関数: 通常授業およびまとめテスト（Check Test）のみを許可し、単元確認テストを完全に除外
+  const isUnitTestItem = (item: any) => isUnitTestCurriculumItem(item);
+
+  const matchingSchoolUnits = allCurriculumUnits.filter(u => 
+    (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
+    matchSubject(u.subject) &&
+    !isUnitTestItem(u)
+  );
+
+  const rawMasters = (curriculumMastersList && curriculumMastersList.length > 0) ? curriculumMastersList : db.getCurriculumMasters();
+  const masters = rawMasters.filter(m => matchSubject(m.subject));
+  const ensuredMasters = ensureMathEnglishUnitTests(masters);
+
+  const schoolUnits = matchingSchoolUnits.map(u => ({
+    id: u.id,
+    name: u.name,
+    sort_order: u.sequence_order ?? 0,
+    isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
+    item_type: (u as any).item_type
+  }));
+
+  const masterUnits = ensuredMasters
+    .filter(m => !isUnitTestItem(m))
+    .map(m => ({
+      id: m.id,
+      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
+      sort_order: m.sort_order ?? 0,
+      isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj)),
+      item_type: m.item_type
+    }));
+
+  const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean; item_type?: string }>();
+  masterUnits.forEach(item => combinedMap.set(item.id, item));
+  schoolUnits.forEach(item => combinedMap.set(item.id, item));
+
+  const fallbackUnits = allCurriculumUnits.filter(u => 
+    (u.school_id === selectedStudent?.school_id || !u.school_id) && 
+    matchSubject(u.subject) &&
+    !isUnitTestItem(u)
+  ).map(u => ({
+    id: u.id,
+    name: u.name,
+    sort_order: u.sequence_order ?? 0,
+    isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
+    item_type: (u as any).item_type
+  }));
+
+  fallbackUnits.forEach(item => {
+    if (!combinedMap.has(item.id)) {
+      combinedMap.set(item.id, item);
+    }
+  });
+
+  // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完（単元テストは除外）
+  resolveCandidateUnitsFromPeriodSelections(combinedMap, periodSelections, matchSubject, isUnitTestItem);
+
+  return Array.from(combinedMap.values())
+    .filter(item => !isUnitTestItem(item))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+}
+
+export function filterSchoolsByGrade(schools: School[], grade?: string): School[] {
+  if (!grade) return schools;
+  const isElem = grade.startsWith('小') || grade === '園児';
+  const isJhs = grade.startsWith('中') || grade.startsWith('高') || grade === '既卒';
+  return schools.filter(s => {
+    if (isElem) return s.type === 'elementary';
+    if (isJhs) return s.type === 'junior_high' || s.type === 'high_school';
+    return true;
+  });
+}
+
+export function deduplicateTodayTests<T extends { content?: string | null; subject?: string | null }>(tests: T[]): T[] {
+  const deduplicated: T[] = [];
+  const seenTestKeys = new Set<string>();
+  for (const test of tests) {
+    if (!test.content || !test.content.trim() || test.content.includes('-- 単元テストマスタから選択 --')) continue;
+    const cleanKey = `${test.subject || ''}_${normalizeUnitName(test.content) || test.content.trim()}`;
+    if (seenTestKeys.has(cleanKey)) continue;
+    seenTestKeys.add(cleanKey);
+    deduplicated.push(test);
+  }
+  return deduplicated;
+}
+
+export function reorderCurriculumUnits<T extends { sequence_order: number }>(
+  units: T[],
+  index: number,
+  direction: 'up' | 'down'
+): T[] | null {
+  if (direction === 'up' && index === 0) return null;
+  if (direction === 'down' && index === units.length - 1) return null;
+  const targetIdx = direction === 'up' ? index - 1 : index + 1;
+  if (targetIdx < 0 || targetIdx >= units.length) return null;
+
+  const newOrder = [...units];
+  const temp = newOrder[index];
+  newOrder[index] = newOrder[targetIdx];
+  newOrder[targetIdx] = temp;
+
+  return newOrder.map((unit, idx) => ({
+    ...unit,
+    sequence_order: idx + 1
+  }));
 }
 
 export default function TeacherDashboard({
@@ -413,19 +2382,17 @@ export default function TeacherDashboard({
       setSupabaseDebugInfo({
         error: null,
         totalCount: fetchedSt ? fetchedSt.length : 0,
-        rawStudentsSummary: fetchedSt && fetchedSt.length > 0 
-          ? fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', ')
-          : '0件（データなし）',
+        rawStudentsSummary: formatStudentsSummary(fetchedSt),
         lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
-        syncLog: seedRes.log || db.lastSyncLog || '全過去データ（生徒・年間計画・学習計画・テスト・宿題・面談記録）の完全復元完了'
+        syncLog: resolveSyncLog(seedRes.log, db.lastSyncLog)
       });
     } catch (err: any) {
       console.warn('handleForceSyncStudents error:', err);
       setSupabaseDebugInfo(prev => ({
         ...prev,
-        error: err?.message || String(err),
+        error: formatErrorMessage(err),
         lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
-        syncLog: `同期エラー: ${err?.message || String(err)}`
+        syncLog: `同期エラー: ${formatErrorMessage(err)}`
       }));
     } finally {
       setIsSyncingStudents(false);
@@ -442,11 +2409,9 @@ export default function TeacherDashboard({
           console.log('取得生徒全データ:', data, '取得エラー:', error);
           if (isMounted) {
             setSupabaseDebugInfo({
-              error: error ? `${error.message} (${error.code || ''})` : null,
+              error: error ? formatErrorMessage(error) : null,
               totalCount: data ? data.length : 0,
-              rawStudentsSummary: data && data.length > 0 
-                ? data.map((s: any) => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.school_branch || s.classroom || '校舎未設定'})`).join(', ')
-                : '0件（データなし）',
+              rawStudentsSummary: formatStudentsSummary(data),
               lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
               syncLog: db.lastSyncLog || null
             });
@@ -457,7 +2422,7 @@ export default function TeacherDashboard({
         if (isMounted) {
           setSupabaseDebugInfo(prev => ({
             ...prev,
-            error: err?.message || String(err),
+            error: formatErrorMessage(err),
             lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
             syncLog: db.lastSyncLog || null
           }));
@@ -471,7 +2436,7 @@ export default function TeacherDashboard({
           setSupabaseDebugInfo({
             error: null,
             totalCount: fetchedSt.length,
-            rawStudentsSummary: fetchedSt.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || (s as any).school_branch || s.classroom || '校舎未設定'})`).join(', '),
+            rawStudentsSummary: formatStudentsSummary(fetchedSt),
             lastFetchedAt: new Date().toLocaleTimeString('ja-JP'),
             syncLog: db.lastSyncLog || '同期完了'
           });
@@ -501,12 +2466,10 @@ export default function TeacherDashboard({
   }, [targetDate, initialDate]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
-      if (queryDate && !targetDate && !initialDate) {
-        setScheduleDate(queryDate);
-      }
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryDate = urlParams.get('targetDate') || urlParams.get('date') || urlParams.get('scheduleDate');
+    if (queryDate && !targetDate && !initialDate) {
+      setScheduleDate(queryDate);
     }
   }, [targetDate, initialDate]);
 
@@ -567,7 +2530,7 @@ export default function TeacherDashboard({
 
   const resetInterview2Form = () => {
     setSelectedInterview2Id(null);
-    setInterviewer2(selectedStudent?.teacher_in_charge || '担当講師');
+    setInterviewer2(resolveInterviewerName(undefined, selectedStudent?.teacher_in_charge));
     setInterviewDate2(new Date().toISOString().split('T')[0]);
     setDreamGoal2('');
     setTargetSchool2(selectedStudent?.target_school || '');
@@ -618,30 +2581,29 @@ export default function TeacherDashboard({
       alert('実施日を入力してください。');
       return;
     }
-    const payload: StudentInterview2 = {
-      id: selectedInterview2Id || `interview2-${selectedStudent.id}-${Date.now()}`,
-      student_id: selectedStudent.id,
-      interviewer: interviewer2 || selectedStudent?.teacher_in_charge || '担当講師',
-      interview_date: interviewDate2,
-      dream_goal: dreamGoal2,
-      target_school: targetSchool2,
-      club_activity: clubActivity2,
-      club_members_count: clubMembersCount2,
-      close_friends: closeFriends2,
-      study_anxiety: studyAnxiety2,
-      self_evaluation: selfEvaluation2,
-      student_challenges: studentChallenges2,
-      required_actions: requiredActions2,
+    const payload = buildInterview2Payload({
+      selectedInterview2Id,
+      studentId: selectedStudent.id,
+      teacherInCharge: selectedStudent?.teacher_in_charge,
+      interviewer: interviewer2,
+      interviewDate: interviewDate2,
+      dreamGoal: dreamGoal2,
+      targetSchool: targetSchool2,
+      clubActivity: clubActivity2,
+      clubMembersCount: clubMembersCount2,
+      closeFriends: closeFriends2,
+      studyAnxiety: studyAnxiety2,
+      selfEvaluation: selfEvaluation2,
+      studentChallenges: studentChallenges2,
+      requiredActions: requiredActions2,
       expectations: expectations2,
-      target_rank: targetRank2,
-      target_score: targetScore2,
+      targetRank: targetRank2,
+      targetScore: targetScore2,
       notes: notes2,
-      custom_fields: customFields2,
-      ai_coaching_advice: aiCoachingAdvice2,
-      interview_summary: aiCoachingAdvice2,
-      audio_transcript: transcript2,
-      created_at: new Date().toISOString()
-    };
+      customFields: customFields2,
+      interviewSummary: aiCoachingAdvice2,
+      audioTranscript: transcript2
+    });
     await db.saveStudentInterview2(payload);
     setSelectedInterview2Id(payload.id);
     const updated = db.getStudentInterviews2(selectedStudent.id);
@@ -716,20 +2678,21 @@ export default function TeacherDashboard({
     setIsParsingTranscript2(true);
     try {
       const parsed = await parseInterviewTranscriptToFields(transcript2, 'two-way');
-      if (parsed.interviewer) setInterviewer2(parsed.interviewer);
-      if (parsed.target_school) setTargetSchool2(parsed.target_school);
-      if (parsed.dream_goal) setDreamGoal2(parsed.dream_goal);
-      if (parsed.club_activity) setClubActivity2(parsed.club_activity);
-      if (parsed.club_members_count) setClubMembersCount2(parsed.club_members_count);
-      if (parsed.close_friends) setCloseFriends2(parsed.close_friends);
-      if (parsed.study_anxiety) setStudyAnxiety2(parsed.study_anxiety);
-      if (parsed.self_evaluation) setSelfEvaluation2(parsed.self_evaluation);
-      if (parsed.student_challenges) setStudentChallenges2(parsed.student_challenges);
-      if (parsed.required_actions) setRequiredActions2(parsed.required_actions);
-      if (parsed.expectations) setExpectations2(parsed.expectations);
-      if (parsed.target_rank) setTargetRank2(parsed.target_rank);
-      if (parsed.target_score) setTargetScore2(parsed.target_score);
-      if (parsed.notes) setNotes2(prev => prev ? `${prev}\n\n${parsed.notes}` : parsed.notes || '');
+      const applied = applyTranscriptFieldsToInterview2(parsed, notes2);
+      if (applied.interviewer) setInterviewer2(applied.interviewer);
+      if (applied.target_school) setTargetSchool2(applied.target_school);
+      if (applied.dream_goal) setDreamGoal2(applied.dream_goal);
+      if (applied.club_activity) setClubActivity2(applied.club_activity);
+      if (applied.club_members_count) setClubMembersCount2(applied.club_members_count);
+      if (applied.close_friends) setCloseFriends2(applied.close_friends);
+      if (applied.study_anxiety) setStudyAnxiety2(applied.study_anxiety);
+      if (applied.self_evaluation) setSelfEvaluation2(applied.self_evaluation);
+      if (applied.student_challenges) setStudentChallenges2(applied.student_challenges);
+      if (applied.required_actions) setRequiredActions2(applied.required_actions);
+      if (applied.expectations) setExpectations2(applied.expectations);
+      if (applied.target_rank) setTargetRank2(applied.target_rank);
+      if (applied.target_score) setTargetScore2(applied.target_score);
+      if (applied.updatedNotes) setNotes2(applied.updatedNotes);
       alert('音声議事録から面談各項目へ自動入力しました。');
     } catch (e: any) {
       alert(`自動入力でエラーが発生しました: ${e?.message || e}`);
@@ -761,7 +2724,7 @@ export default function TeacherDashboard({
     setIsGeneratingAdvice2(true);
     try {
       const draft: Partial<StudentInterview2> = {
-        interviewer: interviewer2 || selectedStudent?.teacher_in_charge || '担当講師',
+        interviewer: resolveInterviewerName(interviewer2, selectedStudent?.teacher_in_charge),
         interview_date: interviewDate2,
         dream_goal: dreamGoal2,
         target_school: targetSchool2,
@@ -803,7 +2766,7 @@ export default function TeacherDashboard({
 
   const resetInterview3Form = () => {
     setSelectedInterview3Id(null);
-    setInterviewer3(selectedStudent?.teacher_in_charge || '担当講師');
+    setInterviewer3(resolveInterviewerName(undefined, selectedStudent?.teacher_in_charge));
     setInterviewDate3(new Date().toISOString().split('T')[0]);
     setParentType3('mother');
     setParentAnxieties3('');
@@ -838,22 +2801,21 @@ export default function TeacherDashboard({
       alert('実施日を入力してください。');
       return;
     }
-    const payload: StudentInterview3 = {
-      id: selectedInterview3Id || `interview3-${selectedStudent.id}-${Date.now()}`,
-      student_id: selectedStudent.id,
-      interviewer: interviewer3 || selectedStudent?.teacher_in_charge || '担当講師',
-      interview_date: interviewDate3,
-      parent_type: parentType3,
-      parent_anxieties: parentAnxieties3,
-      discussed_content: discussedContent3,
-      future_direction_agreed: futureDirectionAgreed3,
+    const payload = buildInterview3Payload({
+      selectedInterview3Id,
+      studentId: selectedStudent.id,
+      teacherInCharge: selectedStudent?.teacher_in_charge,
+      interviewer: interviewer3,
+      interviewDate: interviewDate3,
+      parentType: parentType3,
+      parentAnxieties: parentAnxieties3,
+      discussedContent: discussedContent3,
+      futureDirectionAgreed: futureDirectionAgreed3,
       notes: notes3,
-      custom_fields: customFields3,
-      ai_coaching_advice: aiCoachingAdvice3,
-      interview_summary: aiCoachingAdvice3,
-      audio_transcript: transcript3,
-      created_at: new Date().toISOString()
-    };
+      customFields: customFields3,
+      interviewSummary: aiCoachingAdvice3,
+      audioTranscript: transcript3
+    });
     await db.saveStudentInterview3(payload);
     setSelectedInterview3Id(payload.id);
     const updated = db.getStudentInterviews3(selectedStudent.id);
@@ -928,11 +2890,12 @@ export default function TeacherDashboard({
     setIsParsingTranscript3(true);
     try {
       const parsed = await parseInterviewTranscriptToFields(transcript3, 'three-way');
-      if (parsed.interviewer) setInterviewer3(parsed.interviewer);
+      const applied = applyTranscriptFieldsToInterview3(parsed, notes3);
+      if (applied.interviewer) setInterviewer3(applied.interviewer);
       if (parsed.parent_type) setParentType3(parsed.parent_type);
-      if (parsed.parent_anxieties) setParentAnxieties3(parsed.parent_anxieties);
-      if (parsed.discussed_content) setDiscussedContent3(parsed.discussed_content);
-      if (parsed.notes) setNotes3(prev => prev ? `${prev}\n\n${parsed.notes}` : parsed.notes || '');
+      if (applied.parent_anxieties) setParentAnxieties3(applied.parent_anxieties);
+      if (applied.discussed_content) setDiscussedContent3(applied.discussed_content);
+      if (applied.updatedNotes) setNotes3(applied.updatedNotes);
       alert('音声議事録から面談各項目へ自動入力しました。');
     } catch (e: any) {
       alert(`自動入力でエラーが発生しました: ${e?.message || e}`);
@@ -964,7 +2927,7 @@ export default function TeacherDashboard({
     setIsGeneratingAdvice3(true);
     try {
       const draft: Partial<StudentInterview3> = {
-        interviewer: interviewer3 || selectedStudent?.teacher_in_charge || '担当講師',
+        interviewer: resolveInterviewerName(interviewer3, selectedStudent?.teacher_in_charge),
         interview_date: interviewDate3,
         parent_type: parentType3,
         parent_anxieties: parentAnxieties3,
@@ -1385,14 +3348,9 @@ export default function TeacherDashboard({
     if (listSch.length > 0 && !newStudentSchoolId) {
       setNewStudentSchoolId(listSch[0].id);
     }
-    if (listSch.length > 0 && !selectedSchoolId) {
-      if (targetStudent) {
-        const matched = listSch.find(s => (targetStudent.school_id && s.id === targetStudent.school_id) || (targetStudent.school_name && s.name === targetStudent.school_name));
-        if (matched) setSelectedSchoolId(matched.id);
-        else setSelectedSchoolId(listSch[0].id);
-      } else {
-        setSelectedSchoolId(listSch[0].id);
-      }
+    const nextSchId = resolveSelectedSchoolId(listSch, selectedSchoolId, targetStudent);
+    if (nextSchId && nextSchId !== selectedSchoolId) {
+      setSelectedSchoolId(nextSchId);
     }
 
     const stToProcess = targetStudent !== undefined ? targetStudent : selectedStudent;
@@ -1533,50 +3491,23 @@ export default function TeacherDashboard({
         
         if (!isAttendanceDay) {
           // 休塾日（木曜日など通塾曜日以外）：自動でコマ生成は行わず、既存保存データのみを表示
-          if (today.length > 0) {
-            today.forEach(t => {
-              if (t.period) {
-                const units = listUnits;
-                const unit = units.find(u => u.id === t.unit_id);
-                const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
-                const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
-                const endName = t.end_lesson_name || startName;
-
-                if (unit || master) {
-                  newPeriods[t.period] = {
-                    subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
-                    unitId: t.unit_id,
-                    customTheme: '',
-                    startLessonId: t.start_lesson_id || t.unit_id,
-                    endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
-                    startLessonName: startName,
-                    endLessonName: endName,
-                    lessonRange: t.lesson_range || formatLessonRange(startName, endName)
-                  };
-                } else if (t.subject || t.custom_unit_name) {
-                  newPeriods[t.period] = {
-                    subject: t.subject || 'テスト',
-                    unitId: '',
-                    customTheme: t.custom_unit_name || '',
-                    startLessonId: t.start_lesson_id || '',
-                    endLessonId: t.end_lesson_id || '',
-                    startLessonName: t.start_lesson_name || t.custom_unit_name || '',
-                    endLessonName: t.end_lesson_name || t.custom_unit_name || '',
-                    lessonRange: t.lesson_range || t.custom_unit_name || ''
-                  };
-                }
-                if (t.period > loadedPeriodCount) {
-                  loadedPeriodCount = t.period;
-                }
+          today.forEach(t => {
+            if (t.period) {
+              const slot = resolvePeriodSlotFromTask(t, listUnits, listMasters);
+              if (slot) {
+                newPeriods[t.period] = slot;
               }
-              if (t.office_note) {
-                foundCommonNote = t.office_note;
+              if (t.period > loadedPeriodCount) {
+                loadedPeriodCount = t.period;
               }
-            });
-          }
+            }
+            if (t.office_note) {
+              foundCommonNote = t.office_note;
+            }
+          });
         } else {
           // 通塾日（金曜日など）：既存の有効コマがあればロードし、未設定・不完全な場合は選択教科から進捗順で自動割り当て
-          const validTasks = today.filter(t => t.period && (t.subject || t.unit_id || t.start_lesson_id || t.custom_unit_name));
+          const validTasks = today.filter(isTaskConfigured);
           
           if (validTasks.length > 0) {
             const miniResultsAll = db.getMiniTestResults(freshSt.id);
@@ -1654,50 +3585,16 @@ export default function TeacherDashboard({
                     miniTestResults: miniResultsAll
                   });
 
-                  newPeriods[t.period] = {
-                    subject: sub,
-                    unitId: correctedRange.start_lesson_id || t.unit_id,
-                    customTheme: '',
-                    startLessonId: correctedRange.start_lesson_id || t.start_lesson_id || t.unit_id,
-                    endLessonId: correctedRange.end_lesson_id || correctedRange.start_lesson_id || t.end_lesson_id || t.unit_id,
-                    startLessonName: correctedRange.start_lesson_name || '',
-                    endLessonName: correctedRange.end_lesson_name || correctedRange.start_lesson_name || '',
-                    lessonRange: correctedRange.lesson_range || ''
-                  };
+                  newPeriods[t.period] = resolvePeriodSlotFromCorrectedRange(correctedRange, t, sub);
                   if (t.period > loadedPeriodCount) {
                     loadedPeriodCount = t.period;
                   }
                   return;
                 }
 
-                const units = listUnits;
-                const unit = units.find(u => u.id === t.unit_id);
-                const master = listMasters.find(m => m.id === t.unit_id || String(m.sort_order) === String(t.unit_id));
-                const startName = t.start_lesson_name || (unit ? unit.name : (master ? (master.unit_name ? `${master.unit_name} - ${master.lesson_name}` : master.lesson_name) : ''));
-                const endName = t.end_lesson_name || startName;
-
-                if (unit || master) {
-                  newPeriods[t.period] = {
-                    subject: t.subject || (unit ? unit.subject : master?.subject || '数学'),
-                    unitId: t.unit_id,
-                    customTheme: '',
-                    startLessonId: t.start_lesson_id || t.unit_id,
-                    endLessonId: t.end_lesson_id || t.start_lesson_id || t.unit_id,
-                    startLessonName: startName,
-                    endLessonName: endName,
-                    lessonRange: t.lesson_range || formatLessonRange(startName, endName)
-                  };
-                } else if (t.subject || t.custom_unit_name) {
-                  newPeriods[t.period] = {
-                    subject: t.subject || 'テスト',
-                    unitId: '',
-                    customTheme: t.custom_unit_name || '',
-                    startLessonId: t.start_lesson_id || '',
-                    endLessonId: t.end_lesson_id || '',
-                    startLessonName: t.start_lesson_name || t.custom_unit_name || '',
-                    endLessonName: t.end_lesson_name || t.custom_unit_name || '',
-                    lessonRange: t.lesson_range || t.custom_unit_name || ''
-                  };
+                const slot = resolvePeriodSlotFromTask(t, listUnits, listMasters);
+                if (slot) {
+                  newPeriods[t.period] = slot;
                 }
                 if (t.period > loadedPeriodCount) {
                   loadedPeriodCount = t.period;
@@ -1740,8 +3637,8 @@ export default function TeacherDashboard({
           })
           .map(r => ({
             id: r.id,
-            subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
-            testType: r.test_type || (r.test_content.includes('単元') ? 'unit_test' : 'custom'),
+            subject: resolveDefaultSubject(freshSt.grade, r.subject),
+            testType: resolveTestType(r.test_type, r.test_content) as 'unit_test' | 'custom',
             unitName: r.unit_name || '',
             content: r.test_content,
             passingLine: r.passing_line || '',
@@ -1753,9 +3650,9 @@ export default function TeacherDashboard({
         const todayHwResults = hwResults.filter(r => r.student_id === freshSt.id && r.date === scheduleDate);
         const mappedTodayHomeworks = todayHwResults.map(r => ({
           id: r.id,
-          subject: r.subject || (freshSt.grade?.startsWith('中') ? '数学' : '算数'),
-          type: (r.homework_type as any) || (r.homework_content.includes('2回目演習') ? 'drill_2nd' : 'custom'),
-          content: r.homework_content,
+          subject: resolveDefaultSubject(freshSt.grade, r.subject),
+          type: resolveHomeworkType(r.homework_type, r.homework_content || (r as any).title || ''),
+          content: r.homework_content || (r as any).title || '',
           deadline: r.homework_deadline || getNextAttendanceDateForStudent(scheduleDate, freshSt),
           targetScope: r.target_scope || 'individual'
         }));
@@ -1806,7 +3703,7 @@ export default function TeacherDashboard({
     const passStatusMap: Record<string, string> = {};
     allMiniResults.forEach(r => {
       scoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
-      passStatusMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
+      passStatusMap[r.id] = resolveMiniTestPassedStatus(r.status, r.passed);
     });
     setTempScores(scoresMap);
     setTempPassedStatuses(passStatusMap);
@@ -1819,7 +3716,7 @@ export default function TeacherDashboard({
         const remotePassStatusMap: Record<string, string> = {};
         remoteResults.forEach(r => {
           remoteScoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
-          remotePassStatusMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
+          remotePassStatusMap[r.id] = resolveMiniTestPassedStatus(r.status, r.passed);
         });
         setTempScores(prev => ({ ...prev, ...remoteScoresMap }));
         setTempPassedStatuses(prev => ({ ...prev, ...remotePassStatusMap }));
@@ -1852,7 +3749,7 @@ export default function TeacherDashboard({
           const rPassMap: Record<string, string> = {};
           results.forEach(r => {
             rScoresMap[r.id] = r.score !== null && r.score !== undefined ? r.score.toString() : '';
-            rPassMap[r.id] = (r.status === 'passed' || r.status === '合格' || r.passed === true) ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted');
+            rPassMap[r.id] = resolveMiniTestPassedStatus(r.status, r.passed);
           });
           setTempScores(prev => ({ ...prev, ...rScoresMap }));
           setTempPassedStatuses(prev => ({ ...prev, ...rPassMap }));
@@ -1870,42 +3767,16 @@ export default function TeacherDashboard({
         (selectedStudent.school_id && s.id === selectedStudent.school_id) ||
         (selectedStudent.school_name && s.name === selectedStudent.school_name)
       );
-      if (matchedSchool) {
-        setSelectedSchoolId(matchedSchool.id);
-      } else if (selectedStudent.grade?.startsWith('小') || selectedStudent.grade === '園児') {
-        const elemSch = currentSchools.find(s => s.type === 'elementary');
-        if (elemSch) setSelectedSchoolId(elemSch.id);
-      } else if (selectedStudent.grade?.startsWith('中')) {
-        const jhsSch = currentSchools.find(s => s.type === 'junior_high');
-        if (jhsSch) setSelectedSchoolId(jhsSch.id);
-      } else if (selectedStudent.grade?.startsWith('高')) {
-        const hsSch = currentSchools.find(s => s.type === 'high_school');
-        if (hsSch) setSelectedSchoolId(hsSch.id);
-      }
+      const targetSchoolId = resolveMatchedSchoolForStudent(selectedStudent, currentSchools, matchedSchool);
+      if (targetSchoolId) setSelectedSchoolId(targetSchoolId);
 
       // 生徒の学年・校種・受講教科と連動
-      const isJuniorHigh = selectedStudent.grade?.startsWith('中');
-      const isElementary = selectedStudent.grade?.startsWith('小') || selectedStudent.grade === '園児';
-      if (isJuniorHigh) {
-        const juniorSubjects = ['数学', '英語', '理科', '歴史', '地理', '国語', '社会'];
-        const pref = selectedStudent.selected_subjects?.find(sub => juniorSubjects.includes(sub));
-        if (pref && (!selectedSubject || !juniorSubjects.includes(selectedSubject))) {
-          setSelectedSubject(pref);
-        } else if (!juniorSubjects.includes(selectedSubject)) {
-          setSelectedSubject('数学');
-        }
-      } else if (isElementary) {
-        const elemSubjects = ['算数', '国語', '英語', '理科', '社会'];
-        const pref = selectedStudent.selected_subjects?.find(sub => elemSubjects.includes(sub));
-        if (pref && (!selectedSubject || !elemSubjects.includes(selectedSubject))) {
-          setSelectedSubject(pref);
-        } else if (!elemSubjects.includes(selectedSubject)) {
-          setSelectedSubject('算数');
-        }
+      const prefSubject = resolveStudentPreferredSubject(selectedStudent, selectedSubject);
+      setSelectedSubject(prefSubject);
 
-        const targetSub = pref || selectedSubject || '算数';
+      if (selectedStudent.grade?.startsWith('小') || selectedStudent.grade === '園児') {
         const autoGrade = determineActiveGradeForSubject(
-          targetSub,
+          prefSubject,
           selectedStudent,
           studentTasks,
           undefined,
@@ -1913,30 +3784,12 @@ export default function TeacherDashboard({
           curriculumMastersList
         );
         setElementaryTimelineGradeFilter(autoGrade);
-      } else {
-        const highSubjects = ['数学', '英語', '国語', '理科', '社会'];
-        const pref = selectedStudent.selected_subjects?.find(sub => highSubjects.includes(sub));
-        if (pref && (!selectedSubject || !highSubjects.includes(selectedSubject))) {
-          setSelectedSubject(pref);
-        } else if (!highSubjects.includes(selectedSubject)) {
-          setSelectedSubject('数学');
-        }
       }
     }
     setSelectedTemplateId('');
 
     // スケジュール日付から現在の月を取得して初期表示フィルターにする
-    if (scheduleDate) {
-      const currentMonth = new Date(scheduleDate).getMonth() + 1;
-      const validMonths = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
-      if (validMonths.includes(currentMonth)) {
-        setSelectedMonthFilter(currentMonth);
-      } else {
-        setSelectedMonthFilter('all');
-      }
-    } else {
-      setSelectedMonthFilter('all');
-    }
+    setSelectedMonthFilter(resolveInitialMonthFilter(scheduleDate));
   }, [selectedStudent?.id, scheduleDate]);
 
   useEffect(() => {
@@ -1973,15 +3826,7 @@ export default function TeacherDashboard({
           return;
         }
 
-        // suffix 補完
-        const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
-        const isHigh = newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
-        const suffix = isElem ? '小学校' : isHigh ? '高校' : '中学校';
-        let finalizedSchoolName = newCustomSchoolName.trim();
-        if (!finalizedSchoolName.endsWith('小学校') && !finalizedSchoolName.endsWith('中学校') && !finalizedSchoolName.endsWith('高校') && !finalizedSchoolName.endsWith('学校')) {
-          finalizedSchoolName += suffix;
-        }
-
+        const { finalizedName: finalizedSchoolName, type: schoolType } = finalizeSchoolNameAndType(newCustomSchoolName, newStudentGrade);
         const allSchools = db.getSchools();
         const existingSchool = allSchools.find(s => s.name === finalizedSchoolName);
 
@@ -1992,7 +3837,7 @@ export default function TeacherDashboard({
           const newSchool = {
             id: newSchoolId,
             name: finalizedSchoolName,
-            type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
+            type: schoolType,
             created_at: new Date().toISOString()
           };
           await db.saveSchool(newSchool);
@@ -2008,10 +3853,9 @@ export default function TeacherDashboard({
       const email = `${studentId}@tentoru-student.com`;
 
       const allCurrentSchools = db.getSchools();
-      const currentSchoolObj = allCurrentSchools.find(s => s.id === targetSchoolId);
-      const studentSchoolName = currentSchoolObj?.name || (targetSchoolId === 'add_new' ? newCustomSchoolName.trim() : '');
+      const studentSchoolName = resolveStudentSchoolName(allCurrentSchools, targetSchoolId, targetSchoolId === 'add_new' ? newCustomSchoolName : '');
 
-      const generatedUUID = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `std-${Date.now()}`;
+      const generatedUUID = generateSecureUUID();
       const newStudent: Student = {
         id: generatedUUID,
         student_id: studentId,
@@ -2070,7 +3914,7 @@ export default function TeacherDashboard({
       loadData();
     } catch (err: any) {
       console.error(err);
-      alert(`生徒アカウントの発行に失敗しました。\nエラー: ${err.message || err}`);
+      alert(`生徒アカウントの発行に失敗しました。\nエラー: ${formatErrorMessage(err)}`);
     }
   };
 
@@ -2096,7 +3940,7 @@ export default function TeacherDashboard({
       alert(`${st.name} さんの生徒データを削除しました。`);
     } catch (err: any) {
       console.error('Failed to delete student:', err);
-      alert(`生徒の削除に失敗しました: ${err.message || err}`);
+      alert(`生徒の削除に失敗しました: ${formatErrorMessage(err)}`);
     }
   };
 
@@ -2115,13 +3959,7 @@ export default function TeacherDashboard({
       setSchools(updatedSchools);
 
       // リセット後の初期選択
-      const isElem = newStudentGrade.startsWith('小') || newStudentGrade === '園児';
-      const isJhs = newStudentGrade.startsWith('中') || newStudentGrade.startsWith('高') || newStudentGrade === '既卒';
-      const filtered = updatedSchools.filter(s => {
-        if (isElem) return s.type === 'elementary';
-        if (isJhs) return s.type === 'junior_high' || s.type === 'high_school';
-        return true;
-      });
+      const filtered = filterSchoolsByGrade(updatedSchools, newStudentGrade);
       if (filtered.length > 0) {
         setNewStudentSchoolId(filtered[0].id);
       } else {
@@ -2130,7 +3968,7 @@ export default function TeacherDashboard({
       alert(`学校名「${targetSchool.name}」を削除しました。`);
     } catch (err: any) {
       console.error('Failed to delete school:', err);
-      alert(`学校名の削除に失敗しました: ${err.message || err}`);
+      alert(`学校名の削除に失敗しました: ${formatErrorMessage(err)}`);
     }
   };
 
@@ -2141,40 +3979,38 @@ export default function TeacherDashboard({
     try {
       const rawTargetSchools = (editForm as any).target_schools || [];
       const cleanTargetSchools = rawTargetSchools.filter((s: any) => s.school_name?.trim() || s.course_name?.trim());
-      const newSlots = parseInt(String(editForm.period_count || (editForm as any).default_slots || 2)) || 2;
-      const currentAssignedTeachers = (editForm as any).assigned_teachers && Array.isArray((editForm as any).assigned_teachers) && (editForm as any).assigned_teachers.length > 0
-        ? (editForm as any).assigned_teachers
-        : (editForm.teacher_in_charge ? [editForm.teacher_in_charge] : ['福田 尚弘']);
+      const newSlots = resolvePeriodSlots(editForm.period_count, (editForm as any).default_slots, 2);
+      const currentAssignedTeachers = resolveFormArrayWithFallback(
+        (editForm as any).assigned_teachers,
+        editForm.teacher_in_charge ? [editForm.teacher_in_charge] : null,
+        ['福田 尚弘']
+      );
 
-      const isElem = (editForm.grade || selectedStudent.grade).startsWith('小') || (editForm.grade || selectedStudent.grade) === '園児' || currentTeacherType === 'elementary';
-      const isHigh = (editForm.grade || selectedStudent.grade).startsWith('高') || (editForm.grade || selectedStudent.grade) === '既卒' || currentTeacherType === 'high_school';
-      const defaultSubjs = isElem 
-        ? ['算数', '国語', '英語'] 
-        : isHigh 
-          ? ['数学', '国語', '英語'] 
-          : ['数学', '国語', '英語', '理科', '社会'];
-      const currentSelectedSubjects = (editForm as any).selected_subjects && Array.isArray((editForm as any).selected_subjects) && (editForm as any).selected_subjects.length > 0
-        ? (editForm as any).selected_subjects
-        : (selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0 ? selectedStudent.selected_subjects : defaultSubjs);
+      const defaultSubjs = resolveDefaultSubjectsForGrade(editForm.grade || selectedStudent.grade, currentTeacherType);
+      const currentSelectedSubjects = resolveFormArrayWithFallback(
+        (editForm as any).selected_subjects,
+        selectedStudent.selected_subjects,
+        defaultSubjs
+      );
 
-      const finalizedSchoolName = (schoolName !== undefined && schoolName !== null 
-        ? schoolName 
-        : (editForm.school_name !== undefined 
-            ? editForm.school_name 
-            : (schools.find(s => s.id === editForm.school_id)?.name || selectedStudent.school_name || ''))).trim();
+      const finalizedSchoolName = resolveFormInputSchoolName(
+        schoolName,
+        editForm.school_name,
+        schools,
+        editForm.school_id,
+        selectedStudent.school_name
+      );
 
       let targetSchoolId = editForm.school_id || selectedStudent.school_id;
       const matchedSchool = schools.find(s => s.name === finalizedSchoolName) || db.getSchools().find(s => s.name === finalizedSchoolName);
       if (matchedSchool) {
         targetSchoolId = matchedSchool.id;
       } else if (finalizedSchoolName) {
-        const validUUID = typeof crypto !== 'undefined' && crypto.randomUUID 
-          ? crypto.randomUUID() 
-          : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
+        const validUUID = generateSecureUUID();
         const newSch = {
           id: validUUID,
           name: finalizedSchoolName,
-          type: isElem ? ('elementary' as const) : isHigh ? ('high_school' as const) : ('junior_high' as const),
+          type: resolveSchoolTypeForStudent(editForm.grade || selectedStudent.grade, currentTeacherType, finalizedSchoolName),
           created_at: new Date().toISOString()
         };
         const savedSch = await db.saveSchool(newSch);
@@ -2182,7 +4018,8 @@ export default function TeacherDashboard({
         setSchools(db.getSchools());
       }
 
-      const personalityList = editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || [];
+      const personalityList = resolveStudentPersonalities(selectedStudent, editForm);
+      const saveDefaults = resolveStudentSaveDefaults(editForm, selectedStudent, currentAssignedTeachers);
 
       const updated = {
         ...selectedStudent,
@@ -2194,11 +4031,8 @@ export default function TeacherDashboard({
         school_name: finalizedSchoolName,
         school_id: targetSchoolId,
         assigned_teachers: currentAssignedTeachers,
-        teacher_in_charge: currentAssignedTeachers[0] || editForm.teacher_in_charge || '福田 尚弘',
+        ...saveDefaults,
         selected_subjects: currentSelectedSubjects,
-        weekly_sessions_count: (editForm as any).weekly_sessions_count || selectedStudent.weekly_sessions_count || '2回',
-        weekly_duration_minutes: (editForm as any).weekly_duration_minutes || selectedStudent.weekly_duration_minutes || '120分',
-        selected_days: (editForm as any).selected_days || selectedStudent.selected_days || ['tuesday', 'friday'],
         default_slots: newSlots,
         period_count: newSlots,
         target_schools: cleanTargetSchools.length > 0 ? cleanTargetSchools : undefined,
@@ -2207,29 +4041,22 @@ export default function TeacherDashboard({
       const saved = await db.saveStudent(updated);
       setSelectedStudent(saved);
 
-      // DBから取得した学校名（キー名の揺れをすべて吸収し、空文字での上書きを防止）
-      const resolvedSavedSchool = saved.school_name || (saved as any).school || (saved as any).elementary_school || finalizedSchoolName;
-      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
-        setSchoolName(resolvedSavedSchool);
+      // DBから取得した学校名とフォーム状態を正規化（キー名の揺れをすべて吸収し、空文字での上書きを防止）
+      const { resolvedSchool, resolvedSlots, editForm: nextEditForm } = resolveSavedStudentEditForm({
+        saved,
+        finalizedSchoolName,
+        newSlots,
+        personalityList,
+        currentAssignedTeachers,
+        currentSelectedSubjects,
+        fallbackSelectedDays: (editForm as any).selected_days,
+        cleanTargetSchools
+      });
+      if (resolvedSchool && resolvedSchool.trim() !== '') {
+        setSchoolName(resolvedSchool);
       }
-      setPeriodCount(saved.default_slots || saved.period_count || newSlots);
-      setEditForm({
-        ...saved,
-        enrollment_date: saved.enrollment_date || null,
-        withdrawal_date: saved.withdrawal_date || null,
-        personalities: saved.personalities || saved.personality_tags || personalityList,
-        personality_tags: saved.personalities || saved.personality_tags || personalityList,
-        school_name: resolvedSavedSchool,
-        assigned_teachers: saved.assigned_teachers || currentAssignedTeachers,
-        teacher_in_charge: saved.teacher_in_charge || currentAssignedTeachers[0] || '福田 尚弘',
-        selected_subjects: saved.selected_subjects || currentSelectedSubjects,
-        weekly_sessions_count: saved.weekly_sessions_count || '2回',
-        weekly_duration_minutes: saved.weekly_duration_minutes || '120分',
-        selected_days: saved.selected_days || (editForm as any).selected_days || ['tuesday', 'friday'],
-        default_slots: saved.default_slots || saved.period_count || newSlots,
-        period_count: saved.default_slots || saved.period_count || newSlots,
-        target_schools: (saved as any).target_schools || cleanTargetSchools
-      } as any);
+      setPeriodCount(resolvedSlots);
+      setEditForm(nextEditForm);
 
       // 教科別スタート位置に基づき未実行タスクを動的再計算・連動保存
       try {
@@ -2241,7 +4068,7 @@ export default function TeacherDashboard({
 
         const autoSlots = generateSlotsForSelectedSubjects({
           student: saved,
-          periodCount: saved.default_slots || saved.period_count || newSlots,
+          periodCount: resolveSavedStudentPeriodCount(saved.default_slots, saved.period_count, newSlots),
           selectedSubjects: saved.selected_subjects,
           tasks: recalculatedTasks,
           curriculumMasters: masters,
@@ -2257,10 +4084,10 @@ export default function TeacherDashboard({
       // 生徒リスト自体も即座に対象生徒を更新してカードへ即時反映（Optimistic & Immediate Sync）
       const updatedStudentForList: Student = {
         ...saved,
-        school_name: resolvedSavedSchool,
+        school_name: resolvedSchool,
         school_id: targetSchoolId
       };
-      (updatedStudentForList as any).school = resolvedSavedSchool;
+      (updatedStudentForList as any).school = resolvedSchool;
 
       setStudents(prev => {
         const idx = prev.findIndex(s => s.id === saved.id || s.student_id === saved.student_id);
@@ -2273,24 +4100,24 @@ export default function TeacherDashboard({
       });
 
       setSelectedStudent(updatedStudentForList);
-      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
-        setSchoolName(resolvedSavedSchool);
+      if (resolvedSchool && resolvedSchool.trim() !== '') {
+        setSchoolName(resolvedSchool);
       }
       setEditForm(prev => ({
         ...prev,
         ...updatedStudentForList,
-        school_name: resolvedSavedSchool,
+        school_name: resolvedSchool,
         school_id: targetSchoolId
       }));
 
       loadData(updatedStudentForList);
-      if (resolvedSavedSchool && resolvedSavedSchool.trim() !== '') {
-        setSchoolName(resolvedSavedSchool);
+      if (resolvedSchool && resolvedSchool.trim() !== '') {
+        setSchoolName(resolvedSchool);
       }
       alert('生徒情報を保存しました。');
     } catch (err: any) {
       console.error('handleSaveStudentDetail Supabase error:', err);
-      const errMsg = err?.message || err?.details || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      const errMsg = formatErrorMessage(err);
       alert(`保存中にエラーが発生しました。\nエラー詳細: ${errMsg}`);
     }
   };
@@ -2339,7 +4166,7 @@ export default function TeacherDashboard({
         alert(`講師「${selectedTeacherFromMaster}」をマスタから削除しました。`);
       } catch (err: any) {
         console.error('deleteTeacherOption error:', err);
-        alert(`削除中にエラーが発生しました: ${err?.message || err}`);
+        alert(`削除中にエラーが発生しました: ${formatErrorMessage(err)}`);
       }
     }
   };
@@ -2361,7 +4188,7 @@ export default function TeacherDashboard({
     const tagToAdd = (newPersonalityInput.trim() || selectedPersonalityFromMaster || '').trim();
     if (!tagToAdd) return;
     
-    const currentTags = (editForm.personalities || (editForm as any).personality_tags || selectedStudent.personalities || selectedStudent.personality_tags || []) as string[];
+    const currentTags = resolveStudentPersonalities(selectedStudent, editForm);
     if (currentTags.includes(tagToAdd)) {
       alert('この個性は既に登録されています。');
       setNewPersonalityInput('');
@@ -2412,7 +4239,7 @@ export default function TeacherDashboard({
 
   // 個性の削除・生徒割り当て解除
   const handleRemovePersonality = (tagToRemove: string) => {
-    const currentTags = (editForm.personalities || (editForm as any).personality_tags || selectedStudent?.personalities || selectedStudent?.personality_tags || []) as string[];
+    const currentTags = resolveStudentPersonalities(selectedStudent, editForm);
     const updatedTags = currentTags.filter(t => t !== tagToRemove);
     setEditForm(prev => ({ ...prev, personalities: updatedTags, personality_tags: updatedTags }));
   };
@@ -2424,7 +4251,7 @@ export default function TeacherDashboard({
     try {
       const finalStaffName = interactionStaffName === 'other'
         ? (customStaffName.trim() || '講師')
-        : (interactionStaffName || editForm.teacher_in_charge || selectedStudent.teacher_in_charge || '福田');
+        : resolveStaffName(interactionStaffName, editForm.teacher_in_charge, selectedStudent.teacher_in_charge, '福田');
 
       const newInteraction: StudentInteraction = {
         id: `si-${selectedStudent.id}-${Date.now()}`,
@@ -2453,7 +4280,7 @@ export default function TeacherDashboard({
 
       alert('✅ 対応内容を登録しました');
     } catch (error: any) {
-      const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error, Object.getOwnPropertyNames(error)) : String(error));
+      const errorMsg = formatErrorMessage(error);
       console.error('詳細登録エラー:', error);
       alert(`登録失敗の詳細理由:\n${errorMsg}\n\n対象テーブルやカラム設定を確認してください。`);
     }
@@ -2493,22 +4320,8 @@ export default function TeacherDashboard({
 
   // 2. カリキュラム単元の順序変更（年度途中）
   const moveUnit = async (index: number, direction: 'up' | 'down') => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === schoolUnits.length - 1) return;
-
-    const newOrder = [...schoolUnits];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    
-    // スワップ
-    const temp = newOrder[index];
-    newOrder[index] = newOrder[targetIdx];
-    newOrder[targetIdx] = temp;
-
-    // sequence_order を再割り当て
-    const updatedUnits = newOrder.map((unit, idx) => ({
-      ...unit,
-      sequence_order: idx + 1
-    }));
+    const updatedUnits = reorderCurriculumUnits(schoolUnits, index, direction);
+    if (!updatedUnits) return;
 
     // 即座にステート更新
     setSchoolUnits(updatedUnits);
@@ -2624,47 +4437,15 @@ export default function TeacherDashboard({
     const allUnits = db.getCurriculumUnits();
     const studentSchoolUnits = allUnits.filter(u => u.school_id === selectedStudent.school_id);
     
-    // 5教科のスタート位置を取得
-    const startMath = studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_math);
-    const startEnglish = studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_english);
-    const startScience = studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_science);
-    const startSocial = studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_social);
-    const startJapanese = studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_japanese);
+    const startUnitsBySubject: Record<string, CurriculumUnit | undefined | null> = {
+      math: studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_math),
+      english: studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_english),
+      science: studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_science),
+      social: studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_social),
+      japanese: studentSchoolUnits.find(u => u.id === (selectedStudent as any).start_unit_japanese)
+    };
 
-    const updatedTasks = studentTasks.map(task => {
-      const unit = studentSchoolUnits.find(u => u.id === task.unit_id);
-      if (!unit) return task;
-
-      // 該当教科のスタート位置を決定
-      let activeStartUnit = null;
-      if (unit.subject === '数学' || unit.subject === '算数') activeStartUnit = startMath;
-      else if (unit.subject === '英語') activeStartUnit = startEnglish;
-      else if (unit.subject === '理科') activeStartUnit = startScience;
-      else if (unit.subject === '社会') activeStartUnit = startSocial;
-      else if (unit.subject === '国語') activeStartUnit = startJapanese;
-
-      if (activeStartUnit) {
-        if (unit.sequence_order < activeStartUnit.sequence_order) {
-          // スタートより前はスキップ
-          if (task.status === 'unstarted') {
-            return {
-              ...task,
-              status: 'skipped' as const,
-              office_note: '開始位置指定によりスキップ'
-            };
-          }
-        } else if (task.status === 'skipped') {
-          // スタート以降で過去にスキップされていたものは未着手にリセット
-          return {
-            ...task,
-            status: 'unstarted' as const,
-            office_note: ''
-          };
-        }
-      }
-      return task;
-    });
-
+    const updatedTasks = adjustTasksForStartUnits(studentTasks, studentSchoolUnits, startUnitsBySubject);
     await db.saveLearningTasks(updatedTasks);
     
     alert('教科別スタート位置を設定しました。スタートより前の単元をTodoから除外しました。');
@@ -2679,16 +4460,7 @@ export default function TeacherDashboard({
     setTimetableToast(null);
 
     try {
-      let targetStudents: any[] = [];
-      if (applyScope === 'individual') {
-        targetStudents = [selectedStudent];
-      } else if (applyScope === 'school') {
-        targetStudents = students.filter(s => s.school_id === selectedStudent.school_id);
-      } else if (applyScope === 'grade') {
-        targetStudents = students.filter(s => s.grade === selectedStudent.grade);
-      } else if (applyScope === 'level') {
-        targetStudents = students.filter(s => s.level === selectedStudent.level);
-      }
+      const targetStudents = resolveTargetScopeStudents(applyScope, selectedStudent, students);
 
       // すべてのタスク、ミニテスト結果、宿題結果をDBからロード
       const allMiniTestResults = db.getMiniTestResults();
@@ -2713,7 +4485,7 @@ export default function TeacherDashboard({
           }
 
           if (config.unitId || config.startLessonId) {
-            const effectiveUnitId = config.unitId || config.startLessonId || '';
+            const effectiveUnitId = resolveEffectiveUnitId(config.unitId, config.startLessonId);
             const selectedUnit = allCurriculumUnits.find(u => u.id === effectiveUnitId);
             const selectedMaster = curriculumMastersList.find(m => m.id === effectiveUnitId || String(m.sort_order) === String(effectiveUnitId));
             let targetUnitId = effectiveUnitId;
@@ -2732,102 +4504,33 @@ export default function TeacherDashboard({
               }
             }
 
-            const startLessonName = config.startLessonName || (selectedUnit ? selectedUnit.name : (selectedMaster ? (selectedMaster.unit_name ? `${selectedMaster.unit_name} - ${selectedMaster.lesson_name}` : selectedMaster.lesson_name) : ''));
-            const endLessonName = config.endLessonName || startLessonName;
-            const rangeString = config.lessonRange || formatLessonRange(startLessonName, endLessonName);
-            const customUnitId = targetUnitId || `custom-${student.id}-${scheduleDate}-${p}`;
-            const customThemeName = rangeString || startLessonName || config.customTheme || (selectedUnit ? selectedUnit.name : '');
-
-            // カリキュラムマスタから From〜To 範囲に含まれる全ステップの確定ID配列を正確に抽出（Single Source of Truth）
-            let extractedLessonIds: string[] = [];
-            if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
-              extractedLessonIds = config.lesson_ids.map(String);
-            } else {
-              const stepLessons = getLessonRangeStepIds({
-                subject: config.subject,
-                startLessonId: config.startLessonId || targetUnitId,
-                endLessonId: config.endLessonId || config.startLessonId || targetUnitId,
-                startLessonName: startLessonName,
-                endLessonName: endLessonName,
-                lessonRange: rangeString,
-                customUnitName: customThemeName,
-                lessonIds: config.lesson_ids,
-                curriculumMasters: curriculumMastersList,
-                curriculumUnits: allCurriculumUnits,
-                studentGrade: student.grade
-              });
-              extractedLessonIds = stepLessons.map(s => String(s.id));
-            }
-            if (extractedLessonIds.length === 0 && (config.startLessonId || targetUnitId)) {
-              extractedLessonIds = [String(config.startLessonId || targetUnitId)];
-            }
-
-            newDailyTasks.push({
-              id: `task-${student.id}-${scheduleDate}-${p}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              student_id: student.id,
-              unit_id: customUnitId,
-              scheduled_date: scheduleDate,
+            const dailyTask = buildDailyTaskFromTimetableConfig({
+              student,
+              scheduleDate,
               period: p,
-              status: 'unstarted',
-              video_watched: false,
-              test_passed: false,
-              subject: config.subject,
-              custom_unit_name: customThemeName,
-              start_lesson_id: config.startLessonId || targetUnitId,
-              end_lesson_id: config.endLessonId || config.startLessonId || targetUnitId,
-              start_lesson_name: startLessonName,
-              end_lesson_name: endLessonName,
-              lesson_range: rangeString,
-              lesson_ids: extractedLessonIds,
-              office_note: commonOfficeNote,
-              created_at: new Date().toISOString()
+              config,
+              targetUnitId,
+              selectedUnit,
+              selectedMaster,
+              commonOfficeNote,
+              curriculumMastersList,
+              allCurriculumUnits
             });
+            newDailyTasks.push(dailyTask);
           } else {
-            // カスタムテーマ指定の場合
-            const customUnitId = `custom-${student.id}-${scheduleDate}-${p}`;
-            const customThemeName = config.customTheme || config.subject || '';
-
-            let customLessonIds: string[] = [];
-            if (Array.isArray(config.lesson_ids) && config.lesson_ids.length > 0) {
-              customLessonIds = config.lesson_ids.map(String);
-            } else if (config.startLessonId || config.endLessonId) {
-              const stepLessons = getLessonRangeStepIds({
-                subject: config.subject,
-                startLessonId: config.startLessonId,
-                endLessonId: config.endLessonId,
-                startLessonName: config.startLessonName || customThemeName,
-                endLessonName: config.endLessonName || customThemeName,
-                lessonRange: config.lessonRange || customThemeName,
-                customUnitName: customThemeName,
-                curriculumMasters: curriculumMastersList,
-                studentGrade: student.grade
-              });
-              customLessonIds = stepLessons.map(s => String(s.id));
-            }
-            if (customLessonIds.length === 0 && customUnitId) {
-              customLessonIds = [customUnitId];
-            }
-
-            newDailyTasks.push({
-              id: `task-custom-${Date.now()}-${p}-${student.id}-${Math.random().toString(36).substr(2, 5)}`,
-              student_id: student.id,
-              unit_id: customUnitId,
-              scheduled_date: scheduleDate,
+            const dailyTask = buildDailyTaskFromTimetableConfig({
+              student,
+              scheduleDate,
               period: p,
-              status: 'unstarted',
-              video_watched: false,
-              test_passed: false,
-              subject: config.subject,
-              custom_unit_name: customThemeName,
-              start_lesson_id: config.startLessonId || '',
-              end_lesson_id: config.endLessonId || '',
-              start_lesson_name: config.startLessonName || customThemeName,
-              end_lesson_name: config.endLessonName || customThemeName,
-              lesson_range: config.lessonRange || customThemeName,
-              lesson_ids: customLessonIds,
-              office_note: commonOfficeNote,
-              created_at: new Date().toISOString()
+              config,
+              targetUnitId: '',
+              selectedUnit: undefined,
+              selectedMaster: undefined,
+              commonOfficeNote,
+              curriculumMastersList,
+              allCurriculumUnits
             });
+            newDailyTasks.push(dailyTask);
           }
         }
 
@@ -2882,40 +4585,23 @@ export default function TeacherDashboard({
         const savedTestIds = new Set<string>();
 
         // 保存前に同一教科・同一テスト内容の重複を厳格に排除（二重登録バグ恒久根絶）
-        const deduplicatedTodayTests: typeof todayTests = [];
-        const seenTestKeys = new Set<string>();
-        for (const test of todayTests) {
-          if (!test.content || !test.content.trim() || test.content.includes('-- 単元テストマスタから選択 --')) continue;
-          const cleanKey = `${test.subject || ''}_${normalizeUnitName(test.content) || test.content.trim()}`;
-          if (seenTestKeys.has(cleanKey)) continue;
-          seenTestKeys.add(cleanKey);
-          deduplicatedTodayTests.push(test);
-        }
+        const deduplicatedTodayTests = deduplicateTodayTests(todayTests);
 
         for (const test of deduplicatedTodayTests) {
-          let relStudents = [student];
-          if (test.targetScope === 'grade') {
-            relStudents = students.filter(s => s.grade === student.grade);
-          } else if (test.targetScope === 'school') {
-            relStudents = students.filter(s => s.school_id === student.school_id);
-          } else if (test.targetScope === 'level') {
-            relStudents = students.filter(s => s.level === student.level);
-          }
+          const relStudents = resolveTargetScopeStudents(test.targetScope, student, students);
 
           for (const relSt of relStudents) {
             const relExisting = allMiniTestResults.find(r => 
               r.student_id === relSt.id && 
               r.date === scheduleDate && 
-              (r.test_content === test.content || 
-               isMatchingUnitOrTest(r.test_content, test.content) ||
-               (test.unitName && (r.unit_name === test.unitName || isMatchingUnitOrTest(r.unit_name, test.unitName))))
+              matchesFailedUnitTest({ unit_name: test.unitName, test_content: test.content }, r.test_content, r.unit_name)
             );
             const testData: MiniTestResult = {
               id: relExisting?.id || `mini-${relSt.id}-${scheduleDate}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               student_id: relSt.id,
               date: scheduleDate,
-              subject: test.subject || (student.grade?.startsWith('中') ? '数学' : '算数'),
-              test_type: test.testType || (test.content.includes('単元') ? 'unit_test' : 'custom'),
+              subject: resolveDefaultSubject(student.grade, test.subject),
+              test_type: resolveTestType(test.testType, test.content) as 'unit_test' | 'custom',
               unit_name: test.unitName || '',
               test_content: test.content,
               score: relExisting ? relExisting.score : null,
@@ -2942,14 +4628,7 @@ export default function TeacherDashboard({
         for (const hw of todayHomeworks) {
           if (!hw.content.trim()) continue;
 
-          let relStudents = [student];
-          if (hw.targetScope === 'grade') {
-            relStudents = students.filter(s => s.grade === student.grade);
-          } else if (hw.targetScope === 'school') {
-            relStudents = students.filter(s => s.school_id === student.school_id);
-          } else if (hw.targetScope === 'level') {
-            relStudents = students.filter(s => s.level === student.level);
-          }
+          const relStudents = resolveTargetScopeStudents(hw.targetScope, student, students);
 
           for (const relSt of relStudents) {
             const relExisting = allHomeworkResults.find(r => r.student_id === relSt.id && r.date === scheduleDate && r.homework_content === hw.content);
@@ -3000,7 +4679,7 @@ export default function TeacherDashboard({
       await loadData();
     } catch (err: any) {
       console.error('handleSaveTimetable error:', err);
-      alert(`時間割の保存中にエラーが発生しました: ${err?.message || err}`);
+      alert(`時間割の保存中にエラーが発生しました: ${formatErrorMessage(err)}`);
     } finally {
       setIsSavingTimetable(false);
     }
@@ -3008,12 +4687,13 @@ export default function TeacherDashboard({
 
   // 小テスト結果の自動保存（点数・合否判定のリアルタイムDB保存＆タイムライン連動）
   const handleAutoSaveMiniTestScore = async (result: MiniTestResult, newScoreStr?: string, newPassedStr?: string) => {
-    const scoreStr = newScoreStr !== undefined ? newScoreStr : (tempScores[result.id] ?? (result.score !== null && result.score !== undefined ? String(result.score) : ''));
+    const scoreStr = resolveMiniTestScoreDisplay(result.score, tempScores[result.id], newScoreStr);
     const scoreVal = scoreStr === '' ? null : parseInt(scoreStr, 10);
     if (scoreVal !== null && (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100)) {
       return;
     }
-    const passedStr = newPassedStr !== undefined ? newPassedStr : (tempPassedStatuses[result.id] || (result.passed === true ? 'passed' : result.passed === false ? 'failed' : 'unstarted'));
+    const effectiveTemp = newPassedStr !== undefined ? newPassedStr : tempPassedStatuses[result.id];
+    const passedStr = resolveMiniTestPassedStatusWithFallback(result.status, result.passed, result.score, effectiveTemp);
     
     let passScore = 80;
     if (result.passing_line) {
@@ -3042,7 +4722,7 @@ export default function TeacherDashboard({
     if (student) {
       const allTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
       const todayStr = scheduleDate;
-      const futureUncompletedTasks = allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
+      const futureUncompletedTasks = filterFutureUncompletedTasks(allTasks, todayStr);
 
       if (futureUncompletedTasks.length > 0) {
         const allMasters = db.getCurriculumMasters();
@@ -3050,7 +4730,7 @@ export default function TeacherDashboard({
         const latestMiniResults = db.getMiniTestResults();
 
         futureUncompletedTasks.forEach(task => {
-          const sub = task.subject || (student.grade?.startsWith('中') ? '数学' : '算数');
+          const sub = resolveDefaultSubject(student.grade, task.subject);
           const rangeInfo = calculateLessonRangeForSlot({
             subject: sub,
             student,
@@ -3080,7 +4760,7 @@ export default function TeacherDashboard({
 
   // 宿題提出状況のトグル切り替え（ワンクリック＆即時DB保存）
   const handleToggleHomeworkStatus = async (result: HomeworkResult) => {
-    const currentStatus = tempHomeworkStatuses[result.id] || result.status || 'incomplete';
+    const currentStatus = resolveDisplayHomeworkStatus(tempHomeworkStatuses[result.id], result.status);
     const isSubmitted = currentStatus === 'completed' || (currentStatus as string) === 'submitted';
     const nextStatus = isSubmitted ? 'incomplete' : 'completed';
     await handleAutoSaveHomeworkStatus(result, nextStatus);
@@ -3137,16 +4817,17 @@ export default function TeacherDashboard({
           const res = await analyzeReportCardImage(base64, mimeType);
           
           // 解析された値をフォームに入力する
-          if (res.test_name) setRegularTestName(res.test_name);
-          if (res.score_japanese !== null) setRegularScoreJapanese(res.score_japanese.toString());
-          if (res.score_math !== null) setRegularScoreMath(res.score_math.toString());
-          if (res.score_english !== null) setRegularScoreEnglish(res.score_english.toString());
-          if (res.score_social !== null) setRegularScoreSocial(res.score_social.toString());
-          if (res.score_science !== null) setRegularScoreScience(res.score_science.toString());
-          if (res.score_total !== null) setRegularScoreTotal(res.score_total.toString());
-          if (res.class_rank !== null) setRegularClassRank(res.class_rank);
-          if (res.school_rank !== null) setRegularSchoolRank(res.school_rank);
-          if (res.deviation_value !== null) setRegularDeviation(res.deviation_value.toString());
+          const sc = extractRegularTestScoresFromReportCard(res);
+          if (sc.testName) setRegularTestName(sc.testName);
+          if (sc.scoreJapanese) setRegularScoreJapanese(sc.scoreJapanese);
+          if (sc.scoreMath) setRegularScoreMath(sc.scoreMath);
+          if (sc.scoreEnglish) setRegularScoreEnglish(sc.scoreEnglish);
+          if (sc.scoreSocial) setRegularScoreSocial(sc.scoreSocial);
+          if (sc.scoreScience) setRegularScoreScience(sc.scoreScience);
+          if (sc.scoreTotal) setRegularScoreTotal(sc.scoreTotal);
+          if (sc.classRank) setRegularClassRank(sc.classRank);
+          if (sc.schoolRank) setRegularSchoolRank(sc.schoolRank);
+          if (sc.deviation) setRegularDeviation(sc.deviation);
           
           alert('成績表画像の解析が完了し、点数を自動セットしました！内容をご確認ください。');
         } catch (err) {
@@ -3163,162 +4844,19 @@ export default function TeacherDashboard({
 
   // 教科に対応する全授業リスト（マスタまたはカリキュラム単元）の取得
   const getLessonsForSubject = (subj: string) => {
-    const isElem = Boolean(
-      selectedStudent?.grade?.startsWith('小') || 
-      (selectedStudent?.grade?.includes('年') && !selectedStudent?.grade?.startsWith('中') && !selectedStudent?.grade?.startsWith('高')) ||
-      selectedStudent?.grade === '園児' ||
-      currentTeacherType === 'elementary'
-    );
-
-    // 教科のマッチング判定関数（他教科のカリキュラム混入を完全防ぐ）
-    const matchSubject = (targetSubject?: string) => {
-      if (!targetSubject) return false;
-      const target = targetSubject.trim();
-      const s = subj.trim();
-
-      if (s === '数学' || s === '算数' || s.toLowerCase() === 'math') {
-        return target === '算数' || target === '数学' || target.toLowerCase() === 'math';
-      }
-      if (s === '英語' || s.toLowerCase() === 'english') {
-        return target === '英語' || target.toLowerCase() === 'english';
-      }
-      if (s === '理科' || s.toLowerCase() === 'science') {
-        return target === '理科' || target.toLowerCase() === 'science';
-      }
-      if (s === '社会' || s === '歴史' || s === '地理' || s === '公民' || s.toLowerCase() === 'social') {
-        return ['社会', '歴史', '地理', '公民', 'social'].includes(target) || target.toLowerCase() === 'social';
-      }
-      if (s === '国語' || s.toLowerCase() === 'japanese') {
-        return target === '国語' || target.toLowerCase() === 'japanese';
-      }
-      return target === s;
-    };
-
-    // 単元確認テスト（is_unit_test）判定関数: 通常授業およびまとめテスト（Check Test）のみを許可し、単元確認テストを完全に除外
-    const isUnitTestItem = (item: any) => {
-      const name = item.name || item.lesson_name || '';
-      const isReviewOrCheck = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
-      return !isReviewOrCheck && (
-        item.item_type === 'unit_test' ||
-        name.includes('単元確認テスト') ||
-        name.includes('単元テスト')
-      );
-    };
-
-    const matchingSchoolUnits = allCurriculumUnits.filter(u => 
-      (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-      matchSubject(u.subject) &&
-      !isUnitTestItem(u)
-    );
-
-    const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
-    let masters = rawMasters.filter(m => matchSubject(m.subject));
-    const ensuredMasters = ensureMathEnglishUnitTests(masters);
-
-    const schoolUnits = matchingSchoolUnits.map(u => ({
-      id: u.id,
-      name: u.name,
-      sort_order: u.sequence_order ?? 0,
-      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
-      item_type: (u as any).item_type
-    }));
-
-    const masterUnits = ensuredMasters
-      .filter(m => !isUnitTestItem(m))
-      .map(m => ({
-        id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
-        sort_order: m.sort_order ?? 0,
-        isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj)),
-        item_type: m.item_type
-      }));
-
-    const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean; item_type?: string }>();
-    masterUnits.forEach(item => combinedMap.set(item.id, item));
-    schoolUnits.forEach(item => combinedMap.set(item.id, item));
-
-    const fallbackUnits = allCurriculumUnits.filter(u => 
-      (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-      matchSubject(u.subject) &&
-      !isUnitTestItem(u)
-    ).map(u => ({
-      id: u.id,
-      name: u.name,
-      sort_order: u.sequence_order ?? 0,
-      isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
-      item_type: (u as any).item_type
-    }));
-
-    fallbackUnits.forEach(item => {
-      if (!combinedMap.has(item.id)) {
-        combinedMap.set(item.id, item);
-      }
+    return resolveLessonsForSubject({
+      subject: subj,
+      selectedStudent,
+      currentTeacherType,
+      allCurriculumUnits,
+      curriculumMastersList,
+      periodSelections
     });
-
-    // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完（単元テストは除外）
-    if (periodSelections) {
-      Object.values(periodSelections).forEach(sel => {
-        if (sel && sel.subject && matchSubject(sel.subject)) {
-          if (sel.startLessonId && !combinedMap.has(sel.startLessonId)) {
-            const candidateName = sel.startLessonName || sel.lessonRange || '';
-            if (!isUnitTestItem({ name: candidateName })) {
-              combinedMap.set(sel.startLessonId, {
-                id: sel.startLessonId,
-                name: candidateName,
-                sort_order: 999,
-                isStartUnit: false
-              });
-            }
-          }
-          if (sel.endLessonId && !combinedMap.has(sel.endLessonId)) {
-            const candidateName = sel.endLessonName || sel.startLessonName || '';
-            if (!isUnitTestItem({ name: candidateName })) {
-              combinedMap.set(sel.endLessonId, {
-                id: sel.endLessonId,
-                name: candidateName,
-                sort_order: 999,
-                isStartUnit: false
-              });
-            }
-          }
-        }
-      });
-    }
-
-    return Array.from(combinedMap.values())
-      .filter(item => !isUnitTestItem(item))
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   };
 
   const findLessonById = (id: string, subject?: string) => {
-    if (!id) return null;
     const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
-    const allEnsuredMasters = ensureMathEnglishUnitTests(rawMasters);
-    const m = allEnsuredMasters.find(item => 
-      item.id === id || 
-      String(item.sort_order) === String(id) || 
-      item.lesson_name === id || 
-      `${item.unit_name} - ${item.lesson_name}` === id ||
-      `${item.unit_name} - ${item.lesson_name.replace(/^[^-]+-\s*/, '')}` === id
-    );
-    if (m) {
-      return {
-        id: m.id,
-        name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
-        sort_order: m.sort_order ?? 0,
-        subject: m.subject
-      };
-    }
-    const u = allCurriculumUnits.find(item => item.id === id || item.name === id);
-    if (u) {
-      return {
-        id: u.id,
-        name: u.name,
-        sort_order: u.sequence_order ?? 0,
-        subject: u.subject
-      };
-    }
-    return null;
+    return lookupLessonById(id, rawMasters, allCurriculumUnits, subject);
   };
 
   // コマごとの教科変更時
@@ -3348,7 +4886,7 @@ export default function TeacherDashboard({
         const startUnitId = getStudentStartUnitIdForSubject(selectedStudent, sub);
         const schoolUnits = allCurriculumUnits.filter(u => 
           (u.school_id === selectedStudent.school_id || !u.school_id) && 
-          (u.subject === sub || (sub === '数学' && u.subject === '算数') || (sub === '算数' && u.subject === '数学'))
+          isMatchingSubjectGroup(u.subject, sub)
         ).sort((a, b) => a.sequence_order - b.sequence_order);
 
         if (startUnitId && schoolUnits.some(u => u.id === startUnitId)) {
@@ -3450,7 +4988,7 @@ export default function TeacherDashboard({
         tasks: studentTasks,
         branchRules: branchRules
       });
-      const pace = paceInfo?.estimatedLessonsPerSlot || branchRules?.lessons_per_slot || 2;
+      const pace = resolveLessonsPace(paceInfo, branchRules);
       const step = Math.max(0, pace - 1);
       const targetIdx = Math.min(startIdx + step, lessonsForSubj.length - 1);
       endId = lessonsForSubj[targetIdx]?.id || startId;
@@ -3588,7 +5126,7 @@ export default function TeacherDashboard({
 
   // テストの動的追加・更新・削除
   const handleAddTest = () => {
-    const defaultSub = selectedSubject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
+    const defaultSub = resolveDefaultSubject(selectedStudent?.grade, selectedSubject);
     updateTodayTestsState([...todayTests, {
       id: `temp-${Date.now()}-${Math.random()}`,
       subject: defaultSub,
@@ -3610,81 +5148,16 @@ export default function TeacherDashboard({
   };
 
   // 通塾曜日に基づく次回通塾予定日の取得ヘルパー
-  const getNextAttendanceDateForStudent = (baseDateStr?: string, st?: Student | null): string => {
-    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
-    if (!st) return validBase;
-    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
-    const futureDates = generateAttendanceDates(validBase, days, 5).filter(d => d > validBase);
-    if (futureDates.length > 0) return futureDates[0];
-    const d = new Date(validBase);
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().split('T')[0];
-  };
+  const getNextAttendanceDateForStudent = (baseDateStr?: string, st?: Student | null): string =>
+    resolveNextAttendanceDateForStudent(baseDateStr, st);
 
   // コマ割り内容に基づき、「本日のテスト」および「宿題（算数・英語2回目演習）」を自動連動・セット
-  const getAutoDrillHomeworkText = (sub: string, periodsObj: { [key: number]: any }): string => {
-    if (!periodsObj) return '';
-    const isMath = sub === '算数' || sub === '数学';
-    const normSub = isMath ? (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数') : '英語';
-
-    const rangeTexts: string[] = [];
-    Object.values(periodsObj).forEach((sel: any) => {
-      if (!sel || (sel.subject !== sub && sel.subject !== normSub)) return;
-      const isReviewOrCheck = (sel.startLessonName && (sel.startLessonName.includes('まとめテスト') || sel.startLessonName.toLowerCase().includes('check test'))) ||
-                              (sel.endLessonName && (sel.endLessonName.includes('まとめテスト') || sel.endLessonName.toLowerCase().includes('check test'))) ||
-                              (sel.lessonRange && (sel.lessonRange.includes('まとめテスト') || sel.lessonRange.toLowerCase().includes('check test')));
-      const isTest = !isReviewOrCheck && (
-                     (sel.startLessonName && (sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト'))) ||
-                     (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト'))) ||
-                     (sel.lessonRange && (sel.lessonRange.includes('単元確認テスト') || sel.lessonRange.includes('単元テスト'))));
-      if (isTest) return;
-
-      if (sel.lessonRange) {
-        rangeTexts.push(sel.lessonRange);
-      } else if (sel.startLessonName) {
-        rangeTexts.push(formatLessonRange(sel.startLessonName, sel.endLessonName));
-      }
-    });
-
-    if (rangeTexts.length === 0) return '';
-    const startStr = rangeTexts[0].split(/〜|~|～/)[0]?.trim() || rangeTexts[0];
-    const endStr = rangeTexts[rangeTexts.length - 1].split(/〜|~|～/)[1]?.trim() || rangeTexts[rangeTexts.length - 1];
-    const combinedRange = startStr === endStr ? startStr : `${startStr} 〜 ${endStr}`;
-    return `${normSub}: ${combinedRange}（2回目演習）`;
-  };
+  const getAutoDrillHomeworkText = (sub: string, periodsObj: { [key: number]: any }): string =>
+    resolveAutoDrillHomeworkText(sub, periodsObj, selectedStudent?.grade);
 
   // 完了済み単元テストの厳格な除外判定（誤除外防止）
-  const isUnitTestCompleted = (st: Student, testTitleOrName: string, subject?: string): boolean => {
-    if (!st || !testTitleOrName) return false;
-    const completed = st.completed_lesson_ids || [];
-    const cleanTestTitle = testTitleOrName.trim();
-
-    // 1. completed_lesson_ids に ID や正確なテスト名が完全一致で含まれているか
-    if (completed.some(idOrName => idOrName && (idOrName === cleanTestTitle || idOrName.trim() === cleanTestTitle))) {
-      return true;
-    }
-
-    // 2. カリキュラムマスタから当該単元確認テストの ID を特定し、その ID が completed_lesson_ids に存在するか
-    const masters = db.getCurriculumMasters();
-    const matchingMaster = masters.find(m => 
-      m.item_type === 'unit_test' && 
-      (!subject || m.subject === subject) &&
-      (m.lesson_name === cleanTestTitle || cleanTestTitle.endsWith(m.lesson_name) || cleanTestTitle === `${m.unit_name} - ${m.lesson_name}`)
-    );
-    if (matchingMaster && completed.includes(matchingMaster.id)) {
-      return true;
-    }
-
-    // 3. DBの mini_test_results で過去に本生徒が合格(passed === true または score >= 80) している記録が存在するか
-    const miniResults = db.getMiniTestResults().filter(r => r.student_id === st.id);
-    const passedMini = miniResults.some(r => 
-      (r.passed === true || (r.score !== null && r.score >= 80)) &&
-      (r.test_content === cleanTestTitle || r.test_content.trim() === cleanTestTitle)
-    );
-    if (passedMini) return true;
-
-    return false;
-  };
+  const isUnitTestCompleted = (st: Student, testTitleOrName: string, subject?: string): boolean =>
+    isUnitTestCompletedForStudent(st, testTitleOrName, subject);
 
   const syncAutoHomeworksAndTests = (
     currentPeriods: { [key: number]: any },
@@ -3697,84 +5170,12 @@ export default function TeacherDashboard({
 
     // 1. 本日のテストの連動 (手動追加のカスタムテストのみ保持し、コマ割りから未完了テストを全教科スキャン抽出)
     const updatedTests: typeof todayTests = existingTests.filter(t => t.testType === 'custom' && t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --');
-
     const masters = db.getCurriculumMasters();
-
-    Object.values(currentPeriods).forEach((sel: any) => {
-      if (!sel || !sel.subject) return;
-
-      // 該当コマの start/end レッスンが単元確認テストか判定
-      const startMaster = masters.find(m => m.id === sel.startLessonId || m.lesson_name === sel.startLessonName);
-      const endMaster = masters.find(m => m.id === sel.endLessonId || m.lesson_name === sel.endLessonName);
-
-      const isTestNode = (startMaster && startMaster.item_type === 'unit_test') ||
-                         (endMaster && endMaster.item_type === 'unit_test') ||
-                         (sel.startLessonName && (sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト') || sel.startLessonName.includes('確認テスト'))) ||
-                         (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト'))) ||
-                         (sel.lessonRange && (sel.lessonRange.includes('単元確認テスト') || sel.lessonRange.includes('単元テスト')));
-
-      if (isTestNode) {
-        const testContent = sel.lessonRange || sel.startLessonName || `${sel.subject} 単元確認テスト`;
-        const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
-        
-        let fullContent = testContent;
-        if (startMaster && startMaster.unit_name) {
-          fullContent = `${startMaster.unit_name} - ${startMaster.lesson_name}`;
-        } else if (endMaster && endMaster.unit_name) {
-          fullContent = `${endMaster.unit_name} - ${endMaster.lesson_name}`;
-        } else if (sel.customTheme) {
-          fullContent = `${sel.customTheme} - ${cleanContent}`;
-        }
-        
-        // 完了済み（合格済み）でないテストのみ「本日のテスト」にセット
-        if (!isUnitTestCompleted(st, fullContent, sel.subject) && !isUnitTestCompleted(st, cleanContent, sel.subject)) {
-          const exists = updatedTests.some(t => t.subject === sel.subject && (t.content === fullContent || t.content === testContent || t.content === cleanContent));
-          if (!exists) {
-            updatedTests.push({
-              id: `auto-test-${sel.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-              subject: sel.subject,
-              testType: 'unit_test',
-              unitName: startMaster?.unit_name || sel.customTheme || sel.startLessonName?.split(' ')[0] || '',
-              content: fullContent,
-              passingLine: '80%以上',
-              targetScope: 'individual'
-            });
-          }
-        }
-      }
-    });
+    const autoTests = resolveAutoTestsFromPeriods(currentPeriods, st, masters, updatedTests, (s, title, subj) => isUnitTestCompleted(s as Student, title, subj));
+    updatedTests.push(...autoTests as any);
 
     // 2. 算数・英語の2回目演習宿題の自動連動
-    const updatedHomeworks = [...existingHomeworks.filter(h => h.content && h.content.trim() !== '')];
-    const targetSubjects = ['算数', '数学', '英語'];
-
-    targetSubjects.forEach(sub => {
-      const isMath = sub === '算数' || sub === '数学';
-      const normalizedSub = isMath ? (st.grade?.startsWith('中') ? '数学' : '算数') : '英語';
-
-      const autoText = getAutoDrillHomeworkText(normalizedSub, currentPeriods);
-      if (autoText) {
-        const existingIdx = updatedHomeworks.findIndex(h => h.type === 'drill_2nd' && (h.subject === normalizedSub || h.content.startsWith(`${normalizedSub}:`)));
-        if (existingIdx !== -1) {
-          updatedHomeworks[existingIdx] = {
-            ...updatedHomeworks[existingIdx],
-            subject: normalizedSub,
-            type: 'drill_2nd',
-            content: autoText,
-            deadline: updatedHomeworks[existingIdx].deadline || nextAttDate
-          };
-        } else {
-          updatedHomeworks.push({
-            id: `auto-hw-${normalizedSub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-            subject: normalizedSub,
-            type: 'drill_2nd',
-            content: autoText,
-            deadline: nextAttDate,
-            targetScope: 'individual'
-          });
-        }
-      }
-    });
+    const updatedHomeworks = resolveAutoDrillHomeworks(currentPeriods, st.grade, nextAttDate, existingHomeworks);
 
     return { updatedTests, updatedHomeworks };
   };
@@ -3782,7 +5183,7 @@ export default function TeacherDashboard({
   // 宿題の動的追加・更新・削除
   const handleAddHomework = () => {
     const nextDate = getNextAttendanceDateForStudent(scheduleDate, selectedStudent);
-    const defaultSub = selectedStudent?.grade?.startsWith('中') ? '数学' : '算数';
+    const defaultSub = resolveDefaultSubject(selectedStudent?.grade);
     setTodayHomeworks([
       ...todayHomeworks,
       {
@@ -3801,7 +5202,7 @@ export default function TeacherDashboard({
       if (h.id !== id) return h;
       const updated = { ...h, [field]: val };
       if (field === 'type' && val === 'drill_2nd') {
-        const autoText = getAutoDrillHomeworkText(updated.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数'), periodSelections);
+        const autoText = getAutoDrillHomeworkText(resolveDefaultSubject(selectedStudent?.grade, updated.subject), periodSelections);
         if (autoText) {
           updated.content = autoText;
         }
@@ -3831,7 +5232,7 @@ export default function TeacherDashboard({
       const branchRules = db.getBranchAIRules(targetBranchId);
 
       // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
-      const loadedPeriodCount = (freshSt as any).default_slots || freshSt.period_count || periodCount || 3;
+      const loadedPeriodCount = resolveSavedStudentPeriodCount((freshSt as any).default_slots, freshSt.period_count, periodCount, 3);
       const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
       const optimizedPeriods = generateSlotsForSelectedSubjects({
         student: freshSt,
@@ -3851,7 +5252,7 @@ export default function TeacherDashboard({
         const p = parseInt(pKey);
         const sel = optimizedPeriods[p];
         if (sel && sel.startLessonName) {
-          const isUnitTest = sel.startLessonName.includes('単元確認テスト') || sel.startLessonName.includes('単元テスト');
+          const isUnitTest = isLessonUnitTest(sel.startLessonName);
           if (isUnitTest) {
             sel.endLessonId = sel.startLessonId;
             sel.endLessonName = sel.startLessonName;
@@ -3865,23 +5266,17 @@ export default function TeacherDashboard({
       const allMasters = ensureMathEnglishUnitTests(rawMasters);
       Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
         if (!sel || !sel.subject || !sel.startLessonName) return;
-        const isReviewOrCheck = sel.startLessonName.includes('まとめテスト') || 
-                                sel.startLessonName.toLowerCase().includes('check test') || 
-                                (sel.endLessonName && (sel.endLessonName.includes('まとめテスト') || sel.endLessonName.toLowerCase().includes('check test')));
-        const isTest = !isReviewOrCheck && (
-                       sel.startLessonName.includes('単元確認テスト') || 
-                       sel.startLessonName.includes('単元テスト') || 
-                       sel.startLessonName.includes('確認テスト') ||
-                       (sel.endLessonName && (sel.endLessonName.includes('単元確認テスト') || sel.endLessonName.includes('単元テスト') || sel.endLessonName.includes('確認テスト'))));
+        const isReviewOrCheck = isReviewOrCheckTest(sel.startLessonName) || isReviewOrCheckTest(sel.endLessonName);
+        const isTest = !isReviewOrCheck && (isLessonUnitTest(sel.startLessonName) || isLessonUnitTest(sel.endLessonName));
         if (isTest) {
-          const testContent = (sel.endLessonName && (sel.endLessonName.includes('テスト') || sel.endLessonName.includes('確認')) ? sel.endLessonName : sel.startLessonName) || sel.lessonRange;
+          const testContent = resolveLessonTestContent(sel.startLessonName, sel.endLessonName, sel.lessonRange);
           const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
           
           // 完了済み(合格済み)テストの除外判定
           if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
             const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
             if (!exists) {
-              let unitName = sel.startLessonName ? (sel.startLessonName.includes(' - ') ? sel.startLessonName.split(' - ')[0].trim() : sel.startLessonName.split(' ')[0]) : '単元テスト';
+              let unitName = extractUnitTestUnitName(sel.startLessonName);
               const matchedMaster = allMasters.find(m =>
                 m.id === sel.startLessonId ||
                 m.id === sel.unitId ||
@@ -3982,13 +5377,13 @@ export default function TeacherDashboard({
       }
 
       // 4. 自動宿題 (2回目演習) の生成
-      const autoHwsText = getAutoDrillHomeworkText(freshSt.grade?.startsWith('中') ? '数学' : '算数', optimizedPeriods);
+      const autoHwsText = getAutoDrillHomeworkText(resolveDefaultSubject(freshSt.grade), optimizedPeriods);
       const autoHomeworks: typeof todayHomeworks = [];
       if (autoHwsText) {
         const hwDate = getNextAttendanceDateForStudent(scheduleDate, freshSt);
         autoHomeworks.push({
           id: `hw-auto-${freshSt.id}-${scheduleDate}-1`,
-          subject: freshSt.grade?.startsWith('中') ? '数学' : '算数',
+          subject: resolveDefaultSubject(freshSt.grade),
           type: 'drill_2nd',
           content: autoHwsText,
           deadline: hwDate,
@@ -4066,7 +5461,7 @@ export default function TeacherDashboard({
       await loadData();
     } catch (err: any) {
       console.error('Failed to auto reschedule:', err);
-      alert(`自動リスケジュール処理中にエラーが発生しました: ${err.message || err}`);
+      alert(formatRescheduleErrorMessage(err));
     }
   };
 
@@ -4348,15 +5743,8 @@ export default function TeacherDashboard({
   // --- 年間計画（マイルストーン）カスタマイズ & テンプレート用ヘルパー関数 ---
   const getFilteredMilestones = () => {
     const currentGrade = selectedStudent!.grade;
-    return milestonePlans
-      .filter(p => p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard')
-      .sort((a, b) => {
-        const monthOrder = (m: number) => m >= 3 ? m : m + 12;
-        const am = monthOrder(a.month);
-        const bm = monthOrder(b.month);
-        if (am !== bm) return am - bm;
-        return a.week_number - b.week_number;
-      });
+    const matching = milestonePlans.filter(p => p.grade === currentGrade && p.subject === selectedSubject && p.level === selectedLevel && p.course === 'standard');
+    return sortMilestonePlans(matching);
   };
 
   const getDisplayMilestones = () => {
@@ -4453,7 +5841,7 @@ export default function TeacherDashboard({
       // 将来タスクの自動再割り当て（スキップされた授業を飛ばして再編成）
       const allTasks = db.getLearningTasks().filter(t => t.student_id === selectedStudent.id);
       const todayStr = scheduleDate;
-      const futureUncompletedTasks = allTasks.filter(t => (t.scheduled_date || (t as any).date || '') >= todayStr && t.status !== 'completed');
+      const futureUncompletedTasks = filterFutureUncompletedTasks(allTasks, todayStr);
 
       if (futureUncompletedTasks.length > 0) {
         const allMasters = db.getCurriculumMasters();
@@ -4461,7 +5849,7 @@ export default function TeacherDashboard({
         const latestMiniResults = db.getMiniTestResults();
 
         futureUncompletedTasks.forEach(task => {
-          const sub = task.subject || (selectedStudent.grade?.startsWith('中') ? '数学' : '算数');
+          const sub = resolveDefaultSubject(selectedStudent.grade, task.subject);
           const rangeInfo = calculateLessonRangeForSlot({
             subject: sub,
             student: updatedStudent,
@@ -4510,8 +5898,8 @@ export default function TeacherDashboard({
   const [unitTestFormPassingLine, setUnitTestFormPassingLine] = useState<string>('80%以上');
 
   const handleOpenAddUnitTestModal = (unitName?: string, grade?: string, subject?: string) => {
-    const stGrade = grade || selectedStudent?.grade || '小5';
-    const stSub = subject || selectedSubject || (stGrade.startsWith('中') ? '数学' : '算数');
+    const stGrade = resolveEffectiveGrade(grade, selectedStudent?.grade, '小5');
+    const stSub = subject || resolveDefaultSubject(stGrade, selectedSubject);
     setUnitTestFormGrade(stGrade);
     setUnitTestFormSubject(stSub);
     setUnitTestFormUnitName(unitName || '');
@@ -4537,49 +5925,16 @@ export default function TeacherDashboard({
       return;
     }
 
-    const targetSub = unitTestFormSubject;
-    const sameSubMasters = [...curriculumMastersList]
-      .filter(m => m.subject === targetSub || (targetSub === '算数' && m.subject === '数学') || (targetSub === '数学' && m.subject === '算数'))
-      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const { mastersToSave } = calculateUnitTestMasterPlacement({
+      curriculumMasters: curriculumMastersList,
+      targetSubject: unitTestFormSubject,
+      targetGrade: unitTestFormGrade,
+      unitName: unitTestFormUnitName,
+      testName: unitTestFormTestName,
+      passingLine: unitTestFormPassingLine,
+      editingUnitTestId
+    });
 
-    let targetSortOrder = sameSubMasters.length > 0 ? (sameSubMasters[sameSubMasters.length - 1].sort_order || 0) + 1 : 1;
-
-    // もし指定された対象単元が存在する場合、その単元内の最後のアイテムの直後に割り込み配置
-    const selectedUnitName = unitTestFormUnitName.trim();
-    if (selectedUnitName) {
-      const sameUnitItems = sameSubMasters.filter(m => m.unit_name === selectedUnitName);
-      if (sameUnitItems.length > 0) {
-        const lastUnitItem = sameUnitItems[sameUnitItems.length - 1];
-        const lastSort = lastUnitItem.sort_order || 0;
-        targetSortOrder = lastSort + 1;
-
-        // それ以降のアイテムの sort_order を +1
-        sameSubMasters.forEach(m => {
-          if ((m.sort_order || 0) >= targetSortOrder && m.id !== editingUnitTestId) {
-            m.sort_order = (m.sort_order || 0) + 1;
-          }
-        });
-      }
-    }
-
-    const rawTestName = unitTestFormTestName.trim();
-    const formattedTestName = rawTestName.includes('テスト') || rawTestName.includes('確認')
-      ? rawTestName
-      : `${rawTestName} 単元確認テスト`;
-
-    const masterPayload: CurriculumMaster = {
-      id: editingUnitTestId || `cm-ut-${Date.now()}`,
-      grade: unitTestFormGrade,
-      subject: unitTestFormSubject,
-      unit_name: selectedUnitName || '単元未設定',
-      lesson_name: formattedTestName,
-      sort_order: editingUnitTestId ? (curriculumMastersList.find(m => m.id === editingUnitTestId)?.sort_order || targetSortOrder) : targetSortOrder,
-      item_type: 'unit_test',
-      passing_line: unitTestFormPassingLine || '80%以上',
-      created_at: new Date().toISOString()
-    };
-
-    const mastersToSave = editingUnitTestId ? [masterPayload] : [masterPayload, ...sameSubMasters.filter(m => m.id !== masterPayload.id)];
     await db.saveCurriculumMasters(mastersToSave);
     
     const updated = db.getCurriculumMasters();
@@ -4670,10 +6025,7 @@ export default function TeacherDashboard({
     newChapters[idx] = targetChapter;
     newChapters[targetIdx] = chapterName;
 
-    const getChapterIndex = (ch?: string) => {
-      const index = ch ? newChapters.indexOf(ch) : -1;
-      return index === -1 ? 999 : index;
-    };
+    const getChapterIndex = (ch?: string) => resolveChapterSortIndex(ch, newChapters);
 
     const sortedContent = [...filtered].sort((a, b) => {
       const idxA = getChapterIndex(a.chapter);
@@ -5558,7 +6910,7 @@ export default function TeacherDashboard({
                   <div>③ 適用フィルター: <span>校種={schoolTypeFilter}, 校舎={selectedBranchId === 'all' ? '全校舎' : selectedBranchId}</span></div>
                 </div>
                 <div data-testid="debug-raw-students-summary" style={{ fontSize: '0.75rem', color: '#475569', background: 'rgba(255,255,255,0.7)', padding: '6px 8px', borderRadius: '4px', wordBreak: 'break-all', marginBottom: supabaseDebugInfo.syncLog ? '6px' : '0' }}>
-                  <strong>取得生徒一覧:</strong> {supabaseDebugInfo.rawStudentsSummary || students.map(s => `[${(s.name || '').replace(/\s+/g, '')}](${s.grade || '学年未設定'}/${s.school_name || s.classroom || '未設定'})`).join(', ')}
+                  <strong>取得生徒一覧:</strong> {supabaseDebugInfo.rawStudentsSummary || formatStudentDebugSummary(students)}
                 </div>
                 {supabaseDebugInfo.syncLog && (
                   <div data-testid="debug-sync-log" style={{ fontSize: '0.72rem', color: '#0369a1', background: '#e0f2fe', padding: '4px 8px', borderRadius: '4px', wordBreak: 'break-all' }}>
@@ -5830,68 +7182,29 @@ export default function TeacherDashboard({
                   {/* Timetable planner */}
                   <div className={styles.schedulerGrid}>
                     <div data-testid="timetable-planner-container">
-                      <HorizontalDatePicker 
-                        selectedDate={scheduleDate} 
-                        onChangeDate={setScheduleDate} 
-                        selectedDays={selectedStudent.selected_days || ['tuesday', 'friday']}
-                      />
-                      <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>対象日付: </label>
-                          <input 
-                            type="date" 
-                            value={scheduleDate} 
-                            onChange={e => setScheduleDate(e.target.value)}
-                            className={styles.input}
-                            style={{ width: 'auto', display: 'inline-block' }}
-                          />
-                          {scheduleDate && (() => {
-                            const d = new Date(scheduleDate);
-                            if (isNaN(d.getTime())) return null;
-                            const month = d.getMonth() + 1;
-                            const date = d.getDate();
-                            const days = ['日', '月', '火', '水', '木', '金', '土'];
-                            const dayOfWeek = days[d.getDay()];
-                            const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
-                            const weekNum = Math.ceil((date + firstDay.getDay()) / 7);
-                            const dayOfWeekKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
-                            const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayOfWeekKey);
-
-                            return (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                <span 
-                                  data-testid="japanese-date-badge"
-                                  style={{ 
-                                    padding: '4px 10px', 
-                                    background: isAttendance ? '#eff6ff' : '#f1f5f9', 
-                                    color: isAttendance ? '#1e40af' : '#475569', 
-                                    borderRadius: '6px', 
-                                    fontWeight: 600, 
-                                    fontSize: '0.82rem',
-                                    border: isAttendance ? '1px solid #bfdbfe' : '1px solid #cbd5e1'
-                                  }}
-                                >
-                                  📅 {d.getFullYear()}年{month}月{date}日 ({dayOfWeek}曜日) / {month}月第{weekNum}週
-                                </span>
-                                <span
-                                  style={{
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 700,
-                                    backgroundColor: isAttendance ? '#dbeafe' : '#f8fafc',
-                                    color: isAttendance ? '#1d4ed8' : '#64748b',
-                                    border: isAttendance ? '1px solid #93c5fd' : '1px solid #e2e8f0'
-                                  }}
-                                >
-                                  {isAttendance ? `📌 通塾設定日 (標準${selectedStudent.default_slots || selectedStudent.period_count || 2}コマ)` : '☕ 休塾設定日（自習）'}
-                                </span>
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                        {/* クイック保存ボタン（上部配置） */}
+                      {/* 上部ヘッダー: 日付見出し (h3) & 右上コンパクト「コマ割りを反映」ボタン */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        {scheduleDate && (() => {
+                          const d = new Date(scheduleDate);
+                          if (isNaN(d.getTime())) return null;
+                          const month = d.getMonth() + 1;
+                          const date = d.getDate();
+                          const days = ['日', '月', '火', '水', '木', '金', '土'];
+                          const dayOfWeek = days[d.getDay()];
+                          return (
+                            <h3 
+                              data-testid="japanese-date-badge" 
+                              style={{ 
+                                margin: 0, 
+                                fontSize: '1.05rem', 
+                                fontWeight: 700, 
+                                color: '#1e293b' 
+                              }}
+                            >
+                              {month}月{date}日({dayOfWeek}) のコマ割り
+                            </h3>
+                          );
+                        })()}
                         <button
                           type="button"
                           onClick={handleSaveTimetable}
@@ -5907,15 +7220,22 @@ export default function TeacherDashboard({
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px',
+                            borderRadius: '8px',
                             opacity: isSavingTimetable ? 0.7 : 1,
                             cursor: isSavingTimetable ? 'not-allowed' : 'pointer',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                           }}
                           title="現在のコマ割りを保存"
                         >
                           {isSavingTimetable ? '反映中...' : '💾 コマ割りを反映'}
                         </button>
                       </div>
+
+                      <HorizontalDatePicker 
+                        selectedDate={scheduleDate} 
+                        onChangeDate={setScheduleDate} 
+                        selectedDays={selectedStudent.selected_days || ['tuesday', 'friday']}
+                      />
                       
                       {/* 教科別スタートライン（基準単元）設定状況 - 非表示 */}
                       <button
@@ -5925,20 +7245,50 @@ export default function TeacherDashboard({
                         style={{ display: 'none' }}
                       />
 
-                      <div className={styles.timetableSetup}>
+                      <div className={styles.timetableSetup} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px' }}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
                           const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
                           const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児';
 
                           return (
-                            <div key={p} className={styles.cellRow} style={{ alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
-                              <span className={styles.cellNum} style={{ marginTop: '8px' }}>{p}</span>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                            <div 
+                              key={p} 
+                              style={{ 
+                                backgroundColor: 'rgba(248, 250, 252, 0.7)', 
+                                borderRadius: '12px', 
+                                padding: '12px', 
+                                marginBottom: '8px', 
+                                border: '1px solid #f1f5f9',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span 
+                                  className={styles.cellNum} 
+                                  style={{ 
+                                    width: '26px', 
+                                    height: '26px', 
+                                    borderRadius: '50%', 
+                                    background: '#e2e8f0', 
+                                    color: '#334155', 
+                                    fontWeight: 700, 
+                                    fontSize: '0.8rem', 
+                                    display: 'inline-flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    flexShrink: 0 
+                                  }}
+                                >
+                                  {p}
+                                </span>
                                 <select
                                   data-testid={`period-subject-select-${p}`}
                                   value={currentConfig.subject || ''}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
+                                  style={{ fontSize: '0.85rem', fontWeight: 600, padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1 }}
                                 >
                                   <option value="">-- コマ割りなし --</option>
                                   {(() => {
@@ -5987,160 +7337,141 @@ export default function TeacherDashboard({
                                   <option value="その他">その他</option>
                                   <option value="自由記述">自由記述</option>
                                 </select>
+                              </div>
 
-                                {currentConfig.subject && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    {/* カリキュラム単元・授業進捗範囲設定 */}
-                                    {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
-                                      const lessons = getLessonsForSubject(currentConfig.subject);
-                                              const selectableLessons = lessons.filter(l => {
-                                                const name = l.name || '';
-                                                const isReview = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
-                                                return isReview || (!l.name?.includes('単元確認テスト') && !l.name?.includes('単元テスト') && (l as any).item_type !== 'unit_test');
-                                              });
-                                              const selectedStartId = currentConfig.startLessonId || currentConfig.unitId || '';
-                                              const selectedEndId = currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || '';
-                                              const hasStartInList = selectableLessons.some(l => l.id === selectedStartId);
-                                              const hasEndInList = selectableLessons.some(l => l.id === selectedEndId);
+                              {currentConfig.subject && (
+                                <div style={{ paddingLeft: '36px' }}>
+                                  {/* カリキュラム単元・授業進捗範囲設定 */}
+                                  {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
+                                    const lessons = getLessonsForSubject(currentConfig.subject);
+                                    const selectableLessons = lessons.filter(l => {
+                                      const name = l.name || '';
+                                      const isReview = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
+                                      return isReview || (!l.name?.includes('単元確認テスト') && !l.name?.includes('単元テスト') && (l as any).item_type !== 'unit_test');
+                                    });
+                                    const selectedStartId = currentConfig.startLessonId || currentConfig.unitId || '';
+                                    const selectedEndId = currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || '';
+                                    const hasStartInList = selectableLessons.some(l => l.id === selectedStartId);
+                                    const hasEndInList = selectableLessons.some(l => l.id === selectedEndId);
 
-                                      return (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'rgba(248, 250, 252, 0.85)', padding: '14px 16px', borderRadius: '12px', border: 'none' }}>
-                                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                                  <div>
-                                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                                                      開始授業 (From):
-                                                    </label>
-                                                    <select
-                                                      data-testid={`period-unit-select-${p}`}
-                                                      value={selectedStartId}
-                                                      onChange={e => handleStartLessonChange(p, e.target.value)}
-                                                      className={styles.select}
-                                                      style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
-                                                    >
-                                                      <option value="">-- 開始授業を選択 --</option>
-                                                      {selectedStartId && !hasStartInList && (
-                                                        <option key={selectedStartId} value={selectedStartId}>
-                                                          {currentConfig.startLessonName || '単元確認テスト'}
-                                                        </option>
-                                                      )}
-                                                      {selectableLessons.map(l => (
-                                                        <option key={l.id} value={l.id}>
-                                                          {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
-                                                        </option>
-                                                      ))}
-                                                    </select>
-                                                  </div>
-                                                  <div>
-                                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                                                      終了目標授業 (To):
-                                                    </label>
-                                                    <select
-                                                      data-testid={`period-end-lesson-select-${p}`}
-                                                      value={selectedEndId}
-                                                      onChange={e => handleEndLessonChange(p, e.target.value)}
-                                                      className={styles.select}
-                                                      style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
-                                                    >
-                                                      <option value="">-- 終了目標授業を選択 --</option>
-                                                      {selectedEndId && !hasEndInList && (
-                                                        <option key={selectedEndId} value={selectedEndId}>
-                                                          {currentConfig.endLessonName || currentConfig.startLessonName || '単元確認テスト'}
-                                                        </option>
-                                                      )}
-                                                      {selectableLessons.map(l => (
-                                                        <option key={l.id} value={l.id}>
-                                                          {l.name}
-                                                        </option>
-                                                      ))}
-                                                    </select>
-                                                  </div>
-                                                </div>
-                                          {/* 授業範囲プレビュー (薄いテキストラベル) */}
-                                          {(currentConfig.lessonRange || currentConfig.startLessonName) && (
-                                            <div 
-                                              data-testid={`period-lesson-range-badge-${p}`}
-                                              style={{ 
-                                                fontSize: '0.75rem', 
-                                                padding: '4px 0 0 0', 
-                                                color: '#64748b', 
-                                                fontWeight: 500,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '4px'
-                                              }}
-                                            >
-                                              📖 授業進捗範囲: {currentConfig.lessonRange || formatLessonRange(currentConfig.startLessonName, currentConfig.endLessonName)}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
-
-                                    {/* 「自由記述」が選択された場合：登録済みの自由記述プルダウン ＆ 新規直打ち */}
-                                    {currentConfig.subject === '自由記述' && (
-                                      <>
-                                        <select
-                                          value={currentConfig.customTheme}
-                                          onChange={e => handleThemeChange(p, e.target.value)}
-                                          className={styles.select}
-                                        >
-                                          <option value="">-- 登録済みの自由記述から選択 --</option>
-                                          {customClassesList.map(cc => (
-                                            <option key={cc.id} value={cc.name}>{cc.name}</option>
-                                          ))}
-                                        </select>
-                                        <input 
-                                          type="text"
-                                          placeholder="または新しい授業名を直接入力"
-                                          value={currentConfig.customTheme}
-                                          onChange={e => handleThemeChange(p, e.target.value)}
-                                          className={styles.input}
-                                          style={{ fontSize: '0.8rem', padding: '6px' }}
-                                        />
-                                      </>
-                                    )}
-
-                                    {/* 「テスト」が選択された場合：本日のテスト（自由記述）との連動 */}
-                                    {currentConfig.subject === 'テスト' && (
-                                      <>
-                                        {todayTests.length >= 2 ? (
+                                    return (
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+                                        <div>
+                                          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                            開始授業 (From):
+                                          </label>
                                           <select
-                                            value={currentConfig.customTheme}
-                                            onChange={e => handleThemeChange(p, e.target.value)}
+                                            data-testid={`period-unit-select-${p}`}
+                                            value={selectedStartId}
+                                            onChange={e => handleStartLessonChange(p, e.target.value)}
                                             className={styles.select}
+                                            style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%' }}
                                           >
-                                            <option value="">-- テストを選択 --</option>
-                                            {todayTests.map(t => (
-                                              <option key={t.id} value={t.content}>{t.content}</option>
+                                            <option value="">-- 開始授業を選択 --</option>
+                                            {selectedStartId && !hasStartInList && (
+                                              <option key={selectedStartId} value={selectedStartId}>
+                                                {currentConfig.startLessonName || '単元確認テスト'}
+                                              </option>
+                                            )}
+                                            {selectableLessons.map(l => (
+                                              <option key={l.id} value={l.id}>
+                                                {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
+                                              </option>
                                             ))}
                                           </select>
-                                        ) : (
-                                          <input
-                                            type="text"
-                                            placeholder="テストのテーマ（例: 一次方程式小テスト）"
-                                            value={currentConfig.customTheme}
-                                            onChange={e => handleThemeChange(p, e.target.value)}
-                                            className={styles.input}
-                                            style={{ fontSize: '0.8rem', padding: '6px' }}
-                                          />
-                                        )}
-                                      </>
-                                    )}
+                                        </div>
+                                        <div>
+                                          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                            終了目標授業 (To):
+                                          </label>
+                                          <select
+                                            data-testid={`period-end-lesson-select-${p}`}
+                                            value={selectedEndId}
+                                            onChange={e => handleEndLessonChange(p, e.target.value)}
+                                            className={styles.select}
+                                            style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%' }}
+                                          >
+                                            <option value="">-- 終了目標授業を選択 --</option>
+                                            {selectedEndId && !hasEndInList && (
+                                              <option key={selectedEndId} value={selectedEndId}>
+                                                {formatTaskConfigDisplayName(currentConfig.startLessonName, currentConfig.endLessonName)}
+                                              </option>
+                                            )}
+                                            {selectableLessons.map(l => (
+                                              <option key={l.id} value={l.id}>
+                                                {l.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
 
-                                    {/* 「その他」が選択された場合 */}
-                                    {currentConfig.subject === 'その他' && (
-                                      <input
+                                  {/* 「自由記述」が選択された場合：登録済みの自由記述プルダウン ＆ 新規直打ち */}
+                                  {currentConfig.subject === '自由記述' && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                      <select
+                                        value={currentConfig.customTheme}
+                                        onChange={e => handleThemeChange(p, e.target.value)}
+                                        className={styles.select}
+                                      >
+                                        <option value="">-- 登録済みの自由記述から選択 --</option>
+                                        {customClassesList.map(cc => (
+                                          <option key={cc.id} value={cc.name}>{cc.name}</option>
+                                        ))}
+                                      </select>
+                                      <input 
                                         type="text"
-                                        placeholder="テーマを入力（例: 面談、宿題指導）"
+                                        placeholder="または新しい授業名を直接入力"
                                         value={currentConfig.customTheme}
                                         onChange={e => handleThemeChange(p, e.target.value)}
                                         className={styles.input}
                                         style={{ fontSize: '0.8rem', padding: '6px' }}
                                       />
-                                    )}
-                                  </div>
-                                )}
-                              </div>
+                                    </div>
+                                  )}
+
+                                  {/* 「テスト」が選択された場合：本日のテスト（自由記述）との連動 */}
+                                  {currentConfig.subject === 'テスト' && (
+                                    <div>
+                                      {todayTests.length >= 2 ? (
+                                        <select
+                                          value={currentConfig.customTheme}
+                                          onChange={e => handleThemeChange(p, e.target.value)}
+                                          className={styles.select}
+                                        >
+                                          <option value="">-- テストを選択 --</option>
+                                          {todayTests.map(t => (
+                                            <option key={t.id} value={t.content}>{t.content}</option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <input
+                                          type="text"
+                                          placeholder="テストのテーマ（例: 一次方程式小テスト）"
+                                          value={currentConfig.customTheme}
+                                          onChange={e => handleThemeChange(p, e.target.value)}
+                                          className={styles.input}
+                                          style={{ fontSize: '0.8rem', padding: '6px' }}
+                                        />
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* 「その他」が選択された場合 */}
+                                  {currentConfig.subject === 'その他' && (
+                                    <input
+                                      type="text"
+                                      placeholder="テーマを入力（例: 面談、宿題指導）"
+                                      value={currentConfig.customTheme}
+                                      onChange={e => handleThemeChange(p, e.target.value)}
+                                      className={styles.input}
+                                      style={{ fontSize: '0.8rem', padding: '6px' }}
+                                    />
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -6167,7 +7498,7 @@ export default function TeacherDashboard({
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '8px' }}>
                             {todayTests.map((test, idx) => {
-                              const testSub = test.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
+                              const testSub = resolveDefaultSubject(selectedStudent?.grade, test.subject);
                               const allMasters = ensureMathEnglishUnitTests(curriculumMastersList);
                               const unitTestMasters = allMasters.filter(m => 
                                 !m.lesson_name?.includes('まとめテスト') &&
@@ -6307,26 +7638,26 @@ export default function TeacherDashboard({
                       {/* 宿題 (教科選択 ＋ 種別選択 ＋ 2回目演習自動生成/自由記述 ＋ 期限 ＋ 対象) */}
                       <div style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>宿題:<span style={{ fontSize: '0.7rem', fontWeight: 500, color: '#475569', marginLeft: '4px' }}>(教科別 ＋ 当日授業2回目演習自動入力 ＋ 提出期限 ＋ 自由記述)</span></label>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>宿題:</label>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>自動生成・手動編集対応</span>
                         </div>
                         {todayHomeworks.length === 0 ? (
                           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>登録された宿題はありません。</div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
                             {todayHomeworks.map((hw, idx) => {
-                              const hwSub = hw.subject || (selectedStudent?.grade?.startsWith('中') ? '数学' : '算数');
-                              const hwType = hw.type || (hw.content.includes('2回目演習') ? 'drill_2nd' : 'custom');
+                              const hwSub = resolveDefaultSubject(selectedStudent?.grade, hw.subject);
+                              const hwType = resolveHomeworkType(hw.type, hw.content);
 
                               return (
-                                <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 4px', background: 'transparent', borderBottom: idx === todayHomeworks.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
+                                <div key={hw.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 0', borderBottom: idx === todayHomeworks.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     {/* 教科選択 */}
                                     <select
                                       value={hwSub}
                                       onChange={e => handleUpdateHomework(hw.id, 'subject', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '100px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', fontWeight: 700, color: '#1e293b', width: '85px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0', flexShrink: 0 }}
                                     >
                                       <option value="算数">算数</option>
                                       <option value="数学">数学</option>
@@ -6342,46 +7673,34 @@ export default function TeacherDashboard({
                                       value={hwType}
                                       onChange={e => handleUpdateHomework(hw.id, 'type', e.target.value)}
                                       className={styles.select}
-                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '175px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                      style={{ fontSize: '0.78rem', padding: '4px 8px', width: '160px', borderRadius: '8px', border: '1px solid #e2e8f0', flexShrink: 0 }}
                                     >
-                                      <option value="drill_2nd">🔄 当日授業の2回目（演習）</option>
+                                      <option value="drill_2nd">🔄 授業2回目演習</option>
                                       <option value="custom">✏️ 自由記述</option>
                                     </select>
 
                                     {/* 内容入力 / 自動設定表示 */}
-                                    {hwType === 'drill_2nd' ? (
-                                      <input
-                                        type="text"
-                                        value={hw.content}
-                                        onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
-                                        placeholder="当日授業の2回目（演習）範囲"
-                                        className={styles.input}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#eff6ff', fontWeight: 600 }}
-                                      />
-                                    ) : (
-                                      <input
-                                        type="text"
-                                        value={hw.content}
-                                        onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
-                                        placeholder="宿題の内容を入力（例：ワークP24-25, 漢字ノート）"
-                                        className={styles.input}
-                                        style={{ fontSize: '0.8rem', flex: 1, padding: '5px 8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
-                                      />
-                                    )}
+                                    <input
+                                      type="text"
+                                      value={hw.content}
+                                      onChange={e => handleUpdateHomework(hw.id, 'content', e.target.value)}
+                                      placeholder={hwType === 'drill_2nd' ? '当日授業の2回目（演習）範囲' : '宿題の内容を入力（例：ワークP24-25, 漢字ノート）'}
+                                      className={styles.input}
+                                      style={{ 
+                                        fontSize: '0.8rem', 
+                                        flex: 1, 
+                                        minWidth: '180px', 
+                                        padding: '5px 8px', 
+                                        borderRadius: '8px', 
+                                        border: '1px solid #e2e8f0', 
+                                        backgroundColor: hwType === 'drill_2nd' ? '#eff6ff' : '#ffffff', 
+                                        fontWeight: hwType === 'drill_2nd' ? 600 : 400 
+                                      }}
+                                    />
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveHomework(hw.id)}
-                                      className={styles.btn}
-                                      style={{ width: 'auto', padding: '4px 10px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                    >
-                                      削除
-                                    </button>
-                                  </div>
-
-                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', paddingTop: '2px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>提出期限:</span>
+                                    {/* 提出期限 */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                      <span style={{ fontSize: '0.72rem', color: '#64748b', whiteSpace: 'nowrap' }}>期限:</span>
                                       <input
                                         type="date"
                                         value={hw.deadline || getNextAttendanceDateForStudent(scheduleDate, selectedStudent)}
@@ -6390,13 +7709,27 @@ export default function TeacherDashboard({
                                         style={{ fontSize: '0.75rem', padding: '3px 6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'auto' }}
                                       />
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>対象範囲:</span>
+
+                                    {/* 削除ボタン */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveHomework(hw.id)}
+                                      className={styles.btn}
+                                      style={{ width: 'auto', padding: '4px 10px', background: '#ef4444', color: '#fff', fontSize: '0.75rem', border: 'none', borderRadius: '6px', cursor: 'pointer', flexShrink: 0 }}
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+
+                                  {/* 対象範囲: 個人(この生徒のみ) 以外が指定されている場合のみ表示（デフォルト値の時は非表示） */}
+                                  {hw.targetScope && hw.targetScope !== 'individual' && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '4px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>適用範囲:</span>
                                       <select
-                                        value={hw.targetScope || 'individual'}
+                                        value={hw.targetScope}
                                         onChange={e => handleUpdateHomework(hw.id, 'targetScope', e.target.value)}
                                         className={styles.select}
-                                        style={{ fontSize: '0.75rem', padding: '3px 6px', width: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                                        style={{ fontSize: '0.75rem', padding: '2px 6px', width: 'auto', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                                       >
                                         <option value="individual">個人 (この生徒のみ)</option>
                                         <option value="grade">学年全員</option>
@@ -6404,7 +7737,7 @@ export default function TeacherDashboard({
                                         <option value="level">レベル (同じ学習レベルの同学年)</option>
                                       </select>
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -6471,159 +7804,29 @@ export default function TeacherDashboard({
                         </div>
                       )}
 
-                      <button 
-                        onClick={handleSaveTimetable} 
-                        disabled={isSavingTimetable}
-                        className={styles.btn} 
-                        style={{ 
-                          marginTop: '16px',
-                          opacity: isSavingTimetable ? 0.7 : 1,
-                          cursor: isSavingTimetable ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        {isSavingTimetable ? '時間割コマ割りを保存中...' : '時間割コマ割りを保存'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 1週間の学習予定・コマ割り一覧 */}
-                  <div style={{ marginTop: '28px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1e293b' }}>
-                        📅 選択週（1週間）の学習予定・コマ割り状況
-                      </h4>
-                      <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                        各曜日をクリックしてその日のコマ割りを即座に編集できます
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '8px' }}>
-                      {(() => {
-                        const parts = (scheduleDate || '').split('-');
-                        const d = parts.length === 3 ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])) : new Date();
-                        const day = d.getDay();
-                        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-                        const monday = new Date(d.setDate(diff));
-
-                        const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
-                        const dayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-
-                        return Array.from({ length: 7 }, (_, i) => {
-                          const itemDate = new Date(monday);
-                          itemDate.setDate(monday.getDate() + i);
-                          const yr = itemDate.getFullYear();
-                          const mo = String(itemDate.getMonth() + 1).padStart(2, '0');
-                          const da = String(itemDate.getDate()).padStart(2, '0');
-                          const dStr = `${yr}-${mo}-${da}`;
-                          const dayKey = dayKeys[i];
-                          const dayOfWeek = dayNames[i];
-                          const isAttendance = (selectedStudent.selected_days || ['tuesday', 'friday']).includes(dayKey);
-                          const isSelectedDate = dStr === scheduleDate;
-                          const dayTasks = studentTasks.filter(t => t.scheduled_date === dStr && t.period);
-                          const dayTests = db.getMiniTestResults().filter(r => r.student_id === selectedStudent.id && r.date === dStr);
-                          const dayHws = db.getHomeworkResults().filter(r => r.student_id === selectedStudent.id && r.date === dStr);
-
-                          return (
-                            <div
-                              key={dStr}
-                              onClick={() => setScheduleDate(dStr)}
-                              style={{
-                                backgroundColor: isSelectedDate ? '#eff6ff' : (isAttendance ? '#ffffff' : '#f8fafc'),
-                                border: isSelectedDate ? '2px solid #3b82f6' : (isAttendance ? '1px solid #bfdbfe' : '1px solid #e2e8f0'),
-                                borderRadius: '10px',
-                                padding: '10px 8px',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                minHeight: '140px',
-                                boxShadow: isSelectedDate ? '0 4px 12px rgba(59, 130, 246, 0.15)' : 'none'
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', borderBottom: '1px solid #f1f5f9', paddingBottom: '4px' }}>
-                                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: isSelectedDate ? '#1d4ed8' : '#1e293b' }}>
-                                  {itemDate.getMonth() + 1}/{itemDate.getDate()} ({dayOfWeek})
-                                </span>
-                                <span
-                                  style={{
-                                    fontSize: '0.6rem',
-                                    padding: '1px 4px',
-                                    borderRadius: '4px',
-                                    backgroundColor: isAttendance ? '#dbeafe' : '#f1f5f9',
-                                    color: isAttendance ? '#1d4ed8' : '#64748b',
-                                    fontWeight: 700
-                                  }}
-                                >
-                                  {isAttendance ? '通塾' : '休塾'}
-                                </span>
-                              </div>
-
-                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.7rem' }}>
-                                {dayTasks.length > 0 ? (
-                                  dayTasks
-                                    .sort((a, b) => (a.period || 0) - (b.period || 0))
-                                    .map(t => (
-                                      <div
-                                        key={t.id}
-                                        style={{
-                                          backgroundColor: '#f0fdf4',
-                                          border: '1px solid #bbf7d0',
-                                          borderRadius: '4px',
-                                          padding: '2px 4px',
-                                          color: '#166534',
-                                          fontSize: '0.68rem',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis'
-                                        }}
-                                        title={`${t.period}コマ: ${t.subject || '自由記述'} ${t.lesson_range || t.custom_unit_name || ''}`}
-                                      >
-                                        <strong>{t.period}ｺﾏ:</strong> {t.subject || '自由記述'} {t.lesson_range ? `(${t.lesson_range})` : (t.custom_unit_name ? `(${t.custom_unit_name})` : '')}
-                                      </div>
-                                    ))
-                                ) : isAttendance ? (
-                                  <div style={{ color: '#3b82f6', fontSize: '0.65rem', fontStyle: 'italic', padding: '4px 0' }}>
-                                    標準{selectedStudent.default_slots || selectedStudent.period_count || 2}コマ予定
-                                  </div>
-                                ) : (
-                                  <div style={{ color: '#94a3b8', fontSize: '0.65rem', padding: '4px 0' }}>
-                                    予定なし
-                                  </div>
-                                )}
-
-                                {dayTests.length > 0 && (
-                                  <div style={{ fontSize: '0.63rem', color: '#7c3aed', background: '#f5f3ff', padding: '2px 4px', borderRadius: '4px', border: '1px solid #ddd6fe' }}>
-                                    📝 テスト{dayTests.length}件
-                                  </div>
-                                )}
-                                {dayHws.length > 0 && (
-                                  <div style={{ fontSize: '0.63rem', color: '#c2410c', background: '#fff7ed', padding: '2px 4px', borderRadius: '4px', border: '1px solid #fed7aa' }}>
-                                    🏠 宿題{dayHws.length}件
-                                  </div>
-                                )}
-                              </div>
-
-                              <button
-                                type="button"
-                                style={{
-                                  marginTop: '6px',
-                                  width: '100%',
-                                  padding: '3px 0',
-                                  fontSize: '0.65rem',
-                                  backgroundColor: isSelectedDate ? '#3b82f6' : '#ffffff',
-                                  color: isSelectedDate ? '#ffffff' : '#3b82f6',
-                                  border: '1px solid #3b82f6',
-                                  borderRadius: '4px',
-                                  fontWeight: 600,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {isSelectedDate ? '編集中' : '選択'}
-                              </button>
-                            </div>
-                          );
-                        });
-                      })()}
+                      {/* 時間割コマ割りを保存 ボタン */}
+                      <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={handleSaveTimetable} 
+                          disabled={isSavingTimetable}
+                          className={styles.btn} 
+                          style={{ 
+                            width: 'auto',
+                            minWidth: '220px',
+                            padding: '10px 24px',
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            fontSize: '0.92rem',
+                            fontWeight: 700,
+                            borderRadius: '8px',
+                            opacity: isSavingTimetable ? 0.7 : 1,
+                            cursor: isSavingTimetable ? 'not-allowed' : 'pointer',
+                            boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)'
+                          }}
+                        >
+                          {isSavingTimetable ? '時間割コマ割りを保存中...' : '時間割コマ割りを保存'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -6941,122 +8144,42 @@ export default function TeacherDashboard({
                     </div>
                   </div>
                   
-                  {miniTestResultsList
-                    .filter(r => {
-                      const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
-                      const studentName = r.students?.name || student?.name || '';
-                      const studentGrade = student?.grade || r.students?.grade || '';
-
-                      // 学年フィルター
-                      if (miniTestGradeFilter !== 'all') {
-                        if (!studentGrade) return false;
-                        if (miniTestGradeFilter === '小学生' && !(studentGrade.startsWith('小') || studentGrade === '園児')) return false;
-                        if (miniTestGradeFilter === '中学生' && !studentGrade.startsWith('中')) return false;
-                        if (miniTestGradeFilter === '高校生' && !(studentGrade.startsWith('高') || studentGrade === '既卒')) return false;
-                        if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && studentGrade !== miniTestGradeFilter) return false;
-                      }
-
-                      // 教科フィルター
-                      if (miniTestSubjectFilter !== 'all') {
-                        const targetSub = miniTestSubjectFilter;
-                        const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.test_content && r.test_content.includes(targetSub));
-                        if (!matchSubject) return false;
-                      }
-
-                      // 検索クエリ
-                      if (!miniTestSearchQuery.trim()) return true;
-                      const query = miniTestSearchQuery.toLowerCase().trim();
+                  {(() => {
+                    const filteredMiniTests = filterMiniTestResults(miniTestResultsList, students, miniTestGradeFilter, miniTestSubjectFilter, miniTestSearchQuery);
+                    if (filteredMiniTests.length === 0) {
                       return (
-                        (r.test_content && r.test_content.toLowerCase().includes(query)) ||
-                        (r.subject && r.subject.toLowerCase().includes(query)) ||
-                        (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
-                        studentName.toLowerCase().includes(query)
+                        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                          {miniTestSearchQuery || miniTestGradeFilter !== 'all' || miniTestSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された小テスト結果はありません。'}
+                        </div>
                       );
-                    }).length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
-                      {miniTestSearchQuery || miniTestGradeFilter !== 'all' || miniTestSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された小テスト結果はありません。'}
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                        <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>テスト内容</th>
-                            <th style={{ padding: '10px', width: '100px', textAlign: 'left' }}>レベル/合格点</th>
-                            <th style={{ padding: '10px', width: '120px', textAlign: 'right' }}>点数</th>
-                            <th style={{ padding: '10px', width: '100px', textAlign: 'center' }}>合否</th>
-                            <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {miniTestResultsList
-                            .filter(r => {
-                              const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
-                              const studentName = r.students?.name || student?.name || '';
-                              const studentGrade = student?.grade || r.students?.grade || '';
-
-                              // 学年フィルター
-                              if (miniTestGradeFilter !== 'all') {
-                                if (!studentGrade) return false;
-                                if (miniTestGradeFilter === '小学生' && !(studentGrade.startsWith('小') || studentGrade === '園児')) return false;
-                                if (miniTestGradeFilter === '中学生' && !studentGrade.startsWith('中')) return false;
-                                if (miniTestGradeFilter === '高校生' && !(studentGrade.startsWith('高') || studentGrade === '既卒')) return false;
-                                if (!['小学生', '中学生', '高校生'].includes(miniTestGradeFilter) && studentGrade !== miniTestGradeFilter) return false;
-                              }
-
-                              // 教科フィルター
-                              if (miniTestSubjectFilter !== 'all') {
-                                const targetSub = miniTestSubjectFilter;
-                                const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.test_content && r.test_content.includes(targetSub));
-                                if (!matchSubject) return false;
-                              }
-
-                              // 検索クエリ
-                              if (!miniTestSearchQuery.trim()) return true;
-                              const query = miniTestSearchQuery.toLowerCase().trim();
-                              return (
-                                (r.test_content && r.test_content.toLowerCase().includes(query)) ||
-                                (r.subject && r.subject.toLowerCase().includes(query)) ||
-                                (r.passing_line && String(r.passing_line).toLowerCase().includes(query)) ||
-                                studentName.toLowerCase().includes(query)
-                              );
-                            })
-                            .sort((a, b) => {
-                              const studentA = students.find(s => s.id === a.student_id || s.student_id === a.student_id);
-                              const studentB = students.find(s => s.id === b.student_id || s.student_id === b.student_id);
-
-                              if (miniTestSortOrder === 'date_asc') {
-                                return new Date(a.date).getTime() - new Date(b.date).getTime();
-                              }
-                              if (miniTestSortOrder === 'name_asc') {
-                                const nameA = a.students?.name || studentA?.name_kana || studentA?.name || '';
-                                const nameB = b.students?.name || studentB?.name_kana || studentB?.name || '';
-                                return nameA.localeCompare(nameB, 'ja');
-                              }
-                              if (miniTestSortOrder === 'unsubmitted_first') {
-                                const isUnsubmittedA = (r: any) => (r.score === null || r.score === undefined) && !tempScores[r.id];
-                                const scoreAUnset = isUnsubmittedA(a);
-                                const scoreBUnset = isUnsubmittedA(b);
-                                if (scoreAUnset && !scoreBUnset) return -1;
-                                if (!scoreAUnset && scoreBUnset) return 1;
-                              }
-                              if (miniTestSortOrder === 'passed_first') {
-                                const statusA = tempPassedStatuses[a.id] || (a.status === 'passed' || a.passed === true || (a.score !== null && a.score >= 70) ? 'passed' : 'failed');
-                                const statusB = tempPassedStatuses[b.id] || (b.status === 'passed' || b.passed === true || (b.score !== null && b.score >= 70) ? 'passed' : 'failed');
-                                if (statusA === 'passed' && statusB !== 'passed') return -1;
-                                if (statusA !== 'passed' && statusB === 'passed') return 1;
-                              }
-                              // デフォルト: 日付新しい順
-                              return new Date(b.date).getTime() - new Date(a.date).getTime();
-                            })
+                    }
+                    return (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>テスト内容</th>
+                              <th style={{ padding: '10px', width: '100px', textAlign: 'left' }}>レベル/合格点</th>
+                              <th style={{ padding: '10px', width: '120px', textAlign: 'right' }}>点数</th>
+                              <th style={{ padding: '10px', width: '100px', textAlign: 'center' }}>合否</th>
+                              <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortMiniTestResults(
+                              filteredMiniTests,
+                              miniTestSortOrder,
+                              students,
+                              tempScores,
+                              tempPassedStatuses
+                            )
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id || s.student_id === r.student_id);
                               const studentDisplayName = r.students?.name || student?.name || '不明な生徒';
                               const stLevel = student?.level || 'A';
-                              const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
-                              const displayPassingLine = r.passing_line ? (r.passing_line.includes('レベル') ? r.passing_line : `レベル${stLevel} (${passScore}点)`) : `レベル${stLevel} (${passScore}点)`;
+                              const displayPassingLine = resolvePassingLineDisplay(r.passing_line, stLevel);
 
                               return (
                                  <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -7070,7 +8193,7 @@ export default function TeacherDashboard({
                                         type="number"
                                         min="0"
                                         max="100"
-                                        value={tempScores[r.id] !== undefined ? tempScores[r.id] : (r.score !== null && r.score !== undefined ? String(r.score) : '')}
+                                        value={resolveMiniTestScoreDisplay(r.score, tempScores[r.id])}
                                         onChange={e => {
                                           const val = e.target.value;
                                           setTempScores(prev => ({
@@ -7080,24 +8203,7 @@ export default function TeacherDashboard({
 
                                           // 点数入力時の合否自動判定＆自動保存
                                           const scoreVal = parseInt(val, 10);
-                                          let autoPassedStr = 'unstarted';
-                                          if (!isNaN(scoreVal)) {
-                                            const passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
-                                            let autoPassed = scoreVal >= passScore;
-                                            if (r.passing_line) {
-                                              const matchNum = r.passing_line.match(/\d+/);
-                                              if (matchNum) {
-                                                const limit = parseInt(matchNum[0], 10);
-                                                if (r.passing_line.includes('%') || r.passing_line.includes('割')) {
-                                                  const threshold = r.passing_line.includes('割') ? limit * 10 : limit;
-                                                  autoPassed = scoreVal >= threshold;
-                                                } else if (r.passing_line.includes('点')) {
-                                                  autoPassed = scoreVal >= limit;
-                                                }
-                                              }
-                                            }
-                                            autoPassedStr = autoPassed ? 'passed' : 'failed';
-                                          }
+                                          const autoPassedStr = evaluateAutoPassStatus(scoreVal, r.passing_line, stLevel);
 
                                           setTempPassedStatuses(prev => ({
                                             ...prev,
@@ -7115,7 +8221,7 @@ export default function TeacherDashboard({
                                   </td>
                                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                                     {(() => {
-                                      const currentStatus = tempPassedStatuses[r.id] || (r.status === 'passed' || r.status === '合格' || r.passed === true ? 'passed' : ((r.status === 'failed' || r.status === '不合格' || r.passed === false) ? 'failed' : 'unstarted'));
+                                      const currentStatus = tempPassedStatuses[r.id] || resolveMiniTestPassedStatus(r.status, r.passed);
                                       const statusStyle = currentStatus === 'passed'
                                         ? { backgroundColor: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }
                                         : currentStatus === 'failed'
@@ -7166,7 +8272,7 @@ export default function TeacherDashboard({
                         </tbody>
                       </table>
                     </div>
-                  )}
+                  )})()}
                 </div>
               )}
 
@@ -7269,118 +8375,39 @@ export default function TeacherDashboard({
                     </div>
                   </div>
                   
-                  {homeworkResultsList
-                    .filter(r => {
-                      const student = students.find(s => s.id === r.student_id);
-
-                      // 学年フィルター
-                      if (homeworkGradeFilter !== 'all') {
-                        if (!student) return false;
-                        if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
-                        if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                        if (homeworkGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
-                        if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
-                      }
-
-                      // 教科フィルター
-                      if (homeworkSubjectFilter !== 'all') {
-                        const targetSub = homeworkSubjectFilter;
-                        const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.homework_content && r.homework_content.includes(targetSub));
-                        if (!matchSubject) return false;
-                      }
-
-                      // 検索クエリ
-                      if (!homeworkSearchQuery.trim()) return true;
-                      const query = homeworkSearchQuery.toLowerCase().trim();
+                  {(() => {
+                    const filteredHomeworks = filterHomeworkResults(homeworkResultsList, students, homeworkGradeFilter, homeworkSubjectFilter, homeworkSearchQuery);
+                    if (filteredHomeworks.length === 0) {
                       return (
-                        (r.homework_content && r.homework_content.toLowerCase().includes(query)) ||
-                        (r.subject && r.subject.toLowerCase().includes(query)) ||
-                        (r.homework_deadline && r.homework_deadline.toLowerCase().includes(query)) ||
-                        (student && student.name.toLowerCase().includes(query))
+                        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                          {homeworkSearchQuery || homeworkGradeFilter !== 'all' || homeworkSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された宿題はありません。'}
+                        </div>
                       );
-                    }).length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
-                      {homeworkSearchQuery || homeworkGradeFilter !== 'all' || homeworkSubjectFilter !== 'all' ? '該当するテスト・宿題が見つかりませんでした。' : '記録された宿題はありません。'}
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                        <thead>
-                          <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>宿題内容</th>
-                            <th style={{ padding: '10px', textAlign: 'left' }}>提出期限</th>
-                            <th style={{ padding: '10px', width: '150px', textAlign: 'center' }}>提出状況</th>
-                            <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {homeworkResultsList
-                            .filter(r => {
-                              const student = students.find(s => s.id === r.student_id);
-
-                              // 学年フィルター
-                              if (homeworkGradeFilter !== 'all') {
-                                if (!student) return false;
-                                if (homeworkGradeFilter === '小学生' && !(student.grade.startsWith('小') || student.grade === '園児')) return false;
-                                if (homeworkGradeFilter === '中学生' && !student.grade.startsWith('中')) return false;
-                                if (homeworkGradeFilter === '高校生' && !(student.grade.startsWith('高') || student.grade === '既卒')) return false;
-                                if (!['小学生', '中学生', '高校生'].includes(homeworkGradeFilter) && student.grade !== homeworkGradeFilter) return false;
-                              }
-
-                              // 教科フィルター
-                              if (homeworkSubjectFilter !== 'all') {
-                                const targetSub = homeworkSubjectFilter;
-                                const matchSubject = r.subject === targetSub || (targetSub === '数学' && (r.subject === '算数' || r.subject === '数学')) || (r.homework_content && r.homework_content.includes(targetSub));
-                                if (!matchSubject) return false;
-                              }
-
-                              // 検索クエリ
-                              if (!homeworkSearchQuery.trim()) return true;
-                              const query = homeworkSearchQuery.toLowerCase().trim();
-                              return (
-                                (r.homework_content && r.homework_content.toLowerCase().includes(query)) ||
-                                (r.subject && r.subject.toLowerCase().includes(query)) ||
-                                (r.homework_deadline && r.homework_deadline.toLowerCase().includes(query)) ||
-                                (student && student.name.toLowerCase().includes(query))
-                              );
-                            })
-                            .sort((a, b) => {
-                              const studentA = students.find(s => s.id === a.student_id);
-                              const studentB = students.find(s => s.id === b.student_id);
-
-                              if (homeworkSortOrder === 'date_asc') {
-                                return new Date(a.date).getTime() - new Date(b.date).getTime();
-                              }
-                              if (homeworkSortOrder === 'name_asc') {
-                                const nameA = studentA?.name_kana || studentA?.name || '';
-                                const nameB = studentB?.name_kana || studentB?.name || '';
-                                return nameA.localeCompare(nameB, 'ja');
-                              }
-                              if (homeworkSortOrder === 'unsubmitted_first') {
-                                const statusA = tempHomeworkStatuses[a.id] || a.status;
-                                const statusB = tempHomeworkStatuses[b.id] || b.status;
-                                const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
-                                const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
-                                if (!isSubA && isSubB) return -1;
-                                if (isSubA && !isSubB) return 1;
-                              }
-                              if (homeworkSortOrder === 'completed_first') {
-                                const statusA = tempHomeworkStatuses[a.id] || a.status;
-                                const statusB = tempHomeworkStatuses[b.id] || b.status;
-                                const isSubA = statusA === 'completed' || (statusA as string) === 'submitted';
-                                const isSubB = statusB === 'completed' || (statusB as string) === 'submitted';
-                                if (isSubA && !isSubB) return -1;
-                                if (!isSubA && isSubB) return 1;
-                              }
-                              // デフォルト: 日付新しい順
-                              return new Date(b.date).getTime() - new Date(a.date).getTime();
-                            })
+                    }
+                    return (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>日付</th>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>生徒名</th>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>宿題内容</th>
+                              <th style={{ padding: '10px', textAlign: 'left' }}>提出期限</th>
+                              <th style={{ padding: '10px', width: '150px', textAlign: 'center' }}>提出状況</th>
+                              <th style={{ padding: '10px', width: '80px', textAlign: 'center' }}>操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortHomeworkResults(
+                              filteredHomeworks,
+                              homeworkSortOrder,
+                              students,
+                              tempHomeworkStatuses
+                            )
                             .map(r => {
                               const student = students.find(s => s.id === r.student_id);
                               const todayStr = new Date().toISOString().split('T')[0];
-                              const currentStatus = tempHomeworkStatuses[r.id] || r.status || 'incomplete';
+                              const currentStatus = resolveDisplayHomeworkStatus(tempHomeworkStatuses[r.id], r.status);
                               const isSubmitted = currentStatus === 'completed' || (currentStatus as string) === 'submitted';
                               const deadline = r.homework_deadline || r.date || '';
                               const isOverdue = !isSubmitted && !!deadline && deadline < todayStr;
@@ -7455,7 +8482,7 @@ export default function TeacherDashboard({
                         </tbody>
                       </table>
                     </div>
-                  )}
+                  )})()}
                 </div>
               )}
 
@@ -7768,7 +8795,7 @@ export default function TeacherDashboard({
                                 <td style={{ padding: '10px' }}>
                                   {tr.record_type === 'regular_test' ? (
                                     <span>
-                                      クラス: {tr.class_rank || 'ー'}位 / 学年: {tr.school_rank || 'ー'}位
+                                      クラス: {formatRankDisplay(tr.class_rank)} / 学年: {formatRankDisplay(tr.school_rank)}
                                     </span>
                                   ) : (
                                     <strong style={{ color: '#2563eb' }}>{tr.improvement_plan || '-'}</strong>
@@ -8492,7 +9519,7 @@ export default function TeacherDashboard({
                                 </p>
                               </div>
                               <div style={{ textAlign: 'right', fontSize: '0.85rem', color: '#334155' }}>
-                                <div><strong>生徒名:</strong> {selectedStudent?.name || '生徒'} ({selectedStudent?.grade || ''})</div>
+                                <div><strong>生徒名:</strong> {formatStudentNameWithGrade(selectedStudent)}</div>
                                 <div><strong>面談日:</strong> {interviewDate2} / <strong>担当:</strong> {interviewer2 || '担当講師'}</div>
                               </div>
                             </div>
@@ -9018,7 +10045,7 @@ export default function TeacherDashboard({
                                 </p>
                               </div>
                               <div style={{ textAlign: 'right', fontSize: '0.85rem', color: '#334155' }}>
-                                <div><strong>生徒名:</strong> {selectedStudent?.name || '生徒'} ({selectedStudent?.grade || ''})</div>
+                                <div><strong>生徒名:</strong> {formatStudentNameWithGrade(selectedStudent)}</div>
                                 <div><strong>同席:</strong> {parentType3 === 'mother' ? 'お母様' : parentType3 === 'father' ? 'お父様' : parentType3 === 'both' ? 'ご両親' : parentType3}</div>
                                 <div><strong>面談日:</strong> {interviewDate3} / <strong>担当:</strong> {interviewer3 || '担当講師'}</div>
                               </div>
@@ -9056,24 +10083,6 @@ export default function TeacherDashboard({
                   const targetSubject = (isElementary && selectedSubject === '数学') ? '算数' : selectedSubject;
                   const rawMasters = curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
 
-                  const getGradeOrder = (g?: string | null): number => {
-                    if (!g) return 99;
-                    const norm = normalizeGrade(g);
-                    if (norm === '小1' || /^[1１]年生?$/.test(norm)) return 1;
-                    if (norm === '小2' || /^[2２]年生?$/.test(norm)) return 2;
-                    if (norm === '小3' || /^[3３]年生?$/.test(norm)) return 3;
-                    if (norm === '小4' || /^[4４]年生?$/.test(norm)) return 4;
-                    if (norm === '小5' || /^[5５]年生?$/.test(norm)) return 5;
-                    if (norm === '小6' || /^[6６]年生?$/.test(norm)) return 6;
-                    if (norm === '中1' || /^[7７]年生?$/.test(norm)) return 7;
-                    if (norm === '中2' || /^[8８]年生?$/.test(norm)) return 8;
-                    if (norm === '中3' || /^[9９]年生?$/.test(norm)) return 9;
-                    if (norm.startsWith('高1')) return 10;
-                    if (norm.startsWith('高2')) return 11;
-                    if (norm.startsWith('高3')) return 12;
-                    return 99;
-                  };
-
                   const masterUnits = rawMasters
                     .filter(m => {
                       if (isElementary) {
@@ -9098,31 +10107,9 @@ export default function TeacherDashboard({
                       return m.subject === targetSubject;
                     });
 
-                  // 単元ごとの最小 sort_order を算出して同一単元内のレッスンをまとめ、単元分断・割り込みを防止
-                  const calcUnitMinOrderMap = (items: typeof masterUnits) => {
-                    const map = new Map<string, number>();
-                    items.forEach(m => {
-                      const key = `${m.grade || ''}_${m.unit_name || ''}`;
-                      const current = map.get(key) ?? Infinity;
-                      const order = m.sort_order ?? 0;
-                      if (order < current) map.set(key, order);
-                    });
-                    return map;
-                  };
-
-                  const unitMinMap = calcUnitMinOrderMap(masterUnits);
-                  masterUnits.sort((a, b) => {
-                    const ga = getGradeOrder(a.grade);
-                    const gb = getGradeOrder(b.grade);
-                    if (ga !== gb) return ga - gb;
-                    const keyA = `${a.grade || ''}_${a.unit_name || ''}`;
-                    const keyB = `${b.grade || ''}_${b.unit_name || ''}`;
-                    const minA = unitMinMap.get(keyA) ?? (a.sort_order || 0);
-                    const minB = unitMinMap.get(keyB) ?? (b.sort_order || 0);
-                    if (minA !== minB) return minA - minB;
-                    if (a.unit_name !== b.unit_name) return (a.unit_name || '').localeCompare(b.unit_name || '');
-                    return (a.sort_order || 0) - (b.sort_order || 0);
-                  });
+                  const sortedMasterUnits = sortCurriculumMasterUnits(masterUnits);
+                  masterUnits.length = 0;
+                  masterUnits.push(...sortedMasterUnits);
 
                   const subjectUnits = allCurriculumUnits.filter(u => 
                     u.school_id === selectedStudent.school_id && (
@@ -9134,19 +10121,7 @@ export default function TeacherDashboard({
                   const fallbackUnits = subjectUnits.length > 0 ? subjectUnits : allCurriculumUnits.filter(u => u.subject === targetSubject || (targetSubject === '算数' && u.subject === '数学'));
 
                   const rawEnsuredMasters = ensureMathEnglishUnitTests(masterUnits);
-                  const ensuredUnitMinMap = calcUnitMinOrderMap(rawEnsuredMasters);
-                  const ensuredMasters = rawEnsuredMasters.sort((a, b) => {
-                    const ga = getGradeOrder(a.grade);
-                    const gb = getGradeOrder(b.grade);
-                    if (ga !== gb) return ga - gb;
-                    const keyA = `${a.grade || ''}_${a.unit_name || ''}`;
-                    const keyB = `${b.grade || ''}_${b.unit_name || ''}`;
-                    const minA = ensuredUnitMinMap.get(keyA) ?? (a.sort_order || 0);
-                    const minB = ensuredUnitMinMap.get(keyB) ?? (b.sort_order || 0);
-                    if (minA !== minB) return minA - minB;
-                    if (a.unit_name !== b.unit_name) return (a.unit_name || '').localeCompare(b.unit_name || '');
-                    return (a.sort_order || 0) - (b.sort_order || 0);
-                  });
+                  const ensuredMasters = sortCurriculumMasterUnits(rawEnsuredMasters);
 
                   // masterUnits が存在する場合は全学年分を STEP 1, STEP 2... として途切れなくバインド
                   const rawTimelineUnits = ensuredMasters.length > 0
@@ -9283,143 +10258,24 @@ export default function TeacherDashboard({
                     }
                   }
 
-                  // タイムライン内ユニットとの表記揺れ吸収マッチング関数
-                  const matchesTimelineUnit = (u: any, query: string, queryId?: string): boolean => {
-                    if (!query && !queryId) return false;
-                    if (queryId && (String(u.id) === String(queryId) || (u.sort_order !== undefined && String(u.sort_order) === String(queryId)))) {
-                      return true;
-                    }
-                    if (!query) return false;
-                    if (u.lesson_name === query || u.name === query) return true;
-                    if (isMatchingUnitOrTest(u.name, query) || isMatchingUnitOrTest(u.lesson_name, query)) return true;
-                    if (u.name && (u.name.includes(query) || query.includes(u.name))) return true;
-                    if (u.lesson_name && (u.lesson_name.includes(query) || query.includes(u.lesson_name))) return true;
-                    return false;
-                  };
-
                   // コマ割りスロットから受講対象レッスンID群を抽出する汎用関数
                   const extractLessonIdsFromSlot = (slot: any): string[] => {
-                    // 1. slot.lesson_ids が明示的に保持されている場合は最優先返却（完全同期の単一データソース）
-                    if (Array.isArray(slot.lesson_ids) && slot.lesson_ids.length > 0) {
-                      return slot.lesson_ids.map((id: any) => String(id));
-                    }
-
-                    // 2. getLessonRangeStepIds を用いて同一単元優先・全ステップ展開
-                    const steps = getLessonRangeStepIds({
-                      subject: slot.subject || targetSubject,
-                      startLessonId: slot.start_lesson_id || slot.startLessonId,
-                      endLessonId: slot.end_lesson_id || slot.endLessonId,
-                      startLessonName: slot.start_lesson_name || slot.startLessonName,
-                      endLessonName: slot.end_lesson_name || slot.endLessonName,
-                      lessonRange: slot.lesson_range || slot.lessonRange,
-                      customUnitName: slot.custom_unit_name || slot.customTheme,
-                      curriculumMasters: curriculumMastersList,
-                      studentGrade: selectedStudent.grade
-                    });
-                    if (steps && steps.length > 0 && steps[0].id !== 'lesson-fallback') {
-                      return steps.map(s => String(s.id));
-                    }
-
-                    const ids: string[] = [];
-                    if (slot.unit_id) ids.push(String(slot.unit_id));
-                    if (slot.unitId) ids.push(String(slot.unitId));
-
-                    const startId = slot.start_lesson_id || slot.startLessonId;
-                    const endId = slot.end_lesson_id || slot.endLessonId;
-                    if (startId) ids.push(String(startId));
-                    if (endId) ids.push(String(endId));
-                    let fromStr = slot.start_lesson_name || slot.startLessonName || '';
-                    let toStr = slot.end_lesson_name || slot.endLessonName || '';
-                    const rangeText = slot.lesson_range || slot.custom_unit_name || '';
-
-                    // rangeText からのスマート分割
-                    if ((!fromStr || !toStr) && rangeText) {
-                      if (/\s+[〜~～]\s+/.test(rangeText)) {
-                        const parts = rangeText.split(/\s+[〜~～]\s+/);
-                        if (parts.length >= 2) {
-                          if (!fromStr) fromStr = parts[0].trim();
-                          if (!toStr) toStr = parts[1].trim();
-                        }
-                      } else if (rangeText.includes('〜') || rangeText.includes('~') || rangeText.includes('～')) {
-                        const parts = rangeText.split(/〜|~|～/);
-                        if (parts.length >= 2) {
-                          if (!fromStr) fromStr = parts[0].trim();
-                          if (!toStr) toStr = parts[1].trim();
-                        }
-                      } else if (!fromStr) {
-                        fromStr = rangeText.trim();
-                      }
-                    }
-
-                    let sIdx = -1;
-                    let eIdx = -1;
-
-                    if (startId) {
-                      sIdx = timelineUnits.findIndex(u => String(u.id) === String(startId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(startId)));
-                    }
-                    if (sIdx < 0 && fromStr) {
-                      sIdx = timelineUnits.findIndex(u => matchesTimelineUnit(u, fromStr, startId));
-                    }
-
-                    if (endId) {
-                      eIdx = timelineUnits.findIndex(u => String(u.id) === String(endId) || ((u as any).sort_order !== undefined && String((u as any).sort_order) === String(endId)));
-                    }
-                    if (eIdx < 0 && toStr) {
-                      eIdx = timelineUnits.findIndex(u => matchesTimelineUnit(u, toStr, endId));
-                    }
-
-                    if (sIdx >= 0 && eIdx >= 0) {
-                      const minI = Math.min(sIdx, eIdx);
-                      const maxI = Math.max(sIdx, eIdx);
-                      for (let i = minI; i <= maxI; i++) {
-                        ids.push(String(timelineUnits[i].id));
-                      }
-                    } else if (sIdx >= 0) {
-                      ids.push(String(timelineUnits[sIdx].id));
-                      if (toStr) {
-                        const startUnit = timelineUnits[sIdx] as any;
-                        timelineUnits.forEach((u: any, i) => {
-                          if (i > sIdx && (u.unit_name === startUnit.unit_name || !startUnit.unit_name)) {
-                            if (matchesTimelineUnit(u, toStr)) {
-                              ids.push(String(u.id));
-                            }
-                          }
-                        });
-                      }
-                    } else if (eIdx >= 0) {
-                      ids.push(String(timelineUnits[eIdx].id));
-                    } else if (rangeText) {
-                      timelineUnits.forEach((u: any) => {
-                        if (matchesTimelineUnit(u, rangeText)) {
-                          ids.push(String(u.id));
-                        }
-                      });
-                    }
-
-                    return ids;
+                    return extractLessonIdsFromTimelineSlot(
+                      slot,
+                      timelineUnits,
+                      curriculumMastersList,
+                      selectedStudent.grade,
+                      targetSubject
+                    );
                   };
 
-                  const isUnitCheckTestStep = (stepId: string): boolean => {
-                    const u = timelineUnits.find((unit: any) => 
-                      String(unit.id) === String(stepId) || 
-                      ((unit as any).sort_order !== undefined && String((unit as any).sort_order) === String(stepId))
-                    );
-                    if (!u) return false;
-                    const uName = u.lesson_name || u.name || '';
-                    const isReviewOrCheck = uName.includes('まとめテスト') || 
-                                            uName.toLowerCase().includes('check test') ||
-                                            (u.unit_name || '').includes('まとめテスト') ||
-                                            (u.unit_name || '').toLowerCase().includes('check test');
-                    return !isReviewOrCheck && (
-                      (u as any).item_type === 'unit_test' ||
-                      uName.includes('単元確認テスト') ||
-                      uName.includes('単元テスト')
-                    );
+                  const isLocalUnitCheckTestStep = (stepId: string): boolean => {
+                    return isUnitCheckTestStep(stepId, timelineUnits);
                   };
 
                   activeTasks.forEach(task => {
                     extractLessonIdsFromSlot(task).forEach(id => {
-                      if (!isUnitCheckTestStep(id)) {
+                      if (!isLocalUnitCheckTestStep(id)) {
                         todayActiveLessonIds.add(id);
                       }
                     });
@@ -9429,7 +10285,7 @@ export default function TeacherDashboard({
                     const isTargetSub = p.subject === targetSubject || (targetSubject === '算数' && p.subject === '数学') || (targetSubject === '数学' && p.subject === '算数');
                     if (isTargetSub) {
                       extractLessonIdsFromSlot(p).forEach(id => {
-                        if (!isUnitCheckTestStep(id)) {
+                        if (!isLocalUnitCheckTestStep(id)) {
                           todayActiveLessonIds.add(id);
                         }
                       });
@@ -9440,7 +10296,7 @@ export default function TeacherDashboard({
                   const todayMiniTests = miniTestResultsList.filter(m => 
                     m.student_id === selectedStudent.id && 
                     m.date === targetActiveDate &&
-                    (m.subject === targetSubject || (targetSubject === '算数' && m.subject === '数学') || (targetSubject === '数学' && m.subject === '算数'))
+                    isMatchingSubjectGroup(m.subject, targetSubject)
                   );
 
                   todayMiniTests.forEach(test => {
@@ -9546,8 +10402,7 @@ export default function TeacherDashboard({
                       if (r.student_id !== selectedStudent.id) return false;
                       const isPass = r.passed === true || r.status === 'passed' || (r.score !== null && r.score !== undefined && r.score >= (parseFloat(r.passing_line || '80') || 80));
                       if (!isPass) return false;
-                      if ((r as any).unit_id && String((r as any).unit_id) === uId) return true;
-                      if ((r as any).lesson_id && String((r as any).lesson_id) === uId) return true;
+                      if (matchesMiniTestUnitId(r, uId)) return true;
 
                       const cleanContent = (r.test_content || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
                       const cleanUnit = (r.unit_name || '').replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '').trim();
@@ -9630,7 +10485,7 @@ export default function TeacherDashboard({
                   let failedUnitTestIdx = -1;
                   if (latestUnitTestStatus.hasFailedUnitTest && latestUnitTestStatus.failedUnitTest) {
                     const fut = latestUnitTestStatus.failedUnitTest;
-                    const futKey = fut.unit_name || fut.test_content || '';
+                    const futKey = resolveFailedUnitTestKey(fut);
                     failedUnitTestIdx = timelineUnits.findIndex(u => {
                       const isUT = (u as any).item_type === 'unit_test' || 
                         u.name.includes('単元確認テスト') || u.name.includes('単元テスト') ||
@@ -9748,25 +10603,7 @@ export default function TeacherDashboard({
                       continue;
                     }
 
-                    const stepName = step.lesson_name || step.name || '';
-                    const isReviewOrCheck = stepName.includes('まとめテスト') || 
-                                            stepName.toLowerCase().includes('check test') ||
-                                            (step.unit_name || '').includes('まとめテスト') ||
-                                            (step.unit_name || '').toLowerCase().includes('check test');
-                    const isUnitTest = !isReviewOrCheck && (
-                      step.item_type === 'unit_test' || 
-                      stepName.includes('単元確認テスト') || 
-                      stepName.includes('単元テスト')
-                    );
-
-                    let isStepDone = false;
-                    if (isUnitTest) {
-                      // 単元確認テストは mini_test_results に合格実績（passed）が存在する場合のみ完了
-                      isStepDone = miniTestPassedIdSet.has(stepIdStr) || (stepOrderStr ? miniTestPassedIdSet.has(stepOrderStr) : false);
-                    } else {
-                      // 通常授業およびまとめテストは completedLessonIdSet に存在する場合に完了
-                      isStepDone = completedLessonIdSet.has(stepIdStr) || (stepOrderStr ? completedLessonIdSet.has(stepOrderStr) : false);
-                    }
+                    const isStepDone = evaluateTimelineStepCompletion(step, completedLessonIdSet, miniTestPassedIdSet);
 
                     if (isStepDone) {
                       trulyCompletedStepIds.add(stepIdStr);
@@ -9833,26 +10670,8 @@ export default function TeacherDashboard({
                         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
                           {/* Subject Tab Button Group */}
                           {(() => {
-                            const getSubjectIcon = (sub: string) => {
-                              if (sub.includes('算数') || sub.includes('数学')) return '🧮';
-                              if (sub.includes('国語')) return '📖';
-                              if (sub.includes('英語')) return '🌍';
-                              if (sub.includes('理科') || sub.includes('物理') || sub.includes('化学') || sub.includes('生物')) return '🧪';
-                              if (sub.includes('社会') || sub.includes('歴史') || sub.includes('地理') || sub.includes('日本史') || sub.includes('世界史')) return '🏛️';
-                              return '📚';
-                            };
-
-                            const baseSubjs = isElementary
-                              ? ['算数', '国語', '英語', '理科', '社会']
-                              : selectedStudent.grade.startsWith('中')
-                                ? ['数学', '英語', '理科', '社会', '国語']
-                                : ['数学', '英語', '国語', '理科', '社会'];
-
-                            const studentSubjs = selectedStudent.selected_subjects && selectedStudent.selected_subjects.length > 0
-                              ? selectedStudent.selected_subjects
-                              : baseSubjs;
-
-                            const availableSubjects = Array.from(new Set([...studentSubjs, ...baseSubjs]));
+                            const getSubjectIcon = (sub: string) => resolveSubjectIcon(sub);
+                            const availableSubjects = resolveAvailableSubjectsForStudent(selectedStudent, isElementary);
 
                             return (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -10606,17 +11425,7 @@ export default function TeacherDashboard({
                                   const studentCompletedTasks = studentTasks.filter(t => t.status === 'completed');
                                   const completedSubjectTasks = studentCompletedTasks.filter(t => t.subject === selectedSubject || (!t.subject && (selectedSubject === '数学' || selectedSubject === '算数')));
  
-                                  let studentSeq = 0;
-                                  if (completedSubjectTasks.length > 0) {
-                              const completedUnitIds = completedSubjectTasks.map(t => t.unit_id);
-                              const completedUnits = subjectUnits.filter(u => completedUnitIds.includes(u.id));
-                              studentSeq = Math.max(0, ...completedUnits.map(u => u.sequence_order));
-                            } else if (selectedStudent && selectedStudent.start_unit_id) {
-                              const startUnit = subjectUnits.find(u => u.id === selectedStudent.start_unit_id);
-                              if (startUnit) {
-                                studentSeq = startUnit.sequence_order - 1;
-                              }
-                            }
+                                  const studentSeq = calculateStudentMilestoneSeq(completedSubjectTasks, subjectUnits, selectedStudent);
  
                             const target = plan.target_sequence_order || 0;
                             const isStudentCompleted = studentSeq >= target;
@@ -11384,7 +12193,7 @@ export default function TeacherDashboard({
                             <button
                               type="button"
                               onClick={() => {
-                                const current = (editForm as any).target_schools || [{ school_name: editForm.target_school || '', course_name: '' }];
+                                const current = resolveTargetSchoolsWithFallback((editForm as any).target_schools, editForm.target_school);
                                 if (current.length < 3) {
                                   const updated = [...current, { school_name: '', course_name: '' }];
                                   setEditForm({ ...editForm, target_schools: updated, target_school: updated[0]?.school_name || '' } as any);
@@ -11397,7 +12206,7 @@ export default function TeacherDashboard({
                           )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {((editForm as any).target_schools || [{ school_name: editForm.target_school || '', course_name: '' }]).map((sch: any, idx: number) => (
+                          {resolveTargetSchoolsWithFallback((editForm as any).target_schools, editForm.target_school).map((sch: any, idx: number) => (
                             <div key={idx} style={{ display: 'flex', gap: '10px', alignItems: 'center', backgroundColor: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4f46e5', width: '60px', flexShrink: 0 }}>
                                 {idx === 0 ? '第1志望' : idx === 1 ? '第2志望' : '第3志望'}
@@ -11408,7 +12217,7 @@ export default function TeacherDashboard({
                                   placeholder="志望校名（例: 天登星雲高校）"
                                   value={sch.school_name || ''}
                                   onChange={e => {
-                                    const current = [...((editForm as any).target_schools || [{ school_name: '', course_name: '' }])];
+                                    const current = [...resolveTargetSchoolsWithFallback((editForm as any).target_schools, editForm.target_school)];
                                     current[idx] = { ...current[idx], school_name: e.target.value };
                                     setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
                                   }}
@@ -11422,7 +12231,7 @@ export default function TeacherDashboard({
                                   placeholder="学科・コース名（例: 普通科 特進コース）"
                                   value={sch.course_name || ''}
                                   onChange={e => {
-                                    const current = [...((editForm as any).target_schools || [{ school_name: '', course_name: '' }])];
+                                    const current = [...resolveTargetSchoolsWithFallback((editForm as any).target_schools, editForm.target_school)];
                                     current[idx] = { ...current[idx], course_name: e.target.value };
                                     setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
                                   }}
@@ -11435,7 +12244,7 @@ export default function TeacherDashboard({
                                   type="button"
                                   title="この志望校を削除"
                                   onClick={() => {
-                                    const current = [...((editForm as any).target_schools || [])];
+                                    const current = [...resolveTargetSchoolsWithFallback((editForm as any).target_schools, editForm.target_school)];
                                     current.splice(idx, 1);
                                     setEditForm({ ...editForm, target_schools: current, target_school: current[0]?.school_name || '' } as any);
                                   }}
@@ -11520,7 +12329,7 @@ export default function TeacherDashboard({
                               value={(editForm as any).weekly_sessions_count || '2回'} 
                               onChange={e => {
                                 const newFreq = e.target.value;
-                                const max = newFreq.includes('2') ? 2 : newFreq.includes('3') ? 3 : newFreq.includes('4') ? 4 : newFreq.includes('5') ? 5 : null;
+                                const max = parseWeeklyAttendanceLimit(newFreq);
                                 let curDays = ((editForm as any).selected_days || ['tuesday', 'friday']);
                                 if (max !== null && curDays.length > max) {
                                   curDays = curDays.slice(0, max);
@@ -11579,7 +12388,7 @@ export default function TeacherDashboard({
                             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
                               {(() => {
                                 const freq = (editForm as any).weekly_sessions_count || '2回';
-                                const max = freq.includes('2') ? 2 : freq.includes('3') ? 3 : freq.includes('4') ? 4 : freq.includes('5') ? 5 : null;
+                                const max = parseWeeklyAttendanceLimit(freq);
                                 const curDays = ((editForm as any).selected_days || ['tuesday', 'friday']);
                                 return max !== null ? `選択中: ${curDays.length} / 最大${max}日` : `選択中: ${curDays.length}日 (無制限)`;
                               })()}
@@ -11605,7 +12414,7 @@ export default function TeacherDashboard({
                                   data-testid={`day-chip-${d.id}`}
                                   onClick={() => {
                                     const freq = (editForm as any).weekly_sessions_count || '2回';
-                                    const max = freq.includes('2') ? 2 : freq.includes('3') ? 3 : freq.includes('4') ? 4 : freq.includes('5') ? 5 : null;
+                                    const max = parseWeeklyAttendanceLimit(freq);
                                     if (isSelected) {
                                       const filtered = curDays.filter((x: string) => x !== d.id);
                                       setEditForm({ ...editForm, selected_days: filtered } as any);
@@ -11774,79 +12583,22 @@ export default function TeacherDashboard({
                               }
 
                               // Sort grade options naturally
-                              const gradeOrder = ['1年生', '2年生', '3年生', '4年生', '5年生', '6年生', '中1', '中2', '中3', '高1', '高2', '高3'];
-                              gradeOptions.sort((a, b) => {
-                                const ia = gradeOrder.indexOf(a);
-                                const ib = gradeOrder.indexOf(b);
-                                if (ia !== -1 && ib !== -1) return ia - ib;
-                                if (ia !== -1) return -1;
-                                if (ib !== -1) return 1;
-                                return a.localeCompare(b, 'ja');
-                              });
+                              gradeOptions = sortGradeOptions(gradeOptions);
 
                               // Current selected grade in state, or infer from existing val
-                              let curGrade = selectedStartGrades[item.key] || '';
-                              if (!curGrade && val) {
-                                const foundMaster = mastersForSubject.find(m => m.id === val || String(m.sort_order) === String(val) || m.unit_name === val || m.lesson_name === val);
-                                if (foundMaster) {
-                                  curGrade = normalizeGrade(foundMaster.grade_level || foundMaster.grade);
-                                }
-                              }
+                              const curGrade = inferSelectedStartGrade(selectedStartGrades[item.key], val, mastersForSubject);
 
-                              // Filter curriculum masters by selected grade
-                              const filteredMasters = curGrade 
-                                ? mastersForSubject.filter(m => {
-                                    const g = m.grade_level || m.grade || '';
-                                    return g === curGrade || 
-                                           normalizeGrade(g) === normalizeGrade(curGrade) || 
-                                           normalizeStandardGrade(g) === normalizeStandardGrade(curGrade);
-                                  }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-                                : [];
-
-                              // Also find school units for fallback
                               const schoolUnits = allCurriculumUnits.filter(u => 
                                 (u.school_id === selectedStudent.school_id || !u.school_id) && 
-                                (u.subject === item.subject || (item.subject === '数学' && u.subject === '算数') || (item.subject === '算数' && u.subject === '数学'))
+                                isMatchingSubjectGroup(u.subject, item.subject)
                               );
 
-                              // 1. Group unique units by unit_name in ascending order of sort_order, saving earliest lesson id
-                              const uniqueUnitOptions: Array<{ id: string; name: string; lessonIds: string[]; sort_order: number }> = [];
-                              const seenUnitNames = new Set<string>();
-
-                              if (filteredMasters.length > 0) {
-                                for (const m of filteredMasters) {
-                                  const rawName = (m.unit_name || m.lesson_name || '').trim();
-                                  if (!rawName) continue;
-                                  if (!seenUnitNames.has(rawName)) {
-                                    seenUnitNames.add(rawName);
-                                    uniqueUnitOptions.push({
-                                      id: m.id, // Earliest lesson ID in this unit (lowest sort_order)
-                                      name: rawName,
-                                      lessonIds: [m.id],
-                                      sort_order: m.sort_order || 0
-                                    });
-                                  } else {
-                                    const existing = uniqueUnitOptions.find(u => u.name === rawName);
-                                    if (existing) {
-                                      existing.lessonIds.push(m.id);
-                                    }
-                                  }
-                                }
-                              } else if (!curGrade && mastersForSubject.length === 0 && schoolUnits.length > 0) {
-                                for (const u of schoolUnits) {
-                                  const rawName = (u.name || '').trim();
-                                  if (!rawName) continue;
-                                  if (!seenUnitNames.has(rawName)) {
-                                    seenUnitNames.add(rawName);
-                                    uniqueUnitOptions.push({
-                                      id: u.id,
-                                      name: rawName,
-                                      lessonIds: [u.id],
-                                      sort_order: u.sequence_order || 0
-                                    });
-                                  }
-                                }
-                              }
+                              const uniqueUnitOptions = buildUniqueUnitOptionsForSubject(
+                                curriculumMastersList,
+                                schoolUnits,
+                                item.subject,
+                                curGrade
+                              );
 
                               // Determine currently selected unit value in dropdown
                               let currentDropdownValue = '';

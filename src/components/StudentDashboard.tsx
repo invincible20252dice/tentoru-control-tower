@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import styles from './StudentDashboard.module.css';
 import { db, Student, LearningTask, CurriculumUnit, CurriculumMaster, LearningLog, MiniTestResult, HomeworkResult, StudentScheduleConfig, StudentLessonProgress } from '../lib/db';
-import { ensureMathEnglishUnitTests, normalizeGrade, getLatestUnitTestStatusForSubject, normalizeUnitName, getLessonRangeStepIds, getDisplaySteps } from '../lib/scheduler';
+import { ensureMathEnglishUnitTests, normalizeGrade, getLatestUnitTestStatusForSubject, normalizeUnitName, getLessonRangeStepIds, getDisplaySteps, sortBySortOrder, isElementaryGrade } from '../lib/scheduler';
 import SugorokuMap from './SugorokuMap';
 import { StudentScheduleConfigForm } from './StudentScheduleConfigForm';
+import { isLessonUnitTest } from './TeacherDashboard';
 
 interface StudentDashboardProps {
   student: Student;
@@ -13,106 +14,509 @@ interface StudentDashboardProps {
   onGoToTeacherSchedule?: (studentId: string, date: string) => void;
 }
 
+export function hasEvaluationResult(item: { score?: number | null; passed?: boolean | null; status?: string | null }): boolean {
+  if (!item) return false;
+  return (item.score !== null && item.score !== undefined) || item.passed !== undefined || item.status === 'passed' || item.status === 'failed';
+}
+
+export function sortDateDescending(a?: string | null, b?: string | null): number {
+  const timeA = a ? new Date(a).getTime() : 0;
+  const timeB = b ? new Date(b).getTime() : 0;
+  return timeB - timeA;
+}
+
+export function resolveStudentTaskSubject(subject?: string, isElem?: boolean): string {
+  if (subject && subject.trim() !== '') return subject;
+  return isElem ? '算数' : '数学';
+}
+
+export function resolveTaskSubjectName(taskSubject?: string, unitSubject?: string, defaultSubject: string = 'その他'): string {
+  if (taskSubject && taskSubject.trim() !== '') return taskSubject;
+  if (unitSubject && unitSubject.trim() !== '') return unitSubject;
+  return defaultSubject;
+}
+
+export function sortByPeriod<T extends { period?: number | null }>(a: T, b: T): number {
+  return (a.period || 0) - (b.period || 0);
+}
+
+export function matchesCandidateSubject(masterSubject: string, activeSubject: string, isElem: boolean): boolean {
+  if (masterSubject === activeSubject) return true;
+  if (isElem && masterSubject === '算数') return true;
+  if (!isElem && masterSubject === '数学') return true;
+  return false;
+}
+
+export function resolveTaskDisplayName(
+  task: { start_lesson_name?: string | null; custom_unit_name?: string | null; lesson_range?: string | null },
+  defaultName: string = '授業'
+): string {
+  return task.start_lesson_name || task.custom_unit_name || task.lesson_range || defaultName;
+}
+
+export function resolveFailureSubjectAndUnit(
+  targetTask?: LearningTask,
+  units?: CurriculumUnit[],
+  testSubject?: string,
+  testUnitName?: string
+): { subjectName: string; rawUnitName: string } {
+  const unit = (targetTask && units) ? units.find(u => u.id === targetTask.unit_id) : undefined;
+  const subjectName = targetTask?.subject || testSubject || unit?.subject || '算数';
+  const rawUnitName = targetTask?.start_lesson_name || targetTask?.custom_unit_name || testUnitName || unit?.name || '単元';
+  return { subjectName, rawUnitName };
+}
+
+export function isStepSkipDisallowed(
+  stepIndex: number,
+  allSteps: Array<{ id: string | number }>,
+  completedIds: Set<string>
+): boolean {
+  const firstIncomplete = allSteps.findIndex(s => !completedIds.has(String(s.id)));
+  return firstIncomplete !== -1 && stepIndex > firstIncomplete;
+}
+
+export function resolveTaskStepCompletionStatus(
+  task: LearningTask,
+  isUnitTest: boolean,
+  isAllStepsCompleted: boolean,
+  currentDateStr: string
+): {
+  newStatus: LearningTask['status'];
+  newTestPassed: boolean;
+  newActualCompletedDate: string | undefined;
+} {
+  let newStatus: LearningTask['status'] = task.status;
+  let newTestPassed = task.test_passed || false;
+  let newActualCompletedDate = task.actual_completed_date;
+
+  if (isUnitTest) {
+    if (task.status === 'failed') {
+      newStatus = 'failed';
+      newTestPassed = false;
+    } else if (task.status === 'completed') {
+      newStatus = 'completed';
+      newTestPassed = true;
+    } else {
+      newStatus = 'unstarted';
+      newTestPassed = false;
+    }
+  } else {
+    if (isAllStepsCompleted) {
+      newStatus = 'completed';
+      newTestPassed = true;
+      newActualCompletedDate = currentDateStr;
+    }
+  }
+  return { newStatus, newTestPassed, newActualCompletedDate };
+}
+
+export function isTaskUnitTest(
+  task?: Partial<LearningTask> | null,
+  step?: { name?: string; fullTitle?: string } | null
+): boolean {
+  if (!task && !step) return false;
+
+  const isYarinaoshi = Boolean(
+    task?.custom_unit_name?.includes('ーやり直しー') ||
+    task?.start_lesson_name?.includes('ーやり直しー') ||
+    task?.lesson_range?.includes('ーやり直しー')
+  );
+  if (isYarinaoshi) return false;
+
+  if (step) {
+    if (isLessonUnitTest(step.name) || isLessonUnitTest(step.fullTitle)) return true;
+    if (step.name?.includes('再テスト') || step.fullTitle?.includes('再テスト')) return true;
+  }
+
+  if (task) {
+    if (
+      isLessonUnitTest(task.start_lesson_name) ||
+      isLessonUnitTest(task.end_lesson_name) ||
+      isLessonUnitTest(task.lesson_range) ||
+      isLessonUnitTest(task.custom_unit_name)
+    ) {
+      return true;
+    }
+    if (
+      task.start_lesson_name?.includes('再テスト') ||
+      task.end_lesson_name?.includes('再テスト') ||
+      task.lesson_range?.includes('再テスト') ||
+      task.custom_unit_name?.includes('再テスト')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function resolveTaskStepLessons(params: {
+  task: LearningTask;
+  units: CurriculumUnit[];
+  student: Student;
+  curriculumMasters?: CurriculumMaster[];
+}): Array<{ id: string; name: string; fullTitle: string }> {
+  const { task, units, student, curriculumMasters = [] } = params;
+  const isRemedial = Boolean(
+    task.custom_unit_name?.includes('【復習】') ||
+    task.start_lesson_name?.includes('【復習】') ||
+    task.lesson_range?.includes('【復習】') ||
+    task.custom_unit_name?.includes('ーやり直しー') ||
+    task.start_lesson_name?.includes('ーやり直しー') ||
+    task.lesson_range?.includes('ーやり直しー')
+  );
+  if (isRemedial) {
+    const remedialName = resolveTaskDisplayName(task, '単元確認テスト　ーやり直しー');
+    return [{ id: task.id || `task-${task.period}`, name: remedialName, fullTitle: remedialName }];
+  }
+
+  const mastersSource = curriculumMasters.length > 0 ? curriculumMasters : db.getCurriculumMasters();
+
+  // 単一データソース: getDisplaySteps により全ステップを確実に展開（学習計画・進度タイムライン・生徒画面で100%同一保証）
+  const steps = getDisplaySteps(task, {
+    curriculumMasters: mastersSource,
+    curriculumUnits: units,
+    studentGrade: student.grade,
+    schoolId: student.school_id
+  });
+
+  if (steps && steps.length > 0 && steps[0].id !== 'lesson-fallback') {
+    return steps.map(s => ({ id: s.id, name: s.name, fullTitle: s.fullTitle }));
+  }
+
+  const defaultName = resolveTaskDisplayName(task, '授業');
+  return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
+}
+
+export function determineInitialDate(
+  studentId: string,
+  initialDate?: string,
+  todayStr: string = new Date().toISOString().split('T')[0],
+  stTasks: LearningTask[] = db.getLearningTasks(),
+  miniTests: MiniTestResult[] = db.getMiniTestResults(),
+  hwResults: HomeworkResult[] = db.getHomeworkResults()
+): string {
+  if (initialDate) return initialDate;
+  const studentTasks = stTasks.filter(t => t.student_id === studentId);
+  const hasTodayTasks = studentTasks.some(t => (t.scheduled_date === todayStr || t.scheduled_date?.startsWith(todayStr)) && t.period !== null);
+  const hasTodayTestsOrHw = miniTests.some(r => r.student_id === studentId && (r.date === todayStr || r.date?.startsWith(todayStr))) ||
+    hwResults.some(r => r.student_id === studentId && (r.date === todayStr || r.date?.startsWith(todayStr)));
+  if (hasTodayTasks || hasTodayTestsOrHw) return todayStr;
+  const upcomingTasks = studentTasks
+    .filter(t => t.scheduled_date >= todayStr && t.period !== null)
+    .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+  if (upcomingTasks.length > 0) return upcomingTasks[0].scheduled_date;
+  const allScheduledTasks = studentTasks
+    .filter(t => t.period !== null)
+    .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+  if (allScheduledTasks.length > 0) return allScheduledTasks[0].scheduled_date;
+  return todayStr;
+}
+
+export function checkIsAutoFallbackDate(
+  studentId: string,
+  initialDate?: string,
+  todayStr: string = new Date().toISOString().split('T')[0],
+  stTasks: LearningTask[] = db.getLearningTasks(),
+  miniTests: MiniTestResult[] = db.getMiniTestResults(),
+  hwResults: HomeworkResult[] = db.getHomeworkResults()
+): boolean {
+  if (initialDate) return false;
+  const studentTasks = stTasks.filter(t => t.student_id === studentId);
+  const hasTodayTasks = studentTasks.some(t => (t.scheduled_date === todayStr || t.scheduled_date?.startsWith(todayStr)) && t.period !== null);
+  const hasTodayTestsOrHw = miniTests.some(r => r.student_id === studentId && (r.date === todayStr || r.date?.startsWith(todayStr))) ||
+    hwResults.some(r => r.student_id === studentId && (r.date === todayStr || r.date?.startsWith(todayStr)));
+  const initial = determineInitialDate(studentId, initialDate, todayStr, stTasks, miniTests, hwResults);
+  return !hasTodayTasks && !hasTodayTestsOrHw && initial !== todayStr;
+}
+
+export function resolveNextAttendanceDate(baseDateStr: string, st: Pick<Student, 'selected_days'>): string {
+  const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
+  const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
+  
+  const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+  const targetDayNums = days.map(d => dayMap[d.toLowerCase()]).filter(n => n !== undefined);
+  
+  const d = new Date(validBase);
+  for (let i = 1; i <= 14; i++) {
+    const future = new Date(d.getTime() + i * 24 * 60 * 60 * 1000);
+    if (targetDayNums.includes(future.getDay())) {
+      return future.toISOString().split('T')[0];
+    }
+  }
+  const fallback = new Date(d.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return fallback.toISOString().split('T')[0];
+}
+
+export function cleanUnitTestName(rawName?: string): string {
+  if (!rawName) return '単元';
+  return rawName
+    .replace(/（再テスト）/g, '')
+    .replace(/復習/g, '')
+    .replace(/単元確認テスト\s*ーやり直しー/g, '')
+    .replace(/ーやり直しー/g, '')
+    .replace(/\s*-\s*単元確認テスト/g, '')
+    .replace(/\s*-\s*単元テスト/g, '')
+    .replace(/\s*-\s*確認テスト/g, '')
+    .replace(/単元確認テスト/g, '')
+    .replace(/単元テスト/g, '')
+    .replace(/確認テスト/g, '')
+    .trim() || '単元';
+}
+
+export function isRemedialTask(t?: Partial<LearningTask> | null): boolean {
+  if (!t) return false;
+  return Boolean(
+    t.custom_unit_name?.includes('【やり直し授業】') ||
+    t.start_lesson_name?.includes('【やり直し授業】') ||
+    t.lesson_range?.includes('【やり直し授業】') ||
+    t.custom_unit_name?.includes('やり直し') ||
+    t.start_lesson_name?.includes('やり直し') ||
+    t.lesson_range?.includes('やり直し') ||
+    t.custom_unit_name?.includes('ーやり直しー') ||
+    t.start_lesson_name?.includes('ーやり直しー') ||
+    t.lesson_range?.includes('ーやり直しー')
+  );
+}
+
+export function shiftTasksForRemedial(tasks: LearningTask[], remedialPeriod: number): LearningTask[] {
+  return tasks.map(t => {
+    if ((t.period || 0) >= remedialPeriod) {
+      return {
+        ...t,
+        period: (t.period || 0) + 1
+      };
+    }
+    return t;
+  });
+}
+
+export function resolveFailedScoreVal(testScore?: number | null, taskScoreStr?: string): number {
+  if (testScore !== undefined && testScore !== null && !isNaN(testScore)) {
+    return testScore;
+  }
+  if (taskScoreStr) {
+    const parsed = parseInt(taskScoreStr, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 60;
+}
+
+export function resolveAdvanceTitle(nextMaster?: { unit_name?: string | null; lesson_name?: string | null } | null): string {
+  if (!nextMaster) return '新単元先取り学習';
+  if (nextMaster.unit_name && nextMaster.unit_name.trim()) {
+    return nextMaster.lesson_name ? `${nextMaster.unit_name.trim()} - ${nextMaster.lesson_name.trim()}` : nextMaster.unit_name.trim();
+  }
+  return (nextMaster.lesson_name || '').trim() || '新単元先取り学習';
+}
+
+export function resolveLastPeriod(tasks?: Array<{ period?: number | null }> | null): number {
+  if (!tasks || tasks.length === 0) return 1;
+  return Math.max(...tasks.map(t => t.period || 1));
+}
+
+export function resolveActiveSubject(targetSubject?: string | null, isElem?: boolean): string {
+  if (targetSubject && targetSubject.trim() !== '') return targetSubject.trim();
+  return isElem ? '算数' : '数学';
+}
+
+export function formatMasterLessonTitle(unitName?: string | null, lessonName?: string | null): string {
+  const cleanLesson = (lessonName || '').trim();
+  if (unitName && unitName.trim()) {
+    return cleanLesson ? `${unitName.trim()} - ${cleanLesson}` : unitName.trim();
+  }
+  return cleanLesson || '授業';
+}
+
+export function resolveAutoGeneratedHomework(params: {
+  task: LearningTask;
+  stepLessons: Array<{ id: string; name: string; fullTitle: string }>;
+  currentStudent: Student;
+  currentDateStr: string;
+}): HomeworkResult | null {
+  const { task, stepLessons, currentStudent, currentDateStr } = params;
+  const isUT = Boolean(
+    isLessonUnitTest(task.custom_unit_name) ||
+    isLessonUnitTest(task.start_lesson_name) ||
+    isLessonUnitTest(task.lesson_range)
+  );
+  if (isUT) return null; // 単元テストは対象外
+
+  const isElem = currentStudent.grade.startsWith('小') || currentStudent.grade === '園児';
+  const hwSubject = resolveStudentTaskSubject(task.subject, isElem);
+  const stepNames = stepLessons.map(s => s.name || s.fullTitle).join(', ');
+  const hwContent = `【復習演習】${hwSubject}: ${task.custom_unit_name || task.start_lesson_name || stepNames}（2回目演習ドリル）`;
+  const nextAttendance = resolveNextAttendanceDate(currentDateStr, currentStudent);
+
+  const hwId = `hw-auto-${currentStudent.id}-${currentDateStr}-${task.period || 1}`;
+  return {
+    id: hwId,
+    student_id: currentStudent.id,
+    date: currentDateStr,
+    subject: hwSubject,
+    homework_type: 'drill_2nd',
+    homework_content: hwContent,
+    homework_deadline: nextAttendance,
+    status: 'incomplete',
+    target_scope: 'individual',
+    created_at: new Date().toISOString()
+  };
+}
+
+export function resolveEffectivePassingScore(level?: string | null, passingLine?: string | null): number {
+  const stLevel = level || 'A';
+  let passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
+  if (passingLine) {
+    const matchNum = passingLine.match(/\d+/);
+    if (matchNum) {
+      const limit = parseInt(matchNum[0], 10);
+      passScore = (passingLine.includes('%') || passingLine.includes('割'))
+        ? (passingLine.includes('割') ? limit * 10 : limit)
+        : limit;
+    }
+  }
+  return passScore;
+}
+
+export function resolveCleanUnitName(task: Partial<LearningTask>, unit?: Partial<CurriculumUnit> | null): { rawUnitName: string; cleanUnitName: string } {
+  const rawUnitName = task.start_lesson_name || task.custom_unit_name || unit?.name || '単元';
+  const cleanUnitName = (rawUnitName || '')
+    .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
+    .replace(/【やり直し授業】/g, '')
+    .replace(/（再テスト）/g, '')
+    .replace(/復習/g, '')
+    .replace(/単元確認テスト\s*ーやり直しー/g, '')
+    .replace(/ーやり直しー/g, '')
+    .replace(/\s*-\s*単元確認テスト/g, '')
+    .replace(/\s*-\s*単元テスト/g, '')
+    .replace(/\s*-\s*確認テスト/g, '')
+    .replace(/単元確認テスト/g, '')
+    .replace(/単元テスト/g, '')
+    .replace(/確認テスト/g, '')
+    .trim() || '単元';
+  return { rawUnitName, cleanUnitName };
+}
+
+export function resolveUnitTestSuffix(rawUnitName: string): string {
+  if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
+    return 'まとめテスト（１）';
+  }
+  if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
+    return 'まとめテスト（２）';
+  }
+  if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
+    return 'まとめテスト（３）';
+  }
+  if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
+    return 'Check Test';
+  }
+  if (rawUnitName.includes('再テスト')) {
+    return '単元確認テスト（再テスト）';
+  }
+  return '単元確認テスト';
+}
+
+
+export function resolveCandidateMastersForNextUnit(
+  masters: CurriculumMaster[],
+  activeSubj: string,
+  isElem: boolean
+): CurriculumMaster[] {
+  let candidateMasters = masters
+    .filter(m => matchesCandidateSubject(m.subject, activeSubj, isElem))
+    .sort(sortBySortOrder);
+  if (candidateMasters.length === 0) {
+    candidateMasters = db.getCurriculumMasters()
+      .filter(m => matchesCandidateSubject(m.subject, activeSubj, isElem))
+      .sort(sortBySortOrder);
+  }
+  return candidateMasters;
+}
+
+export function sanitizeCompletedLessonIds(
+  studentId: string,
+  ids?: any[],
+  masters: CurriculumMaster[] = db.getCurriculumMasters(),
+  results: MiniTestResult[] = db.getMiniTestResults()
+): string[] {
+  if (!Array.isArray(ids)) return [];
+  
+  // 単元ごとの最新合否を判定し、最新が不合格のもののみ failedUnitKeys に特定
+  const failedUnitKeys = new Set<string>();
+  const studentResults = results
+    .filter(r => r.student_id === studentId && (r.test_type === 'unit_test' || r.test_content?.includes('テスト') || r.test_content?.includes('確認')))
+    .sort((a, b) => sortDateDescending(a.date || a.created_at, b.date || b.created_at));
+
+  const latestByNorm = new Map<string, (typeof studentResults)[0]>();
+  studentResults.forEach(r => {
+    const rawKey = r.unit_name || r.test_content;
+    const norm = normalizeUnitName(rawKey);
+    const key = norm || rawKey;
+    if (!key) return;
+    const hasEval = hasEvaluationResult(r);
+    const existing = latestByNorm.get(key);
+    if (!existing) {
+      latestByNorm.set(key, r);
+    } else {
+      const existingHasEval = hasEvaluationResult(existing);
+      if (!existingHasEval && hasEval) {
+        latestByNorm.set(key, r);
+      }
+    }
+  });
+
+  latestByNorm.forEach((r, key) => {
+    let passScore = 80;
+    if (r.passing_line) {
+      const match = r.passing_line.match(/\d+/);
+      if (match) passScore = parseInt(match[0], 10);
+    }
+    const isFailed = r.passed === false || r.status === 'failed' || (r.score !== null && r.score !== undefined && r.score < passScore);
+    if (isFailed) {
+      failedUnitKeys.add(key);
+      if (r.unit_name) failedUnitKeys.add(r.unit_name);
+      if (r.test_content) failedUnitKeys.add(r.test_content);
+    }
+  });
+
+  // 不合格の単元テストマスターID
+  const failedMasterIds = new Set<string>();
+  masters.forEach(m => {
+    const isUnitTest = m.item_type === 'unit_test' || isLessonUnitTest(m.lesson_name);
+    if (isUnitTest) {
+      const mNorm = normalizeUnitName(m.unit_name || m.lesson_name);
+      if (
+        failedUnitKeys.has(m.id) ||
+        (mNorm && failedUnitKeys.has(mNorm)) ||
+        (m.unit_name && failedUnitKeys.has(m.unit_name)) ||
+        (m.lesson_name && failedUnitKeys.has(m.lesson_name))
+      ) {
+        failedMasterIds.add(m.id);
+        failedMasterIds.add(String(m.id));
+      }
+    }
+  });
+
+  return Array.from(new Set(
+    ids
+      .filter(Boolean)
+      .map(String)
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !s.includes('単元確認テスト') && !failedMasterIds.has(s))
+  ));
+}
+
 export default function StudentDashboard({ student, onBackToPortal, theme = 'light', initialDate, onGoToTeacherSchedule }: StudentDashboardProps) {
   const getSystemTodayStr = () => new Date().toISOString().split('T')[0];
   const systemTodayStr = getSystemTodayStr();
 
-  const determineInitialDate = () => {
-    if (initialDate) return initialDate;
-    const todayStr = getSystemTodayStr();
-    const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
-    const hasTodayTasks = stTasks.some(t => t.scheduled_date === todayStr && t.period !== null);
-    const hasTodayTestsOrHw = db.getMiniTestResults().some(r => r.student_id === student.id && r.date === todayStr) ||
-      db.getHomeworkResults().some(r => r.student_id === student.id && r.date === todayStr);
-    if (hasTodayTasks || hasTodayTestsOrHw) return todayStr;
-    const upcomingTasks = stTasks
-      .filter(t => t.scheduled_date >= todayStr && t.period !== null)
-      .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-    if (upcomingTasks.length > 0) return upcomingTasks[0].scheduled_date;
-    const allScheduledTasks = stTasks
-      .filter(t => t.period !== null)
-      .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
-    if (allScheduledTasks.length > 0) return allScheduledTasks[0].scheduled_date;
-    return todayStr;
-  };
-
-  const sanitizeCompletedLessonIds = (ids?: any[]): string[] => {
-    if (!Array.isArray(ids)) return [];
-    const masters = typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : [];
-    const results = typeof db.getMiniTestResults === 'function' ? db.getMiniTestResults() : [];
-    
-    // 単元ごとの最新合否を判定し、最新が不合格のもののみ failedUnitKeys に特定
-    const failedUnitKeys = new Set<string>();
-    const studentResults = results
-      .filter(r => r.student_id === student.id && (r.test_type === 'unit_test' || r.test_content?.includes('テスト') || r.test_content?.includes('確認')))
-      .sort((a, b) => new Date(b.date || b.created_at || 0).getTime() - new Date(a.date || a.created_at || 0).getTime());
-
-    const latestByNorm = new Map<string, (typeof studentResults)[0]>();
-    studentResults.forEach(r => {
-      const rawKey = r.unit_name || r.test_content;
-      const norm = normalizeUnitName(rawKey);
-      const key = norm || rawKey;
-      if (!key) return;
-      const hasEval = (r.score !== null && r.score !== undefined) || r.passed !== undefined || r.status === 'passed' || r.status === 'failed';
-      const existing = latestByNorm.get(key);
-      if (!existing) {
-        latestByNorm.set(key, r);
-      } else {
-        const existingHasEval = (existing.score !== null && existing.score !== undefined) || existing.passed !== undefined || existing.status === 'passed' || existing.status === 'failed';
-        if (!existingHasEval && hasEval) {
-          latestByNorm.set(key, r);
-        }
-      }
-    });
-
-    latestByNorm.forEach((r, key) => {
-      let passScore = 80;
-      if (r.passing_line) {
-        const match = r.passing_line.match(/\d+/);
-        if (match) passScore = parseInt(match[0], 10);
-      }
-      const isFailed = r.passed === false || r.status === 'failed' || (r.score !== null && r.score !== undefined && r.score < passScore);
-      if (isFailed) {
-        failedUnitKeys.add(key);
-        if (r.unit_name) failedUnitKeys.add(r.unit_name);
-        if (r.test_content) failedUnitKeys.add(r.test_content);
-      }
-    });
-
-    // 不合格の単元テストマスターID
-    const failedMasterIds = new Set<string>();
-    masters.forEach(m => {
-      const isUnitTest = m.item_type === 'unit_test' || (m.lesson_name || '').includes('単元確認テスト') || (m.lesson_name || '').includes('単元テスト');
-      if (isUnitTest) {
-        const mNorm = normalizeUnitName(m.unit_name || m.lesson_name);
-        if (
-          failedUnitKeys.has(m.id) ||
-          (mNorm && failedUnitKeys.has(mNorm)) ||
-          (m.unit_name && failedUnitKeys.has(m.unit_name)) ||
-          (m.lesson_name && failedUnitKeys.has(m.lesson_name))
-        ) {
-          failedMasterIds.add(m.id);
-          failedMasterIds.add(String(m.id));
-        }
-      }
-    });
-
-    return Array.from(new Set(
-      ids
-        .filter(Boolean)
-        .map(String)
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.includes('単元確認テスト') && !failedMasterIds.has(s))
-    ));
-  };
-
   const getLatestStudent = (): Student => {
-    const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
+    const dbSt = db.getStudent(student.id);
     const rawIds = dbSt?.completed_lesson_ids || student.completed_lesson_ids || [];
     return {
       ...(dbSt || {}),
       ...student,
-      completed_lesson_ids: sanitizeCompletedLessonIds(rawIds)
+      completed_lesson_ids: sanitizeCompletedLessonIds(student.id, rawIds)
     };
   };
 
@@ -136,7 +540,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   useEffect(() => {
     setCurrentStudent(prev => {
       const latest = getLatestStudent();
-      const mergedCompleted = sanitizeCompletedLessonIds([
+      const mergedCompleted = sanitizeCompletedLessonIds(student.id, [
         ...(prev?.completed_lesson_ids || []),
         ...(latest?.completed_lesson_ids || []),
         ...(student.completed_lesson_ids || [])
@@ -149,39 +553,34 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     });
   }, [student.id, student.grade, student.name, student.status]);
 
-  const [currentDateStr, setCurrentDateStr] = useState<string>(determineInitialDate);
+  const getInitialDate = () => determineInitialDate(student.id, initialDate, systemTodayStr);
+  const [currentDateStr, setCurrentDateStr] = useState<string>(getInitialDate);
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState<boolean>(Boolean(initialDate));
-  const [isAutoFallbackDate, setIsAutoFallbackDate] = useState<boolean>(() => {
-    if (initialDate) return false;
-    const todayStr = getSystemTodayStr();
-    const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
-    const hasTodayTasks = stTasks.some(t => (t.scheduled_date === todayStr || t.scheduled_date?.startsWith(todayStr)) && t.period !== null);
-    const hasTodayTestsOrHw = db.getMiniTestResults().some(r => r.student_id === student.id && (r.date === todayStr || r.date?.startsWith(todayStr))) ||
-      db.getHomeworkResults().some(r => r.student_id === student.id && (r.date === todayStr || r.date?.startsWith(todayStr)));
-    return !hasTodayTasks && !hasTodayTestsOrHw && determineInitialDate() !== todayStr;
-  });
+  const [isAutoFallbackDate, setIsAutoFallbackDate] = useState<boolean>(() =>
+    checkIsAutoFallbackDate(student.id, initialDate, systemTodayStr)
+  );
   const [tasks, setTasks] = useState<LearningTask[]>(() => db.getLearningTasks().filter(t => t.student_id === student.id));
   const [units, setUnits] = useState<CurriculumUnit[]>(() => db.getCurriculumUnits());
   const [curriculumMasters, setCurriculumMasters] = useState<CurriculumMaster[]>(() => db.getCurriculumMasters());
   const [todayTasks, setTodayTasks] = useState<LearningTask[]>(() => {
-    const d = determineInitialDate();
+    const d = getInitialDate();
     const stTasks = db.getLearningTasks().filter(t => t.student_id === student.id);
     const today = stTasks.filter(t => (t.scheduled_date === d || t.scheduled_date?.startsWith(d)) && t.period !== null);
-    today.sort((a, b) => (a.period || 0) - (b.period || 0));
+    today.sort(sortByPeriod);
     return today;
   });
   const [showScheduleConfig, setShowScheduleConfig] = useState(false);
   const [miniTestResults, setMiniTestResults] = useState<MiniTestResult[]>(() => {
-    const d = determineInitialDate();
+    const d = getInitialDate();
     return db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === d);
   });
   const [assignedTestIds, setAssignedTestIds] = useState<Set<string>>(() => {
-    const d = determineInitialDate();
+    const d = getInitialDate();
     const initialMini = db.getMiniTestResults().filter(r => r.student_id === student.id && r.date === d);
     return new Set(initialMini.map(m => m.id));
   });
   const [homeworkResults, setHomeworkResults] = useState<HomeworkResult[]>(() => {
-    const d = determineInitialDate();
+    const d = getInitialDate();
     return db.getHomeworkResults().filter(r => r.student_id === student.id && r.date === d);
   });
   const [studentScores, setStudentScores] = useState<Record<string, string>>({});
@@ -189,7 +588,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   const [scheduleConfig, setScheduleConfig] = useState<StudentScheduleConfig | undefined>(() => db.getStudentScheduleConfig(student.id));
   const [activeMobileTab, setActiveMobileTab] = useState<'mission' | 'map'>('mission');
   const [lessonProgressList, setLessonProgressList] = useState<StudentLessonProgress[]>(() => 
-    typeof db.getStudentLessonProgressList === 'function' ? db.getStudentLessonProgressList(student.id) : []
+    db.getStudentLessonProgressList(student.id)
   );
 
   const loadData = async () => {
@@ -211,13 +610,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     try {
       progressList = await db.fetchStudentLessonProgressList(student.id);
     } catch {
-      progressList = typeof db.getStudentLessonProgressList === 'function' ? db.getStudentLessonProgressList(student.id) : [];
+      progressList = db.getStudentLessonProgressList(student.id);
     }
     setLessonProgressList(progressList);
 
-    const dbSt = typeof db.getStudent === 'function' ? db.getStudent(student.id) : (typeof db.getStudents === 'function' ? db.getStudents().find(s => s.id === student.id) : null);
+    const dbSt = db.getStudent(student.id);
     const originalRawIds = dbSt?.completed_lesson_ids || student.completed_lesson_ids || [];
-    const sanitizedIds = sanitizeCompletedLessonIds(originalRawIds);
+    const sanitizedIds = sanitizeCompletedLessonIds(student.id, originalRawIds);
 
     const latestStudent: Student = {
       ...(dbSt || {}),
@@ -275,7 +674,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
         !t.start_lesson_name?.includes('【やり直し授業】') &&
         !t.lesson_range?.includes('【やり直し授業】')
       );
-    today.sort((a, b) => (a.period || 0) - (b.period || 0));
+    today.sort(sortByPeriod);
     setTodayTasks(today);
 
     // 小テスト結果
@@ -333,84 +732,28 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 1コマに含まれる授業ステップ（複数レッスン）の展開関数
   const getTaskStepLessons = (task: LearningTask, mastersOverride?: CurriculumMaster[]): Array<{ id: string; name: string; fullTitle: string }> => {
-    // やり直しタスクの場合は独自の復習・テストステップをそのまま使用
-    const isRemedial = Boolean(
-      task.custom_unit_name?.includes('やり直し') ||
-      task.start_lesson_name?.includes('やり直し') ||
-      task.lesson_range?.includes('やり直し') ||
-      task.custom_unit_name?.includes('【復習】') ||
-      task.start_lesson_name?.includes('【復習】') ||
-      task.lesson_range?.includes('【復習】') ||
-      task.custom_unit_name?.includes('ーやり直しー') ||
-      task.start_lesson_name?.includes('ーやり直しー') ||
-      task.lesson_range?.includes('ーやり直しー')
-    );
-    if (isRemedial) {
-      const remedialName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '単元確認テスト　ーやり直しー';
-      return [{ id: task.id || `task-${task.period}`, name: remedialName, fullTitle: remedialName }];
-    }
-
-    const mastersSource = mastersOverride || (curriculumMasters.length > 0 ? curriculumMasters : (typeof db.getCurriculumMasters === 'function' ? db.getCurriculumMasters() : []));
-
-    // 単一データソース: getDisplaySteps により全ステップを確実に展開（学習計画・進度タイムライン・生徒画面で100%同一保証）
-    const steps = getDisplaySteps(task, {
-      curriculumMasters: mastersSource,
-      curriculumUnits: units,
-      studentGrade: student.grade,
-      schoolId: student.school_id
+    return resolveTaskStepLessons({
+      task,
+      units,
+      student,
+      curriculumMasters: mastersOverride || (curriculumMasters.length > 0 ? curriculumMasters : db.getCurriculumMasters())
     });
-
-    if (steps && steps.length > 0 && steps[0].id !== 'lesson-fallback') {
-      return steps.map(s => ({ id: s.id, name: s.name, fullTitle: s.fullTitle }));
-    }
-
-    // fallback to curriculumUnits
-    if (task.unit_id) {
-      const unit = units.find(u => u.id === task.unit_id);
-      if (unit) {
-        return [{ id: unit.id, name: unit.name, fullTitle: unit.name }];
-      }
-    }
-
-    const defaultName = task.start_lesson_name || task.custom_unit_name || task.lesson_range || '授業';
-    return [{ id: task.id || `task-${task.period}`, name: defaultName, fullTitle: defaultName }];
   };
 
   // 授業コマ受講完了時の次回通塾日を期限とする宿題自動生成ヘルパー
   const autoGenerateHomeworkForCompletedTask = async (task: LearningTask, stepLessons: Array<{ id: string; name: string; fullTitle: string }>) => {
     try {
-      const isUT = Boolean(
-        task.custom_unit_name?.includes('単元テスト') ||
-        task.custom_unit_name?.includes('単元確認テスト') ||
-        task.start_lesson_name?.includes('単元テスト') ||
-        task.start_lesson_name?.includes('単元確認テスト') ||
-        task.lesson_range?.includes('単元テスト')
-      );
-      if (isUT) return; // 単元テストは対象外
-
-      const isElem = currentStudent.grade.startsWith('小') || currentStudent.grade === '園児';
-      const hwSubject = task.subject || (isElem ? '算数' : '数学');
-      const stepNames = stepLessons.map(s => s.name || s.fullTitle).join(', ');
-      const hwContent = `【復習演習】${hwSubject}: ${task.custom_unit_name || task.start_lesson_name || stepNames}（2回目演習ドリル）`;
-      const nextAttendance = getNextAttendanceDate(currentDateStr, currentStudent);
-
-      const hwId = `hw-auto-${currentStudent.id}-${currentDateStr}-${task.period || 1}`;
-      const newHw: HomeworkResult = {
-        id: hwId,
-        student_id: currentStudent.id,
-        date: currentDateStr,
-        subject: hwSubject,
-        homework_type: 'drill_2nd',
-        homework_content: hwContent,
-        homework_deadline: nextAttendance,
-        status: 'incomplete',
-        target_scope: 'individual',
-        created_at: new Date().toISOString()
-      };
+      const newHw = resolveAutoGeneratedHomework({
+        task,
+        stepLessons,
+        currentStudent,
+        currentDateStr
+      });
+      if (!newHw) return;
 
       await db.saveHomeworkResult(newHw);
       setHomeworkResults(prev => {
-        const filtered = prev.filter(h => h.id !== hwId && h.homework_content !== hwContent);
+        const filtered = prev.filter(h => h.id !== newHw.id && h.homework_content !== newHw.homework_content);
         return [...filtered, newHw];
       });
     } catch (e) {
@@ -419,43 +762,20 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
   };
 
   // 次回通塾予定日の計算ヘルパー
-  const getNextAttendanceDate = (baseDateStr: string, st: Student): string => {
-    const validBase = baseDateStr && !isNaN(new Date(baseDateStr).getTime()) ? baseDateStr : new Date().toISOString().split('T')[0];
-    const days = st.selected_days && st.selected_days.length > 0 ? st.selected_days : ['tuesday', 'friday'];
-    
-    const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
-    const targetDayNums = days.map(d => dayMap[d.toLowerCase()]).filter(n => n !== undefined);
-    
-    const d = new Date(validBase);
-    for (let i = 1; i <= 14; i++) {
-      const future = new Date(d.getTime() + i * 24 * 60 * 60 * 1000);
-      if (targetDayNums.includes(future.getDay())) {
-        return future.toISOString().split('T')[0];
-      }
-    }
-    const fallback = new Date(d.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return fallback.toISOString().split('T')[0];
-  };
+  const getNextAttendanceDate = (baseDateStr: string, st: Student): string => resolveNextAttendanceDate(baseDateStr, st);
 
   // 合格時：次回通塾日へ新単元の最初の授業（From: 新単元 STEP 1）を自動セット・引き継ぎ
   const scheduleNextUnitForStudent = async (st: Student, targetSubject?: string) => {
     const nextAttendanceDate = getNextAttendanceDate(currentDateStr, st);
     const completedSet = new Set((st.completed_lesson_ids || []).map(String));
-    const isElem = st.grade.startsWith('小') || /^[1-6]年生?$/.test(st.grade) || st.grade === '園児';
-    const activeSubj = targetSubject || (isElem ? '算数' : '数学');
+    const isElem = isElementaryGrade(st.grade);
+    const activeSubj = resolveActiveSubject(targetSubject, isElem);
     
-    let candidateMasters = curriculumMasters
-      .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    if (candidateMasters.length === 0) {
-      candidateMasters = db.getCurriculumMasters()
-        .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    }
+    const candidateMasters = resolveCandidateMastersForNextUnit(curriculumMasters, activeSubj, isElem);
     
     const nextNewMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
     if (nextNewMaster) {
-      const nextTitle = nextNewMaster.unit_name ? `${nextNewMaster.unit_name} - ${nextNewMaster.lesson_name}` : nextNewMaster.lesson_name;
+      const nextTitle = formatMasterLessonTitle(nextNewMaster.unit_name, nextNewMaster.lesson_name);
       const nextNewTask: LearningTask = {
         id: `task-nextunit-${st.id}-${nextAttendanceDate}-1`,
         student_id: st.id,
@@ -488,22 +808,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     testPassingLine?: string | null,
     testScore?: number | null
   ) => {
-    const unit = targetTask ? units.find(u => u.id === targetTask.unit_id) : undefined;
-    const subjectName = targetTask?.subject || testSubject || (unit ? unit.subject : '算数');
-    const rawUnitName = targetTask?.start_lesson_name || targetTask?.custom_unit_name || testUnitName || (unit ? unit.name : '単元');
-    const cleanUnitName = rawUnitName
-      .replace(/【やり直し授業】/g, '')
-      .replace(/（再テスト）/g, '')
-      .replace(/復習/g, '')
-      .replace(/単元確認テスト\s*ーやり直しー/g, '')
-      .replace(/ーやり直しー/g, '')
-      .replace(/\s*-\s*単元確認テスト/g, '')
-      .replace(/\s*-\s*単元テスト/g, '')
-      .replace(/\s*-\s*確認テスト/g, '')
-      .replace(/単元確認テスト/g, '')
-      .replace(/単元テスト/g, '')
-      .replace(/確認テスト/g, '')
-      .trim() || '単元';
+    const { subjectName, rawUnitName } = resolveFailureSubjectAndUnit(targetTask, units, testSubject, testUnitName);
+    const cleanUnitName = cleanUnitTestName(rawUnitName);
     const reTestContent = `${subjectName}: ${cleanUnitName}（再テスト）`;
 
     const updatedTask: LearningTask | undefined = targetTask ? {
@@ -513,9 +819,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     } : undefined;
 
     // 0. 本日の小テスト結果管理にも不合格結果を保存・更新（講師ダッシュボードとの完全連動）
-    const failedScoreVal = (testScore !== undefined && testScore !== null && !isNaN(testScore))
-      ? testScore
-      : (targetTask && taskScores[targetTask.id] ? parseInt(taskScores[targetTask.id], 10) : 60);
+    const failedScoreVal = resolveFailedScoreVal(testScore, targetTask ? taskScores[targetTask.id] : undefined);
     const todayMini = db.getMiniTestResults().filter(r => r.student_id === currentStudent.id && r.date === currentDateStr);
     const existingMini = todayMini.find(m => 
       (targetTask && m.task_id === targetTask.id) ||
@@ -530,7 +834,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
       test_type: 'unit_test',
       unit_name: cleanUnitName,
       test_content: `${subjectName}: ${cleanUnitName} - 単元確認テスト`,
-      score: isNaN(failedScoreVal) ? 60 : failedScoreVal,
+      score: failedScoreVal,
       passed: false,
       status: 'failed',
       passing_line: targetTask?.passing_line || testPassingLine || '80%以上',
@@ -576,16 +880,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     // クリーンアップ対象: 古い【やり直し授業】を含むタスク、または既存の重複やり直しタスク
     const sanitizedDayTasks = currentDayAllTasks.filter(t => {
       if (targetTask && t.id === targetTask.id) return false;
-      const isRemedial = t.custom_unit_name?.includes('【やり直し授業】') ||
-                         t.start_lesson_name?.includes('【やり直し授業】') ||
-                         t.lesson_range?.includes('【やり直し授業】') ||
-                         t.custom_unit_name?.includes('やり直し') ||
-                         t.start_lesson_name?.includes('やり直し') ||
-                         t.lesson_range?.includes('やり直し') ||
-                         t.custom_unit_name?.includes('ーやり直しー') ||
-                         t.start_lesson_name?.includes('ーやり直しー') ||
-                         t.lesson_range?.includes('ーやり直しー');
-      return !isRemedial;
+      return !isRemedialTask(t);
     });
 
     const lastPeriod = sanitizedDayTasks.length > 0 ? Math.max(...sanitizedDayTasks.map(t => t.period || 1)) : 0;
@@ -593,15 +888,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const remedialTitle = `【復習】${cleanUnitName} - 単元テスト（やり直し）`;
 
     // targetPeriod より後のタスク（元々のコマ2の英語、コマ3の国語など）の period を +1 シフト
-    const shiftedTasks = sanitizedDayTasks.map(t => {
-      if ((t.period || 0) >= remedialPeriod) {
-        return {
-          ...t,
-          period: (t.period || 0) + 1
-        };
-      }
-      return t;
-    });
+    const shiftedTasks = shiftTasksForRemedial(sanitizedDayTasks, remedialPeriod);
 
     const remedialTask: LearningTask = {
       id: `task-remedial-${currentStudent.id}-${Date.now()}`,
@@ -721,46 +1008,14 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     const currentTaskCompletedIds = new Set<string>(task.completed_lesson_ids?.map(String) || []);
 
     // 中抜き・スキップ受講の完全禁止ガード（未完了先頭ステップ以外は受講不可）
-    const firstIncompleteStepIdx = allSteps.findIndex(s => !currentTaskCompletedIds.has(String(s.id)));
-    if (firstIncompleteStepIdx !== -1 && stepIndex > firstIncompleteStepIdx) {
-      if (typeof window !== 'undefined') {
-        window.alert('前のステップを順番に受講してください。中抜き・スキップ受講はできません。');
-      }
+    if (isStepSkipDisallowed(stepIndex, allSteps, currentTaskCompletedIds)) {
+      window.alert('前のステップを順番に受講してください。中抜き・スキップ受講はできません。');
       return;
     }
 
     currentTaskCompletedIds.add(stepIdStr);
 
-    const isStepUnitTest = Boolean(
-      step.name.includes('単元確認テスト') ||
-      step.name.includes('単元テスト') ||
-      step.name.includes('確認テスト') ||
-      step.name.includes('再テスト') ||
-      step.fullTitle.includes('単元確認テスト') ||
-      step.fullTitle.includes('単元テスト') ||
-      step.fullTitle.includes('確認テスト') ||
-      step.fullTitle.includes('再テスト')
-    );
-
-    const isUnitTest = Boolean(
-      isStepUnitTest ||
-      task.start_lesson_name?.includes('単元テスト') ||
-      task.start_lesson_name?.includes('確認テスト') ||
-      task.start_lesson_name?.includes('単元確認テスト') ||
-      task.start_lesson_name?.includes('再テスト') ||
-      task.end_lesson_name?.includes('単元テスト') ||
-      task.end_lesson_name?.includes('確認テスト') ||
-      task.end_lesson_name?.includes('単元確認テスト') ||
-      task.end_lesson_name?.includes('再テスト') ||
-      task.lesson_range?.includes('単元テスト') ||
-      task.lesson_range?.includes('確認テスト') ||
-      task.lesson_range?.includes('単元確認テスト') ||
-      task.lesson_range?.includes('再テスト') ||
-      task.custom_unit_name?.includes('単元テスト') ||
-      task.custom_unit_name?.includes('確認テスト') ||
-      task.custom_unit_name?.includes('単元確認テスト') ||
-      task.custom_unit_name?.includes('再テスト')
-    ) && !task.custom_unit_name?.includes('ーやり直しー') && !task.start_lesson_name?.includes('ーやり直しー') && !task.lesson_range?.includes('ーやり直しー');
+    const isUnitTest = isTaskUnitTest(task, step);
 
     const studentCompletedIds = new Set<string>(currentStudent.completed_lesson_ids?.map(String) || []);
     if (!isUnitTest) {
@@ -769,34 +1024,11 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     const isAllStepsCompleted = allSteps.length > 0 && allSteps.every(s => currentTaskCompletedIds.has(String(s.id)));
 
-    let newStatus: LearningTask['status'] = task.status;
-    let newTestPassed = task.test_passed || false;
-    let newActualCompletedDate = task.actual_completed_date;
-
-    if (isUnitTest) {
-      // 単元テストの場合: ステップ完了は「実施した」記録のみ。合否（status / test_passed）は点数判断でのみ決定する！
-      // 既に合格している場合を除き、勝手に completed や test_passed: true にしない！
-      // 既に failed の場合は failed を維持！
-      if (task.status === 'failed') {
-        newStatus = 'failed';
-        newTestPassed = false;
-      } else if (task.status === 'completed') {
-        newStatus = 'completed';
-        newTestPassed = true;
-      } else {
-        newStatus = 'unstarted';
-        newTestPassed = false;
-      }
-    } else {
-      // 通常授業タスクの場合: 全ステップ完了ならコマ完了（合格）
-      if (isAllStepsCompleted) {
-        newStatus = 'completed';
-        newTestPassed = true;
-        newActualCompletedDate = currentDateStr;
-      } else {
-        newStatus = task.status === 'completed' ? 'completed' : 'unstarted';
-      }
-    }
+    const {
+      newStatus,
+      newTestPassed,
+      newActualCompletedDate
+    } = resolveTaskStepCompletionStatus(task, isUnitTest, isAllStepsCompleted, currentDateStr);
 
     const updatedTask: LearningTask = {
       ...task,
@@ -1021,48 +1253,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
     }
 
     const stLevel = currentStudent.level || 'A';
-    let passScore = stLevel === 'A' ? 90 : stLevel === 'B' ? 80 : 70;
-    if (task.passing_line) {
-      const matchNum = task.passing_line.match(/\d+/);
-      if (matchNum) {
-        const limit = parseInt(matchNum[0], 10);
-        passScore = (task.passing_line.includes('%') || task.passing_line.includes('割'))
-          ? (task.passing_line.includes('割') ? limit * 10 : limit)
-          : limit;
-      }
-    }
+    const passScore = resolveEffectivePassingScore(stLevel, task.passing_line);
 
     const isPassed = scoreVal >= passScore;
     const unit = units.find(u => u.id === task.unit_id);
-    const subjectName = task.subject || (unit ? unit.subject : 'その他');
-    const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
-    const cleanUnitName = rawUnitName
-      .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
-      .replace(/【やり直し授業】/g, '')
-      .replace(/（再テスト）/g, '')
-      .replace(/復習/g, '')
-      .replace(/単元確認テスト\s*ーやり直しー/g, '')
-      .replace(/ーやり直しー/g, '')
-      .replace(/\s*-\s*単元確認テスト/g, '')
-      .replace(/\s*-\s*単元テスト/g, '')
-      .replace(/\s*-\s*確認テスト/g, '')
-      .replace(/単元確認テスト/g, '')
-      .replace(/単元テスト/g, '')
-      .replace(/確認テスト/g, '')
-      .trim() || '単元';
-
-    let testSuffix = '単元確認テスト';
-    if (rawUnitName.includes('まとめテスト（１）') || rawUnitName.includes('まとめテスト(1)') || rawUnitName.includes('まとめテスト1')) {
-      testSuffix = 'まとめテスト（１）';
-    } else if (rawUnitName.includes('まとめテスト（２）') || rawUnitName.includes('まとめテスト(2)') || rawUnitName.includes('まとめテスト2')) {
-      testSuffix = 'まとめテスト（２）';
-    } else if (rawUnitName.includes('まとめテスト（３）') || rawUnitName.includes('まとめテスト(3)') || rawUnitName.includes('まとめテスト3')) {
-      testSuffix = 'まとめテスト（３）';
-    } else if (rawUnitName.toLowerCase().includes('check test') || rawUnitName.includes('チェックテスト')) {
-      testSuffix = 'Check Test';
-    } else if (rawUnitName.includes('再テスト')) {
-      testSuffix = '単元確認テスト（再テスト）';
-    }
+    const subjectName = resolveTaskSubjectName(task.subject, unit?.subject);
+    const { rawUnitName, cleanUnitName } = resolveCleanUnitName(task, unit);
+    const testSuffix = resolveUnitTestSuffix(rawUnitName);
     const testContent = `${subjectName}: ${cleanUnitName} - ${testSuffix}`;
 
     // 講師ダッシュボードの「小テスト結果管理」と完全連動するMiniTestResultを作成・更新
@@ -1313,7 +1510,7 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
     // 単元テストの場合、小テスト結果管理にも合格結果を保存（講師ダッシュボード完全連動）
     const unit = units.find(u => u.id === task.unit_id);
-    const subjectName = task.subject || (unit ? unit.subject : 'その他');
+    const subjectName = resolveTaskSubjectName(task.subject, unit?.subject);
     const rawUnitName = task.start_lesson_name || task.custom_unit_name || (unit ? unit.name : '単元');
     const cleanUnitName = rawUnitName
       .replace(/^(?:算数|数学|英語|国語|理科|社会)\s*[:：]\s*/i, '')
@@ -1456,18 +1653,18 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
 
   // 4. 当日全コマ完了後の「🚀 次の単元を先取り学習する」アクション
   const handleStartAdvanceLearning = async () => {
-    const isElem = currentStudent.grade.startsWith('小') || currentStudent.grade === '園児';
+    const isElem = isElementaryGrade(currentStudent.grade);
     const activeSubj = isElem ? '算数' : '数学';
     
     const completedSet = new Set((currentStudent.completed_lesson_ids || []).map(String));
     const candidateMasters = curriculumMasters
-      .filter(m => m.subject === activeSubj || (isElem && m.subject === '算数') || (!isElem && m.subject === '数学'))
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      .filter(m => matchesCandidateSubject(m.subject, activeSubj, isElem))
+      .sort(sortBySortOrder);
     
     const nextMaster = candidateMasters.find(m => !completedSet.has(String(m.id)) && !completedSet.has(String(m.sort_order)));
     
     const advanceSubject = nextMaster?.subject || activeSubj;
-    const advanceTitle = nextMaster ? (nextMaster.unit_name ? `${nextMaster.unit_name} - ${nextMaster.lesson_name}` : nextMaster.lesson_name) : '新単元先取り学習';
+    const advanceTitle = resolveAdvanceTitle(nextMaster);
     
     const nextPeriod = todayTasks.length + 1;
     const advanceTask: LearningTask = {
@@ -1897,13 +2094,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                     uniqueTaskMap.set(key, task);
                   }
                 });
-                const taskList = Array.from(uniqueTaskMap.values()).sort((a, b) => (a.period || 0) - (b.period || 0));
+                const taskList = Array.from(uniqueTaskMap.values()).sort(sortByPeriod);
                 const firstIncompleteTask = taskList.find(t => t.status !== 'completed');
                 const mainQuestTaskId = firstIncompleteTask ? firstIncompleteTask.id : (taskList[0] ? taskList[0].id : null);
 
                 return taskList.map(task => {
                   const unit = units.find(u => u.id === task.unit_id);
-                  const subjectName = task.subject || (unit ? unit.subject : 'その他');
+                  const subjectName = resolveTaskSubjectName(task.subject, unit?.subject);
                   const themeName = task.lesson_range 
                     || (task.start_lesson_name && task.end_lesson_name && task.start_lesson_name !== task.end_lesson_name 
                         ? `${task.start_lesson_name} 〜 ${task.end_lesson_name}` 
@@ -2034,13 +2231,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                               const isPlayable = !isStepDone && sIdx === firstIncompleteIdx;
                               return (
                                 <div 
-                                  key={step.id || sIdx} 
+                                  key={step.id} 
                                   className={`${styles.stepCard} ${isStepDone ? styles.stepCardCompleted : ''}`}
                                   data-testid={`step-card-${task.period}-${sIdx}`}
                                 >
                                   <div className={styles.stepTitle}>
                                     <span style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>STEP {sIdx + 1}:</span>
-                                    <span style={{ minWidth: 0, wordBreak: 'break-word', flex: '1 1 auto' }}>{step.name || step.fullTitle}</span>
+                                    <span style={{ minWidth: 0, wordBreak: 'break-word', flex: '1 1 auto' }}>{step.name}</span>
                                   </div>
                                   <div style={{ flexShrink: 0, minWidth: 'max-content' }}>
                                     {isStepDone ? (
@@ -2061,7 +2258,13 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                         🎯 完了にする
                                       </button>
                                     ) : (
-                                      <span 
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleCompleteLessonStep(task, step, sIdx, stepLessons);
+                                        }}
                                         style={{ 
                                           fontSize: '0.75rem', 
                                           color: '#94a3b8', 
@@ -2069,14 +2272,17 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                           padding: '4px 8px', 
                                           borderRadius: '6px', 
                                           backgroundColor: '#f1f5f9',
+                                          border: '1px solid #e2e8f0',
+                                          cursor: 'pointer',
                                           display: 'inline-flex',
                                           alignItems: 'center',
                                           gap: '4px'
                                         }}
                                         data-testid={`step-waiting-badge-${task.period}-${sIdx}`}
+                                        title="前のステップを順番に受講してください"
                                       >
                                         ⏳ 待機中
-                                      </span>
+                                      </button>
                                     )}
                                   </div>
                                 </div>
@@ -2201,9 +2407,8 @@ export default function StudentDashboard({ student, onBackToPortal, theme = 'lig
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const lastPeriod = todayTasks.length > 0 ? Math.max(...todayTasks.map(t => t.period || 1)) : 1;
-                                      const remedialEl = document.querySelector(`[data-testid="period-row-${lastPeriod}"]`) ||
-                                                         document.getElementById(`period-row-${lastPeriod}`);
+                                      const lastPeriod = resolveLastPeriod(todayTasks);
+                                      const remedialEl = document.getElementById(`period-row-${lastPeriod}`);
                                       if (typeof remedialEl?.scrollIntoView === 'function') {
                                         remedialEl.scrollIntoView({ behavior: 'smooth' });
                                       }

@@ -235,27 +235,49 @@ export function normalizeStandardGrade(g?: string): string {
   const elemMatch = trimmed.match(/(?:小学|小|elementary[_\s]?)([1-6])/i);
   if (elemMatch) return `小${elemMatch[1]}`;
   if (/^[1-6]年生?$/.test(trimmed) || /^[1-6]$/.test(trimmed)) {
-    const num = trimmed.replace(/[^1-6]/g, '');
-    if (num) return `小${num}`;
+    return `小${trimmed.replace(/[^1-6]/g, '')}`;
   }
 
   // 中学生
   const jhsMatch = trimmed.match(/(?:中学|中|junior[_\s]?high[_\s]?|jhs[_\s]?)([1-3])/i);
   if (jhsMatch) return `中${jhsMatch[1]}`;
   if (/^[7-9]年生?$/.test(trimmed) || /^[7-9]$/.test(trimmed)) {
-    const num = parseInt(trimmed.replace(/[^7-9]/g, ''), 10);
-    if (!isNaN(num)) return `中${num - 6}`;
+    return `中${parseInt(trimmed.replace(/[^7-9]/g, ''), 10) - 6}`;
   }
 
   // 高校生
   const highMatch = trimmed.match(/(?:高校|高|high[_\s]?school[_\s]?|high[_\s]?)([1-3])/i);
   if (highMatch) return `高${highMatch[1]}`;
   if (/^(?:10|11|12)年生?$/.test(trimmed) || /^(?:10|11|12)$/.test(trimmed)) {
-    const num = parseInt(trimmed.replace(/[^0-9]/g, ''), 10);
-    if (!isNaN(num)) return `高${num - 9}`;
+    return `高${parseInt(trimmed.replace(/[^0-9]/g, ''), 10) - 9}`;
   }
 
   return trimmed;
+}
+
+export function isTaskMatchingStudentAndDate(
+  task: { student_id?: string; scheduled_date?: string },
+  studentId?: string,
+  effectiveStudentId?: string,
+  normDate?: string
+): boolean {
+  if (studentId) {
+    const matchSt = task.student_id === studentId || (Boolean(effectiveStudentId) && task.student_id === effectiveStudentId);
+    if (!matchSt) return false;
+  }
+  if (normDate) {
+    const sDate = task.scheduled_date;
+    const matchDate = sDate === normDate || (sDate ? sDate.startsWith(normDate) : false);
+    if (!matchDate) return false;
+  }
+  return true;
+}
+
+export function resolveMiniTestDbStatus(status?: string | null, passed?: boolean | null): string | null {
+  if (status) return status;
+  if (passed === true) return 'passed';
+  if (passed === false) return 'failed';
+  return null;
 }
 
 export function isElementaryStudent(grade?: string, gradeCategory?: string, schoolType?: string): boolean {
@@ -292,6 +314,88 @@ export function calculateCurrentGrade(registeredGrade: string, registeredYear: n
   const idx = GRADES.indexOf(normalized);
   if (idx === -1) return registeredGrade;
   return GRADES[Math.min(idx + diff, GRADES.length - 1)];
+}
+
+export function determineSchoolTypeFromName(schoolName?: string): 'elementary' | 'high_school' | 'junior_high' {
+  if (!schoolName) return 'junior_high';
+  if (schoolName.includes('小')) return 'elementary';
+  if (schoolName.includes('高')) return 'high_school';
+  return 'junior_high';
+}
+
+export function matchesMasterGrade(masterGrade?: string, isElem?: boolean, isJunior?: boolean): boolean {
+  const mg = masterGrade || '';
+  if (isElem) return mg.startsWith('小') || /^[1-6]年生?$/.test(mg) || mg === '園児';
+  if (isJunior) return mg.startsWith('中') || /^[7-9]年生?$/.test(mg);
+  return true;
+}
+
+export function parsePersonalityTags(personalities?: any, personality_tags?: any): string[] {
+  if (Array.isArray(personalities)) return personalities;
+  if (Array.isArray(personality_tags)) return personality_tags;
+  if (typeof personalities === 'string' && personalities.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(personalities);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  if (typeof personality_tags === 'string' && personality_tags.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(personality_tags);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return [];
+}
+
+export function isMathSubject(sub?: string | null): boolean {
+  return sub === '算数' || sub === '数学';
+}
+
+export function sortBySortOrder<T extends { sort_order?: number | null }>(a: T, b: T): number {
+  return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+}
+
+export function matchesStudentId(
+  student?: { id?: string | null; student_id?: string | null } | null,
+  targetId?: string | null
+): boolean {
+  if (!student || !targetId) return false;
+  return student.id === targetId || (Boolean(student.student_id) && student.student_id === targetId);
+}
+
+export function resolveInteractionDate(contactDate?: string | null, date?: string | null): string {
+  if (contactDate && contactDate.trim() !== '') return contactDate.trim();
+  if (date && date.trim() !== '') return date.trim();
+  return new Date().toISOString().split('T')[0];
+}
+
+export function resolveStudentAssignedTeachers(assignedTeachers?: any, teacherInCharge?: string | null): string[] {
+  if (assignedTeachers && Array.isArray(assignedTeachers) && assignedTeachers.length > 0) {
+    return assignedTeachers;
+  }
+  if (teacherInCharge && teacherInCharge.trim() !== '') {
+    return [teacherInCharge.trim()];
+  }
+  return ['福田 尚弘'];
+}
+
+export function resolveStudentSelectedSubjects(selectedSubjects?: any, grade?: string | null): string[] {
+  if (selectedSubjects && Array.isArray(selectedSubjects) && selectedSubjects.length > 0) {
+    return selectedSubjects;
+  }
+  if (grade && grade.startsWith('小')) {
+    return ['算数', '国語', '英語'];
+  }
+  return ['数学', '英語', '理科', '社会', '国語'];
+}
+
+export function sortInterviewsByDate<T extends { interview_date?: string | null; created_at?: string | null }>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const dateA = a.interview_date || a.created_at || '';
+    const dateB = b.interview_date || b.created_at || '';
+    return dateB.localeCompare(dateA);
+  });
 }
 
 
@@ -1753,7 +1857,7 @@ class DatabaseService {
         school_name: resolvedSchoolName,
         school: resolvedSchoolName,
         assigned_teachers: assignedTeachers,
-        teacher_in_charge: assignedTeachers[0] || s.teacher_in_charge || '',
+        teacher_in_charge: assignedTeachers[0],
         selected_subjects: selectedSubjects,
         registered_year: regYear,
         registered_grade: regGrade,
@@ -2132,7 +2236,7 @@ class DatabaseService {
                   const newSch: School = {
                     id: st.school_id || `sch-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
                     name: st.school_name.trim(),
-                    type: st.school_name.includes('小') ? 'elementary' : st.school_name.includes('高') ? 'high_school' : 'junior_high',
+                    type: determineSchoolTypeFromName(st.school_name),
                     created_at: new Date().toISOString()
                   };
                   allSchools.push(newSch);
@@ -2308,18 +2412,14 @@ class DatabaseService {
 
     for (const sub of targetSubjects) {
       const subMasters = allMasters.filter(m => {
-        if (sub === '算数' || sub === '数学') return m.subject === '算数' || m.subject === '数学';
+        if (isMathSubject(sub)) return isMathSubject(m.subject);
         return m.subject === sub;
       });
 
       const isElem = (student.grade || '').startsWith('小') || student.grade === '園児';
       const isJunior = (student.grade || '').startsWith('中');
-      const filtered = subMasters.filter(m => {
-        if (isElem) return (m.grade || '').startsWith('小') || /^[1-6]年生?$/.test(m.grade || '') || m.grade === '園児';
-        if (isJunior) return (m.grade || '').startsWith('中') || /^[7-9]年生?$/.test(m.grade || '');
-        return true;
-      });
-      const ensured = filtered.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      const filtered = subMasters.filter(m => matchesMasterGrade(m.grade, isElem, isJunior));
+      const ensured = filtered.sort(sortBySortOrder);
 
       let maxIdx = -1;
       ensured.forEach((m, idx) => {
@@ -2377,7 +2477,7 @@ class DatabaseService {
 
     const selectedSubjects = student.selected_subjects && Array.isArray(student.selected_subjects) && student.selected_subjects.length > 0
       ? student.selected_subjects
-      : (student.grade.startsWith('小') || student.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
+      : ((student.grade || '').startsWith('小') || student.grade === '園児' ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']);
 
     const schoolsList = this.getSchools();
     const derivedSchoolName = student.school_name || (student as any).school || (student.school_id ? schoolsList.find(s => s.id === student.school_id)?.name : '') || '';
@@ -2469,7 +2569,7 @@ class DatabaseService {
               await this.saveSchool({
                 id: dbSchools[0].id,
                 name: derivedSchoolName,
-                type: derivedSchoolName.includes('小') ? 'elementary' : derivedSchoolName.includes('高') ? 'high_school' : 'junior_high',
+                type: determineSchoolTypeFromName(derivedSchoolName),
                 created_at: new Date().toISOString()
               });
             } else {
@@ -2478,7 +2578,7 @@ class DatabaseService {
                 const createdSch = await this.saveSchool({
                   id: newSchoolUUID,
                   name: derivedSchoolName,
-                  type: derivedSchoolName.includes('小') ? 'elementary' : derivedSchoolName.includes('高') ? 'high_school' : 'junior_high',
+                  type: determineSchoolTypeFromName(derivedSchoolName),
                   created_at: new Date().toISOString()
                 });
                 if (createdSch && isValidUUID(createdSch.id)) {
@@ -2954,12 +3054,7 @@ class DatabaseService {
             const existingLocal = currentLocalStudents.find((ls: Student) => ls.id === s.id || ls.student_id === s.student_id);
             const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || existingLocal?.school_name || (existingLocal as any)?.school || '';
             const resolvedSchoolId = s.school_id || (resolvedSchoolName ? schoolsList.find(sc => sc.name === resolvedSchoolName)?.id : undefined) || existingLocal?.school_id;
-            let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
-            if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
-              try { pers = JSON.parse(s.personalities); } catch (e) {}
-            } else if (typeof s.personality_tags === 'string' && s.personality_tags.startsWith('[')) {
-              try { pers = JSON.parse(s.personality_tags); } catch (e) {}
-            }
+            const pers = parsePersonalityTags(s.personalities, s.personality_tags);
             return {
               ...s,
               school_id: resolvedSchoolId,
@@ -2990,12 +3085,7 @@ class DatabaseService {
                 const existingLocal = currentLocalStudents.find((ls: Student) => ls.id === s.id || ls.student_id === s.student_id);
                 const resolvedSchoolName = s.school_name || s.school || (s as any).elementary_school || (s.school_id ? schoolsList.find(sc => sc.id === s.school_id)?.name : '') || existingLocal?.school_name || (existingLocal as any)?.school || '';
                 const resolvedSchoolId = s.school_id || (resolvedSchoolName ? schoolsList.find(sc => sc.name === resolvedSchoolName)?.id : undefined) || existingLocal?.school_id;
-                let pers = Array.isArray(s.personalities) ? s.personalities : (Array.isArray(s.personality_tags) ? s.personality_tags : []);
-                if (typeof s.personalities === 'string' && s.personalities.startsWith('[')) {
-                  try { pers = JSON.parse(s.personalities); } catch (e) {}
-                } else if (typeof s.personality_tags === 'string' && s.personality_tags.startsWith('[')) {
-                  try { pers = JSON.parse(s.personality_tags); } catch (e) {}
-                }
+                const pers = parsePersonalityTags(s.personalities, s.personality_tags);
                 return {
                   ...s,
                   school_id: resolvedSchoolId,
@@ -3041,9 +3131,9 @@ class DatabaseService {
             ...data,
             school_name: resolvedSchoolName,
             school: resolvedSchoolName,
-            assigned_teachers: data.assigned_teachers && Array.isArray(data.assigned_teachers) ? data.assigned_teachers : (data.teacher_in_charge ? [data.teacher_in_charge] : ['福田 尚弘']),
+            assigned_teachers: resolveStudentAssignedTeachers(data.assigned_teachers, data.teacher_in_charge),
             teacher_in_charge: (data.assigned_teachers && data.assigned_teachers[0]) || data.teacher_in_charge || '福田 尚弘',
-            selected_subjects: data.selected_subjects && Array.isArray(data.selected_subjects) ? data.selected_subjects : (data.grade?.startsWith('小') ? ['算数', '国語', '英語'] : ['数学', '英語', '理科', '社会', '国語']),
+            selected_subjects: resolveStudentSelectedSubjects(data.selected_subjects, data.grade),
             registered_year: regYear,
             registered_grade: regGrade,
             grade: calculateCurrentGrade(regGrade, regYear, curYear)
@@ -3238,14 +3328,7 @@ class DatabaseService {
 
         // Synchronize local memory cache with latest remote tasks
         let currentList = this.getLearningTasks();
-        if (studentId && normDate) {
-          currentList = currentList.filter(t => !(
-            (t.student_id === studentId || (effectiveStudentId && t.student_id === effectiveStudentId)) &&
-            (t.scheduled_date === normDate || t.scheduled_date?.startsWith(normDate))
-          ));
-        } else if (studentId) {
-          currentList = currentList.filter(t => t.student_id !== studentId && (!effectiveStudentId || t.student_id !== effectiveStudentId));
-        }
+        currentList = currentList.filter(t => !isTaskMatchingStudentAndDate(t, studentId, effectiveStudentId, normDate));
         currentList.push(...tasks.map(t => sanitizeLearningTask(t)));
         this.saveMockData('learning_tasks', currentList);
 
@@ -3255,11 +3338,7 @@ class DatabaseService {
       }
     }
     const all = this.getLearningTasks();
-    return all.filter(t => {
-      if (studentId && t.student_id !== studentId) return false;
-      if (normDate && t.scheduled_date !== normDate && !t.scheduled_date?.startsWith(normDate)) return false;
-      return true;
-    });
+    return all.filter(t => isTaskMatchingStudentAndDate(t, studentId, undefined, normDate));
   }
 
   public async deleteLearningTasksByDate(studentId: string, date: string): Promise<void> {
@@ -3505,8 +3584,8 @@ class DatabaseService {
 
           const localStudents = this.getStudents();
           const enriched: MiniTestResult[] = rawList.map(t => {
-            const matchedSt = fetchedStudents.find(s => s.id === t.student_id || (s.student_id && s.student_id === t.student_id))
-              || localStudents.find(s => s.id === t.student_id || s.student_id === t.student_id);
+            const matchedSt = fetchedStudents.find(s => matchesStudentId(s, t.student_id))
+              || localStudents.find(s => matchesStudentId(s, t.student_id));
             return {
               ...t,
               students: matchedSt ? { id: matchedSt.id, name: matchedSt.name, grade: matchedSt.grade } : (t.students || null)
@@ -3592,7 +3671,7 @@ class DatabaseService {
         test_content: sanitized.test_content,
         score: sanitized.score,
         passed: sanitized.passed ?? null,
-        status: sanitized.status ?? (sanitized.passed === true ? 'passed' : sanitized.passed === false ? 'failed' : null),
+        status: resolveMiniTestDbStatus(sanitized.status, sanitized.passed),
         completed_at: sanitized.completed_at ?? (sanitized.score !== null ? new Date().toISOString() : null),
         passing_line: sanitized.passing_line ?? null,
         target_scope: sanitized.target_scope ?? 'individual',
@@ -4580,8 +4659,8 @@ class DatabaseService {
             student_id: d.student_id,
             category: d.category || d.contact_type || 'その他',
             memo: d.memo || d.content || '',
-            date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
-            contact_date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            date: resolveInteractionDate(d.contact_date, d.date),
+            contact_date: resolveInteractionDate(d.contact_date, d.date),
             staff_name: d.staff_name || '担当講師',
             created_at: d.created_at || new Date().toISOString()
           }));
@@ -4601,8 +4680,8 @@ class DatabaseService {
             student_id: d.student_id,
             category: d.category || 'その他',
             memo: d.memo || '',
-            date: d.date || d.contact_date || new Date().toISOString().split('T')[0],
-            contact_date: d.contact_date || d.date || new Date().toISOString().split('T')[0],
+            date: resolveInteractionDate(d.contact_date, d.date),
+            contact_date: resolveInteractionDate(d.contact_date, d.date),
             staff_name: d.staff_name || '担当講師',
             created_at: d.created_at || new Date().toISOString()
           }));
@@ -4615,7 +4694,7 @@ class DatabaseService {
   public async saveStudentInteraction(interaction: StudentInteraction): Promise<StudentInteraction> {
     const studentId = interaction.student_id;
     const category = interaction.category || 'その他';
-    const contactDate = interaction.date || interaction.contact_date || new Date().toISOString().split('T')[0];
+    const contactDate = resolveInteractionDate(interaction.contact_date, interaction.date);
     const memoText = interaction.memo || '';
     const staffName = interaction.staff_name || '担当講師';
     const createdAt = interaction.created_at || new Date().toISOString();
@@ -5381,10 +5460,8 @@ class DatabaseService {
   // StudentInterviews (2者面談) CRUD
   public getStudentInterviews2(studentId?: string): StudentInterview2[] {
     const list = this.getMockData<StudentInterview2>('student_interviews_2', []);
-    if (studentId) {
-      return list.filter(i => i.student_id === studentId).sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
-    }
-    return list.sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+    const filtered = studentId ? list.filter(i => i.student_id === studentId) : list;
+    return sortInterviewsByDate(filtered);
   }
 
   public async saveStudentInterview2(interview: StudentInterview2): Promise<StudentInterview2> {
@@ -5423,10 +5500,8 @@ class DatabaseService {
   // StudentInterviews (3者面談) CRUD
   public getStudentInterviews3(studentId?: string): StudentInterview3[] {
     const list = this.getMockData<StudentInterview3>('student_interviews_3', []);
-    if (studentId) {
-      return list.filter(i => i.student_id === studentId).sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
-    }
-    return list.sort((a, b) => (b.interview_date || b.created_at).localeCompare(a.interview_date || a.created_at));
+    const filtered = studentId ? list.filter(i => i.student_id === studentId) : list;
+    return sortInterviewsByDate(filtered);
   }
 
   public async saveStudentInterview3(interview: StudentInterview3): Promise<StudentInterview3> {

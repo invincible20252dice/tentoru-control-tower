@@ -296,15 +296,32 @@ describe('Meaningful 95%+ Coverage Suite for Timeline and Dashboard', () => {
       expect(screen.getByTestId('two-way-interview-view')).toBeInTheDocument();
     });
 
-    // 議事録テキストを入力
+    // 空白テキスト時のバリデーション（disabled解除かつtrim()===''を通す）
     const transcriptTextarea2 = screen.getByTestId('interview2-transcript');
+    fireEvent.change(transcriptTextarea2, {
+      target: {
+        value: '   '
+      }
+    });
+    const parseBtn2 = screen.getByTestId('interview2-parse-transcript-btn');
+    fireEvent.click(parseBtn2);
+    expect(alertMock).toHaveBeenCalledWith('音声文字起こしテキストがありません。録音を行うか、テキストを入力してください。');
+
+    // 議事録テキストを入力
     fireEvent.change(transcriptTextarea2, {
       target: {
         value: 'テスト音声テキスト'
       }
     });
 
-    const parseBtn2 = screen.getByTestId('interview2-parse-transcript-btn');
+    // 1回目: 空オブジェクト返却時（各項目の falsy 分岐を網羅）
+    parseSpy.mockResolvedValueOnce({});
+    fireEvent.click(parseBtn2);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('音声議事録から面談各項目へ自動入力しました。');
+    });
+
+    // 2回目: フルオブジェクト返却時（各項目の truthy 分岐を網羅）
     fireEvent.click(parseBtn2);
 
     await waitFor(() => {
@@ -329,14 +346,31 @@ describe('Meaningful 95%+ Coverage Suite for Timeline and Dashboard', () => {
       expect(screen.getByTestId('three-way-interview-view')).toBeInTheDocument();
     });
 
+    // 空白テキスト時のバリデーション（disabled解除かつtrim()===''を通す）
     const transcriptTextarea3 = screen.getByTestId('interview3-transcript');
+    fireEvent.change(transcriptTextarea3, {
+      target: {
+        value: '   '
+      }
+    });
+    const parseBtn3 = screen.getByTestId('interview3-parse-transcript-btn');
+    fireEvent.click(parseBtn3);
+    expect(alertMock).toHaveBeenCalledWith('音声文字起こしテキストがありません。録音を行うか、テキストを入力してください。');
+
     fireEvent.change(transcriptTextarea3, {
       target: {
         value: 'テスト音声テキスト三者'
       }
     });
 
-    const parseBtn3 = screen.getByTestId('interview3-parse-transcript-btn');
+    // 1回目: 空オブジェクト返却時（各項目の falsy 分岐を網羅）
+    parseSpy.mockResolvedValueOnce({});
+    fireEvent.click(parseBtn3);
+    await waitFor(() => {
+      expect(alertMock).toHaveBeenCalledWith('音声議事録から面談各項目へ自動入力しました。');
+    });
+
+    // 2回目: フルオブジェクト返却時（各項目の truthy 分岐を網羅）
     fireEvent.click(parseBtn3);
 
     await waitFor(() => {

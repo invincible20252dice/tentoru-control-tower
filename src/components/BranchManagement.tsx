@@ -66,10 +66,8 @@ export const BranchManagement: React.FC<BranchManagementProps> = ({
         onBranchesUpdated?.(e.detail.branches);
       }
     };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('tentoru_branches_updated', handleBranchesUpdate);
-      return () => window.removeEventListener('tentoru_branches_updated', handleBranchesUpdate);
-    }
+    window.addEventListener('tentoru_branches_updated', handleBranchesUpdate);
+    return () => window.removeEventListener('tentoru_branches_updated', handleBranchesUpdate);
   }, []);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {

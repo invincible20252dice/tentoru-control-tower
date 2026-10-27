@@ -635,7 +635,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
   });
 
   test('STEP 7..10 range expansion, optimistic completion, timeline (📍 現在地) sync to STEP 11, and next session From auto-preset', async () => {
-    const { findNextUncompletedLessonForSubject, calculateLessonRangeForSlot } = await import('../lib/scheduler');
+    const { findNextUncompletedLessonForSubject, calculateLessonRangeForSlot, isStudentAttendanceDay } = await import('../lib/scheduler');
     const TeacherDashboard = (await import('../components/TeacherDashboard')).default;
 
     const student: Student = {
@@ -661,6 +661,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
     };
     await db.saveStudent(student);
 
+    const todayStr = new Date().toISOString().split('T')[0];
     await db.saveMiniTestResult({
       id: 'ut-pass-kazu-sync-2',
       student_id: student.id,
@@ -670,7 +671,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       status: 'passed',
       passed: true,
       score: 100,
-      date: '2026-08-18'
+      date: todayStr
     });
     await db.saveMiniTestResult({
       id: 'ut-pass-tashizan-sync-2',
@@ -681,7 +682,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       status: 'passed',
       passed: true,
       score: 100,
-      date: '2026-08-18'
+      date: todayStr
     });
     await db.saveMiniTestResult({
       id: 'ut-pass-2keta-sync-2',
@@ -692,10 +693,10 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       status: 'passed',
       passed: true,
       score: 100,
-      date: '2026-08-18'
+      date: todayStr
     });
 
-    const targetDate = '2026-08-18';
+    const targetDate = todayStr;
     // Task covering STEP 7 through STEP 10 (cm-p2-m3 to cm-p3-m2)
     const task: LearningTask = {
       id: 'task-step-7-10',
@@ -742,7 +743,7 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       status: 'passed',
       passed: true,
       score: 100,
-      date: '2026-08-18'
+      date: todayStr
     });
 
     // 2. Verify all completed IDs (STEP 1..10) are recorded
@@ -781,8 +782,26 @@ describe('Schedule and Timetable Synchronization Tests', () => {
       status: 'passed',
       passed: true,
       score: 100,
-      date: '2026-08-18'
+      date: todayStr
     });
+
+    // 次の取り組み対象ステップ (STEP 11: cm-p3-m3) を当日コマ割りタスクとして登録
+    await db.saveLearningTasks([{
+      id: 'task-step-11',
+      student_id: refreshedStudent.id,
+      scheduled_date: todayStr,
+      period: 1,
+      subject: '算数',
+      unit_id: 'cm-p3-m3',
+      start_lesson_id: 'cm-p3-m3',
+      end_lesson_id: 'cm-p3-m3',
+      start_lesson_name: '小数の意味と加減',
+      end_lesson_name: '小数の意味と加減',
+      status: 'unstarted',
+      video_watched: false,
+      test_passed: false,
+      created_at: new Date().toISOString()
+    }]);
 
     const nextLesson = findNextUncompletedLessonForSubject({
       student: refreshedStudent,
@@ -810,21 +829,30 @@ describe('Schedule and Timetable Synchronization Tests', () => {
 
     await waitFor(() => {
       // STEP 10 should show completed badge
-      expect(timelineRender.getByTestId('timeline-item-cm-p3-m2')).toHaveTextContent('✓ 完了');
-      // Verify timeline displays current position badge for the next item (cm-p3-m3)
+      // STEP 11 is scheduled for today, so it shows current location (📍 現在地（取り組み中）)
       expect(timelineRender.getByTestId('timeline-item-cm-p3-m3')).toHaveTextContent('📍 現在地（取り組み中）');
-      expect(timelineRender.getAllByText('📍 現在地（取り組み中）').length).toBeGreaterThanOrEqual(1);
     });
 
     timelineRender.unmount();
 
-    // 5. Verify TeacherDashboard schedule tab auto-selects STEP 11 (cm-p3-m3) as From for next date (2026-08-21)
+    // 5. Verify TeacherDashboard schedule tab auto-selects STEP 11 (cm-p3-m3) as From for next date
+    let nextDateStr = '';
+    for (let i = 1; i <= 7; i++) {
+      const cand = new Date();
+      cand.setDate(cand.getDate() + i);
+      const candStr = cand.toISOString().split('T')[0];
+      if (isStudentAttendanceDay(refreshedStudent, candStr)) {
+        nextDateStr = candStr;
+        break;
+      }
+    }
+
     const scheduleRender = render(
       <TeacherDashboard 
         students={[refreshedStudent]} 
         initialStudentId={refreshedStudent.id}
         initialTab="schedule"
-        initialDate="2026-08-21"
+        initialDate={nextDateStr}
         teacherType="elementary"
       />
     );

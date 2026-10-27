@@ -26,6 +26,16 @@ const scheduleSchema = z.object({
 
 export type ScheduleFormData = z.infer<typeof scheduleSchema>;
 
+// 週回数と曜日選択の連動制限チェック（純粋ヘルパー関数）
+export const getMaxAllowedDays = (freq?: string | null): number | null => {
+  if (!freq) return null;
+  if (freq.includes('2')) return 2;
+  if (freq.includes('3')) return 3;
+  if (freq.includes('4')) return 4;
+  if (freq.includes('5')) return 5;
+  return null; // 無制限、自由追加
+};
+
 interface StudentScheduleConfigFormProps {
   studentId: string;
   gradeType?: 'elementary' | 'junior_high' | string;
@@ -90,6 +100,7 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
   const watchFrequency = watch('weekly_frequency');
   const watchDuration = watch('weekly_duration');
   const watchSelectedDays = watch('selected_days');
+  const selectedDays = watchSelectedDays ?? [];
 
   // データ初期ロード
   useEffect(() => {
@@ -109,21 +120,11 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
     setValue('default_slots', slots);
   }, [watchDuration, gradeType, setValue]);
 
-  // 週回数と曜日選択の連動制限チェック
-  const getMaxAllowedDays = (freq: string): number | null => {
-    if (freq.includes('2')) return 2;
-    if (freq.includes('3')) return 3;
-    if (freq.includes('4')) return 4;
-    if (freq.includes('5')) return 5;
-    return null; // 無制限、自由追加
-  };
-
   const handleToggleDay = (dayKey: string) => {
-    const currentDays = watchSelectedDays || [];
-    const isSelected = currentDays.includes(dayKey);
+    const isSelected = selectedDays.includes(dayKey);
     const maxDays = getMaxAllowedDays(watchFrequency);
 
-    if (!isSelected && maxDays !== null && currentDays.length >= maxDays) {
+    if (!isSelected && maxDays !== null && selectedDays.length >= maxDays) {
       showToast(`週${maxDays}回設定のため、曜日は最大${maxDays}つまでしか選択できません。`, 'error');
       setError('selected_days', {
         type: 'manual',
@@ -134,8 +135,8 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
 
     clearErrors('selected_days');
     const newDays = isSelected
-      ? currentDays.filter(d => d !== dayKey)
-      : [...currentDays, dayKey];
+      ? selectedDays.filter(d => d !== dayKey)
+      : [...selectedDays, dayKey];
 
     setValue('selected_days', newDays);
   };
@@ -333,7 +334,7 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
               通塾曜日選択
             </label>
             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-              選択中: <strong style={{ color: '#4f46e5', fontWeight: 'bold' }}>{watchSelectedDays?.length || 0}</strong> 曜日
+              選択中: <strong style={{ color: '#4f46e5', fontWeight: 'bold' }}>{selectedDays.length}</strong> 曜日
               {getMaxAllowedDays(watchFrequency) !== null && (
                 <span> (上限 {getMaxAllowedDays(watchFrequency)} つ)</span>
               )}
@@ -342,7 +343,7 @@ export const StudentScheduleConfigForm: React.FC<StudentScheduleConfigFormProps>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {ALL_DAYS.map(d => {
-              const isSelected = (watchSelectedDays || []).includes(d.key);
+              const isSelected = selectedDays.includes(d.key);
               return (
                 <button
                   key={d.key}
