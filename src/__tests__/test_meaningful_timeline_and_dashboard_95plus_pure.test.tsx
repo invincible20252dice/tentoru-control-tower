@@ -1,9 +1,10 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { db, Student, LearningTask, CurriculumMaster } from '../lib/db';
+import { db, Student, LearningTask, CurriculumMaster, MiniTestResult } from '../lib/db';
 import * as gemini from '../lib/gemini';
 import TeacherDashboard from '../components/TeacherDashboard';
+import TimelineSubjectView from '../components/TimelineSubjectView';
 
 describe('Meaningful 95%+ Coverage Suite for Timeline and Dashboard', () => {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -452,5 +453,61 @@ describe('Meaningful 95%+ Coverage Suite for Timeline and Dashboard', () => {
 
     // 元に戻す
     (db as any).supabase = originalSupabase;
+  });
+
+  it('should cover TimelineSubjectView active failed mini test matching and trulyCompletedStepIds', () => {
+    const student: Student = {
+      id: 'st-timeline-match-1',
+      name: 'タイムライン生徒',
+      grade: '小1',
+      completed_lesson_ids: ['cm-t-1']
+    };
+
+    const units: CurriculumMaster[] = [
+      {
+        id: 'cm-t-1',
+        grade: '1年生',
+        subject: '算数',
+        unit_name: '1章 かず',
+        lesson_name: 'かず(1)',
+        sort_order: 1
+      },
+      {
+        id: 'cm-t-ut',
+        grade: '1年生',
+        subject: '算数',
+        unit_name: '1章 かず',
+        lesson_name: '1章 かず - 単元確認テスト',
+        sort_order: 2,
+        item_type: 'unit_test'
+      }
+    ];
+
+    const failedMiniTest: MiniTestResult = {
+      id: 'mini-tl-failed',
+      student_id: student.id,
+      subject: '算数',
+      unit_name: '1章 かず',
+      test_content: '1章 かず - 単元確認テスト',
+      test_type: 'unit_test',
+      date: todayStr,
+      score: 40,
+      passed: false,
+      status: 'failed'
+    };
+
+    const { unmount } = render(
+      <TimelineSubjectView
+        student={student}
+        subject="算数"
+        timelineUnits={units}
+        learningTasks={[]}
+        miniTestResults={[failedMiniTest]}
+        currentDate={todayStr}
+      />
+    );
+
+    expect(screen.getByTestId('timeline-subject-view')).toBeInTheDocument();
+    unmount();
   });
 });
