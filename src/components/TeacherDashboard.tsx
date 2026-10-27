@@ -2098,6 +2098,129 @@ export function resolveAutoDrillHomeworks(
   return updatedHomeworks as Array<{ id: string; subject: string; type: string; content: string; deadline: string; targetScope: string }>;
 }
 
+export interface AutoExtractedUnitTest {
+  subject: string;
+  unitName: string;
+  content: string;
+  passingLine: string;
+}
+
+export function extractUnitTestsFromPeriodSelections(params: {
+  periodSelections: { [key: number]: any };
+  periodCount: number;
+  curriculumMasters: CurriculumMaster[];
+  curriculumUnits?: CurriculumUnit[];
+  student?: Partial<Student> | null;
+}): AutoExtractedUnitTest[] {
+  const { periodSelections, periodCount, curriculumMasters, curriculumUnits = [], student } = params;
+  const processedMasters = ensureMathEnglishUnitTests(curriculumMasters);
+  const results: AutoExtractedUnitTest[] = [];
+  const seenKeys = new Set<string>();
+
+  for (let p = 1; p <= periodCount; p++) {
+    const config = periodSelections[p];
+    if (!config || !config.subject) continue;
+
+    const subj = config.subject;
+    if (['その他', '自由記述', 'テスト'].includes(subj)) continue;
+
+    // From〜To 範囲内の全ステップを展開
+    const steps = getLessonRangeStepIds({
+      subject: subj,
+      startLessonId: config.startLessonId || config.unitId,
+      endLessonId: config.endLessonId || config.startLessonId || config.unitId,
+      startLessonName: config.startLessonName,
+      endLessonName: config.endLessonName,
+      lessonRange: config.lessonRange,
+      customUnitName: config.customTheme,
+      curriculumMasters: processedMasters,
+      curriculumUnits,
+      studentGrade: student?.grade,
+      schoolId: student?.school_id
+    });
+
+    for (const step of steps) {
+      const stepName = step.name || '';
+      const stepFull = step.fullTitle || '';
+      const isUnitTest = Boolean(
+        step.isUnitTest ||
+        stepName.includes('単元確認テスト') ||
+        stepName.includes('単元テスト') ||
+        stepName.includes('まとめテスト') ||
+        stepName.includes('確認テスト') ||
+        stepName.toLowerCase().includes('check test') ||
+        stepFull.includes('単元確認テスト') ||
+        stepFull.includes('単元テスト')
+      );
+
+      if (isUnitTest) {
+        const matchedMaster = processedMasters.find(m => 
+          m.id === step.id || 
+          m.lesson_name === step.name || 
+          m.lesson_name === step.fullTitle ||
+          (m.unit_name && `${m.unit_name} - ${m.lesson_name}` === (step.fullTitle || step.name))
+        );
+        let rawUnit = step.unit_name || matchedMaster?.unit_name || extractUnitTestUnitName(stepName);
+        if (rawUnit === stepName || rawUnit === '単元確認テスト' || rawUnit === '単元テスト') {
+          rawUnit = matchedMaster?.unit_name || config.customTheme || '';
+        }
+        const unitName = rawUnit;
+        let content = matchedMaster?.lesson_name || step.fullTitle || step.name;
+        if (unitName && !content.includes(unitName)) {
+          content = `${unitName} - ${content.replace(/^[^-]+-\s*/, '')}`;
+        }
+        const passingLine = matchedMaster?.passing_line || '80%以上';
+        const key = `${subj}::${content}`;
+
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          results.push({
+            subject: subj,
+            unitName,
+            content,
+            passingLine
+          });
+        }
+      }
+    }
+
+    // startLessonName / endLessonName に単元確認テストが入っている場合のフォールバック
+    const startName = config.startLessonName || '';
+    const endName = config.endLessonName || '';
+    for (const candidateName of [startName, endName]) {
+      if (candidateName && (candidateName.includes('単元確認テスト') || candidateName.includes('単元テスト') || candidateName.includes('まとめテスト'))) {
+        const matchedMaster = processedMasters.find(m => 
+          m.lesson_name === candidateName || 
+          (m.unit_name && `${m.unit_name} - ${m.lesson_name}` === candidateName) ||
+          (m.unit_name && `${m.unit_name} - ${candidateName}` === m.lesson_name)
+        );
+        let rawUnit = matchedMaster?.unit_name || extractUnitTestUnitName(candidateName);
+        if (rawUnit === candidateName || rawUnit === '単元確認テスト' || rawUnit === '単元テスト') {
+          rawUnit = matchedMaster?.unit_name || config.customTheme || '';
+        }
+        const unitName = rawUnit;
+        let content = matchedMaster?.lesson_name || candidateName;
+        if (unitName && !content.includes(unitName)) {
+          content = `${unitName} - ${content.replace(/^[^-]+-\s*/, '')}`;
+        }
+        const passingLine = matchedMaster?.passing_line || '80%以上';
+        const key = `${subj}::${content}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          results.push({
+            subject: subj,
+            unitName,
+            content,
+            passingLine
+          });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 export function resolveSubjectIcon(sub?: string | null): string {
   if (!sub) return '📚';
   if (sub.includes('算数') || sub.includes('数学')) return '🧮';
@@ -3811,6 +3934,46 @@ export default function TeacherDashboard({
     }
   }, []);
 
+  // コマ割り変更時の「本日のテスト」自動抽出・リアクティブ連動
+  useEffect(() => {
+    if (!selectedStudent) return;
+    const masters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+    const extracted = extractUnitTestsFromPeriodSelections({
+      periodSelections,
+      periodCount,
+      curriculumMasters: masters,
+      curriculumUnits: allCurriculumUnits,
+      student: selectedStudent
+    });
+
+    if (!extracted || extracted.length === 0) return;
+
+    setTodayTests(prev => {
+      let changed = false;
+      const nextTests = [...prev];
+      for (const item of extracted) {
+        if (isUnitTestCompleted(selectedStudent, item.content, item.subject)) continue;
+        const exists = nextTests.some(t => 
+          (t.subject === item.subject || !t.subject) &&
+          (t.content === item.content || (item.unitName && t.content.includes(item.unitName)))
+        );
+        if (!exists) {
+          changed = true;
+          nextTests.push({
+            id: `auto-extract-${item.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+            subject: item.subject,
+            testType: 'unit_test',
+            unitName: item.unitName,
+            content: item.content,
+            passingLine: item.passingLine || '80%以上',
+            targetScope: 'individual'
+          });
+        }
+      }
+      return changed ? nextTests : prev;
+    });
+  }, [periodSelections, periodCount, selectedStudent?.id, curriculumMastersList, allCurriculumUnits]);
+
   // 1. 1クリックアカウント発行
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -5063,6 +5226,34 @@ export default function TeacherDashboard({
     }
   };
 
+  // コマ割り削除（指定されたコマを削除し、以降のコマを前詰め）
+  const handleRemovePeriod = (p: number) => {
+    const updatedPeriods: { [key: number]: any } = {};
+    let newIdx = 1;
+    for (let i = 1; i <= periodCount; i++) {
+      if (i === p) continue;
+      if (periodSelections[i]) {
+        updatedPeriods[newIdx] = { ...periodSelections[i] };
+      }
+      newIdx++;
+    }
+
+    setPeriodSelections(updatedPeriods);
+    setPeriodCount(prev => Math.max(1, prev - 1));
+
+    if (selectedStudent) {
+      const { updatedTests, updatedHomeworks } = syncAutoHomeworksAndTests(
+        updatedPeriods,
+        selectedStudent,
+        scheduleDate,
+        todayTests,
+        todayHomeworks
+      );
+      setTodayTests(updatedTests);
+      setTodayHomeworks(updatedHomeworks);
+    }
+  };
+
   // 校舎別 AI自動設定ルール モーダル操作
   const handleOpenBranchAIRulesModal = () => {
     const targetBranchId = selectedBranchId !== 'all' ? selectedBranchId : (selectedStudent?.branch_id || 'branch-1');
@@ -5170,9 +5361,37 @@ export default function TeacherDashboard({
 
     // 1. 本日のテストの連動 (手動追加のカスタムテストのみ保持し、コマ割りから未完了テストを全教科スキャン抽出)
     const updatedTests: typeof todayTests = existingTests.filter(t => t.testType === 'custom' && t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --');
-    const masters = db.getCurriculumMasters();
+    const masters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
     const autoTests = resolveAutoTestsFromPeriods(currentPeriods, st, masters, updatedTests, (s, title, subj) => isUnitTestCompleted(s as Student, title, subj));
     updatedTests.push(...autoTests as any);
+
+    // From〜To 範囲内のステップから単元テストを抽出
+    const extractedFromRange = extractUnitTestsFromPeriodSelections({
+      periodSelections: currentPeriods,
+      periodCount: Math.max(periodCount, Object.keys(currentPeriods).length),
+      curriculumMasters: masters,
+      curriculumUnits: allCurriculumUnits,
+      student: st
+    });
+
+    for (const item of extractedFromRange) {
+      if (isUnitTestCompleted(st, item.content, item.subject)) continue;
+      const alreadyAdded = updatedTests.some(t =>
+        (t.subject === item.subject || !t.subject) &&
+        (t.content === item.content || (item.unitName && t.content.includes(item.unitName)))
+      );
+      if (!alreadyAdded) {
+        updatedTests.push({
+          id: `auto-test-${item.subject}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          subject: item.subject,
+          testType: 'unit_test',
+          unitName: item.unitName,
+          content: item.content,
+          passingLine: item.passingLine || '80%以上',
+          targetScope: 'individual'
+        });
+      }
+    }
 
     // 2. 算数・英語の2回目演習宿題の自動連動
     const updatedHomeworks = resolveAutoDrillHomeworks(currentPeriods, st.grade, nextAttDate, existingHomeworks);
@@ -7245,7 +7464,7 @@ export default function TeacherDashboard({
                         style={{ display: 'none' }}
                       />
 
-                      <div className={styles.timetableSetup} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px' }}>
+                      <div className={styles.timetableSetup} style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '14px' }}>
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
                           const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
                           const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児';
@@ -7253,28 +7472,30 @@ export default function TeacherDashboard({
                           return (
                             <div 
                               key={p} 
+                              data-testid={`period-row-${p}`}
                               style={{ 
-                                backgroundColor: 'rgba(248, 250, 252, 0.7)', 
-                                borderRadius: '12px', 
-                                padding: '12px', 
-                                marginBottom: '8px', 
-                                border: '1px solid #f1f5f9',
+                                backgroundColor: '#ffffff', 
+                                borderRadius: '8px', 
+                                padding: '6px 10px', 
+                                border: '1px solid #e2e8f0',
                                 display: 'flex',
-                                flexDirection: 'column',
-                                gap: '8px'
+                                alignItems: 'center',
+                                gap: '8px',
+                                minHeight: '42px',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '130px', flexShrink: 0 }}>
                                 <span 
                                   className={styles.cellNum} 
                                   style={{ 
-                                    width: '26px', 
-                                    height: '26px', 
+                                    width: '22px', 
+                                    height: '22px', 
                                     borderRadius: '50%', 
                                     background: '#e2e8f0', 
                                     color: '#334155', 
                                     fontWeight: 700, 
-                                    fontSize: '0.8rem', 
+                                    fontSize: '0.75rem', 
                                     display: 'inline-flex', 
                                     alignItems: 'center', 
                                     justifyContent: 'center',
@@ -7288,7 +7509,7 @@ export default function TeacherDashboard({
                                   value={currentConfig.subject || ''}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
-                                  style={{ fontSize: '0.85rem', fontWeight: 600, padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1 }}
+                                  style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '96px', flex: 1 }}
                                 >
                                   <option value="">-- コマ割りなし --</option>
                                   {(() => {
@@ -7339,8 +7560,8 @@ export default function TeacherDashboard({
                                 </select>
                               </div>
 
-                              {currentConfig.subject && (
-                                <div style={{ paddingLeft: '36px' }}>
+                              {currentConfig.subject ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
                                   {/* カリキュラム単元・授業進捗範囲設定 */}
                                   {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
                                     const lessons = getLessonsForSubject(currentConfig.subject);
@@ -7355,17 +7576,15 @@ export default function TeacherDashboard({
                                     const hasEndInList = selectableLessons.some(l => l.id === selectedEndId);
 
                                     return (
-                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                                        <div>
-                                          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                            開始授業 (From):
-                                          </label>
+                                      <>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0 }}>
+                                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>開始:</span>
                                           <select
                                             data-testid={`period-unit-select-${p}`}
                                             value={selectedStartId}
                                             onChange={e => handleStartLessonChange(p, e.target.value)}
                                             className={styles.select}
-                                            style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%' }}
+                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis' }}
                                           >
                                             <option value="">-- 開始授業を選択 --</option>
                                             {selectedStartId && !hasStartInList && (
@@ -7380,16 +7599,15 @@ export default function TeacherDashboard({
                                             ))}
                                           </select>
                                         </div>
-                                        <div>
-                                          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                            終了目標授業 (To):
-                                          </label>
+                                        <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: '0.8rem', userSelect: 'none', flexShrink: 0 }}>→</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0 }}>
+                                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>終了:</span>
                                           <select
                                             data-testid={`period-end-lesson-select-${p}`}
                                             value={selectedEndId}
                                             onChange={e => handleEndLessonChange(p, e.target.value)}
                                             className={styles.select}
-                                            style={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%' }}
+                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis' }}
                                           >
                                             <option value="">-- 終了目標授業を選択 --</option>
                                             {selectedEndId && !hasEndInList && (
@@ -7404,17 +7622,18 @@ export default function TeacherDashboard({
                                             ))}
                                           </select>
                                         </div>
-                                      </div>
+                                      </>
                                     );
                                   })()}
 
                                   {/* 「自由記述」が選択された場合：登録済みの自由記述プルダウン ＆ 新規直打ち */}
                                   {currentConfig.subject === '自由記述' && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
                                       <select
                                         value={currentConfig.customTheme}
                                         onChange={e => handleThemeChange(p, e.target.value)}
                                         className={styles.select}
+                                        style={{ fontSize: '0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '4px 6px', flex: 1 }}
                                       >
                                         <option value="">-- 登録済みの自由記述から選択 --</option>
                                         {customClassesList.map(cc => (
@@ -7427,19 +7646,20 @@ export default function TeacherDashboard({
                                         value={currentConfig.customTheme}
                                         onChange={e => handleThemeChange(p, e.target.value)}
                                         className={styles.input}
-                                        style={{ fontSize: '0.8rem', padding: '6px' }}
+                                        style={{ fontSize: '0.75rem', padding: '4px 6px', flex: 1 }}
                                       />
                                     </div>
                                   )}
 
                                   {/* 「テスト」が選択された場合：本日のテスト（自由記述）との連動 */}
                                   {currentConfig.subject === 'テスト' && (
-                                    <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                                       {todayTests.length >= 2 ? (
                                         <select
                                           value={currentConfig.customTheme}
                                           onChange={e => handleThemeChange(p, e.target.value)}
                                           className={styles.select}
+                                          style={{ fontSize: '0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '4px 6px', width: '100%' }}
                                         >
                                           <option value="">-- テストを選択 --</option>
                                           {todayTests.map(t => (
@@ -7453,7 +7673,7 @@ export default function TeacherDashboard({
                                           value={currentConfig.customTheme}
                                           onChange={e => handleThemeChange(p, e.target.value)}
                                           className={styles.input}
-                                          style={{ fontSize: '0.8rem', padding: '6px' }}
+                                          style={{ fontSize: '0.75rem', padding: '4px 6px', width: '100%' }}
                                         />
                                       )}
                                     </div>
@@ -7461,17 +7681,60 @@ export default function TeacherDashboard({
 
                                   {/* 「その他」が選択された場合 */}
                                   {currentConfig.subject === 'その他' && (
-                                    <input
-                                      type="text"
-                                      placeholder="テーマを入力（例: 面談、宿題指導）"
-                                      value={currentConfig.customTheme}
-                                      onChange={e => handleThemeChange(p, e.target.value)}
-                                      className={styles.input}
-                                      style={{ fontSize: '0.8rem', padding: '6px' }}
-                                    />
+                                    <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                                      <input
+                                        type="text"
+                                        placeholder="テーマを入力（例: 面談、宿題指導）"
+                                        value={currentConfig.customTheme}
+                                        onChange={e => handleThemeChange(p, e.target.value)}
+                                        className={styles.input}
+                                        style={{ fontSize: '0.75rem', padding: '4px 6px', width: '100%' }}
+                                      />
+                                    </div>
                                   )}
                                 </div>
+                              ) : (
+                                <div style={{ flex: 1, color: '#94a3b8', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                                  教科を選択してください
+                                </div>
                               )}
+
+                              {/* コマ削除ボタン */}
+                              <button
+                                type="button"
+                                data-testid={`period-delete-btn-${p}`}
+                                aria-label={`${p}コマ目を削除`}
+                                title={`${p}コマ目を削除`}
+                                onClick={() => handleRemovePeriod(p)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  padding: '4px',
+                                  borderRadius: '4px',
+                                  color: '#94a3b8',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'color 0.15s, background-color 0.15s',
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = '#ef4444';
+                                  e.currentTarget.style.backgroundColor = '#fee2e2';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = '#94a3b8';
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                }}
+                              >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6"></polyline>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                                </svg>
+                              </button>
                             </div>
                           );
                         })}

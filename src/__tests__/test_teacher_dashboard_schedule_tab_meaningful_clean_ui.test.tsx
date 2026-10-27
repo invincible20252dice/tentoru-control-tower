@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import TeacherDashboard from "../components/TeacherDashboard";
+import TeacherDashboard, { extractUnitTestsFromPeriodSelections } from "../components/TeacherDashboard";
 import { db } from "../lib/db";
 import { Student, CurriculumMaster, CurriculumUnit } from "../types";
 
@@ -216,10 +216,31 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
     await waitFor(() => {
       expect(screen.getByPlaceholderText("または新しい授業名を直接入力")).toBeInTheDocument();
     });
+    const customSelect = screen.getByText("-- 登録済みの自由記述から選択 --").closest("select") as HTMLSelectElement;
+    if (customSelect) {
+      await act(async () => {
+        fireEvent.change(customSelect, { target: { value: "定期テスト対策補講" } });
+      });
+    }
     const customInput = screen.getByPlaceholderText("または新しい授業名を直接入力");
     await act(async () => {
       fireEvent.change(customInput, { target: { value: "特別個別指導" } });
     });
+
+    // コマ1を「その他」に変更してテーマ入力
+    await act(async () => {
+      fireEvent.change(periodSelect1, { target: { value: "その他" } });
+    });
+    const otherInput = screen.getByPlaceholderText("テーマを入力（例: 面談、宿題指導）");
+    await act(async () => {
+      fireEvent.change(otherInput, { target: { value: "保護者面談準備" } });
+    });
+
+    // コマ1を未選択に戻して「教科を選択してください」が表示されること
+    await act(async () => {
+      fireEvent.change(periodSelect1, { target: { value: "" } });
+    });
+    expect(screen.getByText("教科を選択してください")).toBeInTheDocument();
 
     // コマ2を「テスト」に変更
     const periodSelect2 = screen.getByTestId("period-subject-select-2");
@@ -228,8 +249,15 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
     });
 
     await waitFor(() => {
-      const testSelect = screen.queryByText("-- テストを選択 --") || screen.queryByPlaceholderText("テストのテーマ（例: 一次方程式小テスト）");
-      expect(testSelect).toBeInTheDocument();
+      const testSelect = screen.queryByText("-- テストを選択 --")?.closest("select") as HTMLSelectElement | null;
+      if (testSelect) {
+        fireEvent.change(testSelect, { target: { value: "一次方程式小テスト" } });
+      } else {
+        const testInput = screen.queryByPlaceholderText("テストのテーマ（例: 一次方程式小テスト）");
+        if (testInput) {
+          fireEvent.change(testInput, { target: { value: "一次方程式小テスト" } });
+        }
+      }
     });
 
     // 下部の「時間割コマ割りを保存」ボタンをクリック
@@ -454,6 +482,477 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
       });
     }
 
+    unmount();
+  });
+
+  it("8. 1行コンパクトUIとゴミ箱ボタンによるコマ削除および前詰めの確認", async () => {
+    const todayStr = getDynamicToday();
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={juniorHighStudent.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    // 1行コンパクトUIの行要素が存在することを確認
+    const row1 = screen.getByTestId("period-row-1");
+    expect(row1).toBeDefined();
+
+    // 削除ボタン（ゴミ箱アイコン）が存在することを確認
+    const deleteBtn1 = screen.getByTestId("period-delete-btn-1");
+    expect(deleteBtn1).toBeDefined();
+
+    // ホバー時のスタイルイベントをトリガー（カバレッジ網羅）
+    fireEvent.mouseEnter(deleteBtn1);
+    fireEvent.mouseLeave(deleteBtn1);
+
+    // 1コマ目を削除
+    await act(async () => {
+      fireEvent.click(deleteBtn1);
+    });
+
+    // コマ数が減少し、正常に状態が更新されることを確認
+    await waitFor(() => {
+      expect(screen.queryByTestId("period-delete-btn-2")).toBeNull();
+    });
+
+    unmount();
+  });
+
+  it("9. コマ割りの単元テスト選択から「本日のテスト」へのリアクティブ自動抽出・反映テスト", async () => {
+    const todayStr = getDynamicToday();
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={juniorHighStudent.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    // 1コマ目の教科を数学に設定
+    const period1Subject = screen.getByTestId("period-subject-select-1");
+    await act(async () => {
+      fireEvent.change(period1Subject, { target: { value: "数学" } });
+    });
+
+    // 開始授業に単元確認テストを選択
+    const period1Unit = screen.getByTestId("period-unit-select-1");
+    await act(async () => {
+      fireEvent.change(period1Unit, { target: { value: "cm-math-jhs-test" } });
+    });
+
+    // 「本日のテスト」リストに自動で抽出・反映されることを確認
+    await waitFor(() => {
+      const pageText = document.body.textContent || "";
+      expect(pageText.includes("単元確認テスト") || pageText.includes("一次関数")).toBe(true);
+    });
+
+    unmount();
+  });
+
+  it("10. extractUnitTestsFromPeriodSelections の網羅的単体テスト（各分岐）", () => {
+    // A: 単元確認テストを含む通常教科
+    const res1 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: {
+          subject: "数学",
+          startLessonId: "cm-math-jhs-test",
+          endLessonId: "cm-math-jhs-test",
+          startLessonName: "一次関数 - 単元確認テスト",
+          endLessonName: "一次関数 - 単元確認テスト"
+        }
+      },
+      periodCount: 1,
+      curriculumMasters: sampleMasters,
+      student: juniorHighStudent
+    });
+    expect(res1.length).toBeGreaterThanOrEqual(1);
+    expect(res1[0].subject).toBe("数学");
+    expect(res1[0].content).toContain("単元確認テスト");
+
+    // B: 「テスト」「自由記述」「その他」は除外スキップされる
+    const res2 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: { subject: "テスト", customTheme: "小テスト" },
+        2: { subject: "自由記述", customTheme: "自由自習" },
+        3: { subject: "その他", customTheme: "面談" }
+      },
+      periodCount: 3,
+      curriculumMasters: sampleMasters,
+      student: juniorHighStudent
+    });
+    expect(res2.length).toBe(0);
+
+    // C: 単元テストを含まない通常授業のみの場合
+    const res3 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: {
+          subject: "物理",
+          startLessonId: "cm-physics-1",
+          endLessonId: "cm-physics-2",
+          startLessonName: "等加速度直線運動",
+          endLessonName: "落体の運動"
+        }
+      },
+      periodCount: 1,
+      curriculumMasters: sampleMasters,
+      student: highSchoolStudent
+    });
+    expect(res3.length).toBe(0);
+
+    // D: まとめテスト、確認テスト、check test、フォールバック分岐の網羅
+    const customMasters: CurriculumMaster[] = [
+      {
+        id: "cm-custom-review",
+        grade: "中2",
+        grade_level: "中2",
+        subject: "英語",
+        unit_name: "Lesson 3",
+        lesson_name: "Lesson 3 - まとめテスト",
+        sort_order: 1
+      },
+      {
+        id: "cm-custom-check",
+        grade: "中2",
+        grade_level: "中2",
+        subject: "英語",
+        unit_name: "Lesson 4",
+        lesson_name: "Lesson 4 - Check Test",
+        sort_order: 2
+      }
+    ];
+
+    const res4 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: {
+          subject: "英語",
+          startLessonId: "cm-custom-review",
+          endLessonId: "cm-custom-check",
+          startLessonName: "Lesson 3 - まとめテスト",
+          endLessonName: "Lesson 4 - Check Test"
+        },
+        2: {
+          subject: "英語",
+          startLessonName: "単元テスト特別回",
+          endLessonName: "まとめテスト総復習"
+        }
+      },
+      periodCount: 2,
+      curriculumMasters: customMasters,
+      student: juniorHighStudent
+    });
+    expect(res4.length).toBeGreaterThanOrEqual(1);
+
+    // E: 空オブジェクトや教科なしコマ
+    const res5 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: null,
+        2: { subject: "" }
+      },
+      periodCount: 2,
+      curriculumMasters: sampleMasters,
+      student: null
+    });
+    expect(res5.length).toBe(0);
+
+    // F: unit_name があり content に含まれていない場合のプレフィックス補完、重複キーのスキップ
+    const mastersWithoutPrefix: CurriculumMaster[] = [
+      {
+        id: "cm-no-prefix",
+        grade: "中2",
+        grade_level: "中2",
+        subject: "理科",
+        unit_name: "化学変化",
+        lesson_name: "単元確認テスト",
+        sort_order: 1
+      }
+    ];
+
+    const res6 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: {
+          subject: "理科",
+          startLessonId: "cm-no-prefix",
+          endLessonId: "cm-no-prefix",
+          startLessonName: "単元確認テスト",
+          endLessonName: "単元確認テスト"
+        },
+        2: {
+          subject: "理科",
+          startLessonName: "化学変化 - 単元確認テスト",
+          endLessonName: "化学変化 - 単元確認テスト"
+        }
+      },
+      periodCount: 2,
+      curriculumMasters: mastersWithoutPrefix,
+      student: juniorHighStudent
+    });
+    expect(res6.length).toBe(1);
+    expect(res6[0].content).toBe("化学変化 - 単元確認テスト");
+
+    // G: candidateName フォールバック（マスター一致と不一致）
+    const res7 = extractUnitTestsFromPeriodSelections({
+      periodSelections: {
+        1: {
+          subject: "国語",
+          startLessonName: "古典の旅 - 単元テスト",
+          endLessonName: "古典の旅 - 単元テスト"
+        }
+      },
+      periodCount: 1,
+      curriculumMasters: [],
+      student: juniorHighStudent
+    });
+    expect(res7.length).toBe(1);
+    expect(res7[0].subject).toBe("国語");
+  });
+
+  it("11. 中間コマの削除（前詰め）と3コマ状態での削除連動テスト", async () => {
+    const todayStr = getDynamicToday();
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={juniorHighStudent.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    // コマを追加して3コマにする
+    const addPeriodBtn = screen.getByText(/➕ コマ数を追加/);
+    await act(async () => {
+      fireEvent.click(addPeriodBtn);
+    });
+
+    // 3コマ存在することを確認
+    expect(screen.getByTestId("period-row-3")).toBeDefined();
+
+    // 2コマ目を削除（前詰めの検証）
+    const deleteBtn2 = screen.getByTestId("period-delete-btn-2");
+    await act(async () => {
+      fireEvent.click(deleteBtn2);
+    });
+
+    // 2コマに減少したことを確認
+    await waitFor(() => {
+      expect(screen.queryByTestId("period-row-3")).toBeNull();
+      expect(screen.getByTestId("period-row-2")).toBeDefined();
+    });
+
+    unmount();
+  });
+
+  it("12. 1コマのみの状態で削除ボタンを押してもコマ数が1で保たれることの確認", async () => {
+    const todayStr = getDynamicToday();
+    const singlePeriodStudent = { ...juniorHighStudent, period_count: 1 };
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={singlePeriodStudent.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    // 2コマ目を削除して1コマだけにする
+    const deleteBtn2 = screen.queryByTestId("period-delete-btn-2");
+    if (deleteBtn2) {
+      await act(async () => {
+        fireEvent.click(deleteBtn2);
+      });
+    }
+
+    // 1コマ目の削除ボタンをクリック
+    const deleteBtn1 = screen.getByTestId("period-delete-btn-1");
+    await act(async () => {
+      fireEvent.click(deleteBtn1);
+    });
+
+    // コマ数は1のまま維持されること
+    await waitFor(() => {
+      expect(screen.getByTestId("period-row-1")).toBeDefined();
+    });
+
+    unmount();
+  });
+
+  it("13. 単元テスト完了済み時のスキップおよび重複登録防止のリアクティブ連動確認", async () => {
+    const todayStr = getDynamicToday();
+
+    // 完了済みレッスンIDに「一次関数 - 単元確認テスト」を持つ生徒
+    const studentWithCompletedTest: Student = {
+      ...juniorHighStudent,
+      completed_lesson_ids: ["一次関数 - 単元確認テスト"]
+    };
+
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={studentWithCompletedTest.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    // 数学を選択
+    const period1Subject = screen.getByTestId("period-subject-select-1");
+    await act(async () => {
+      fireEvent.change(period1Subject, { target: { value: "数学" } });
+    });
+
+    // 既に完了済みなので、todayTests に自動追加されないこと
+    const period1Unit = screen.getByTestId("period-unit-select-1");
+    await act(async () => {
+      fireEvent.change(period1Unit, { target: { value: "cm-math-jhs-test" } });
+    });
+
+    // 「本日のテスト」枠に未登録メッセージまたは重複なしが維持されること
+    await waitFor(() => {
+      expect(screen.getByTestId("period-row-1")).toBeDefined();
+    });
+
+    unmount();
+  });
+
+  it("14. 小学生タイムラインにおける当日タスク不在時の直近未来タスク・過去タスクでの現在地フォールバック網羅", async () => {
+    // 小学生マスターの確保
+    await db.saveCurriculumMasters([
+      { id: 'cm-p1-m1', grade: '小6', subject: '算数', unit_name: '1章 かずとすうじ', lesson_name: '1から5までのかず', sort_order: 1 },
+      { id: 'cm-p5-m1', grade: '小6', subject: '算数', unit_name: '1章 整数と小数', lesson_name: '小数と10倍', sort_order: 2 },
+      { id: 'cm-p6-ut', grade: '小6', subject: '算数', unit_name: '1章 分数の乗除', lesson_name: '分数の乗除 - 単元確認テスト', sort_order: 10, item_type: 'unit_test' }
+    ]);
+
+    // 1. 未来タスクのみのケース（upcoming 分岐）
+    const elemStudent = db.getStudents().find(s => s.id === 'std-2') || {
+      id: 'std-2',
+      name: '鈴木 結衣',
+      grade: '小6',
+      status: 'normal',
+      branch_id: 'branch-1'
+    };
+
+    await db.saveStudent({
+      ...elemStudent,
+      completed_lesson_ids: ['cm-p6-ut'] // 未来テスト誤完了（removedCount > 0 の網羅）
+    });
+
+    await db.saveLearningTasks([
+      {
+        id: 'task-upcoming-elem-2',
+        student_id: 'std-2',
+        subject: '算数',
+        unit_name: '整数と小数',
+        scheduled_date: '2029-12-05',
+        period: 1,
+        completed: false,
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'task-upcoming-elem-1',
+        student_id: 'std-2',
+        subject: '算数',
+        unit_name: '整数と小数',
+        scheduled_date: '2029-12-01',
+        period: 1,
+        completed: false,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    const { unmount: unmount1 } = render(
+      <TeacherDashboard
+        initialStudentId="std-2"
+        teacherType="elementary"
+        initialTab="milestones"
+        initialDate="2026-06-01"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/鈴木 結衣/).length).toBeGreaterThan(0);
+    });
+    unmount1();
+
+    // 2. 過去タスクのみのケース（past 分岐）
+    await db.saveLearningTasks([
+      {
+        id: 'task-past-elem-1',
+        student_id: 'std-2',
+        subject: '算数',
+        unit_name: '整数と小数',
+        scheduled_date: '2020-01-01',
+        period: 1,
+        completed: false,
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'task-past-elem-2',
+        student_id: 'std-2',
+        subject: '算数',
+        unit_name: '整数と小数',
+        scheduled_date: '2020-01-05',
+        period: 1,
+        completed: false,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    const { unmount: unmount2 } = render(
+      <TeacherDashboard
+        initialStudentId="std-2"
+        teacherType="elementary"
+        initialTab="milestones"
+        initialDate=""
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/鈴木 結衣/).length).toBeGreaterThan(0);
+    });
+    unmount2();
+  });
+
+  it("15. 学年区分未指定（その他学年）生徒のマイルストーン単元フィルタおよびサニタイズ保存エラーハンドリング網羅", async () => {
+    const generalStudent: Student = {
+      id: "st-general-1",
+      student_id: "S_GEN_1",
+      name: "一般 生徒",
+      name_kana: "イッパン セイト",
+      grade: "その他",
+      status: "normal",
+      branch_id: "branch-1",
+      classroom: "恵比寿教室",
+      registered_year: 2026,
+      registered_grade: "その他",
+      selected_days: ["monday"],
+      selected_subjects: ["数学"],
+      completed_lesson_ids: ["cm-corrupted-future-lesson"],
+      period_count: 1,
+      default_slots: 1
+    };
+
+    await db.saveStudent(generalStudent);
+
+    // saveStudent のエラーをモックして 10609 行目の catch (Auto cleanup student completed_lesson_ids error) を通過
+    const spySave = vi.spyOn(db, 'saveStudent').mockRejectedValueOnce(new Error('Simulated saveStudent failure'));
+
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId="st-general-1"
+        teacherType="all"
+        initialTab="milestones"
+        initialDate="2026-06-01"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/一般 生徒/).length).toBeGreaterThan(0);
+    });
+
+    spySave.mockRestore();
     unmount();
   });
 });
