@@ -238,16 +238,17 @@ describe('生徒情報（学校名・個性タグ）完全同期 ＆ 単元テ�
       expect(range.end_lesson_name).toContain('まとめテスト（３）');
       expect(range.end_lesson_name).not.toContain('単元確認テスト');
 
-      // 次回（まとめテスト3完了後）は単元テスト単独で1コマ
+      // 次回（まとめテスト3完了後）の授業コマは単元テスト直前（まとめテスト(3)）にとどまり新単元には進まない
       const nextRange = calculateLessonRangeForSlot({
         subject: '算数',
         startLessonId: 'cm-step-19-test',
         student: studentAtStep17,
         curriculumMasters: sampleCurriculum
       });
-      expect(nextRange.start_lesson_id).toBe('cm-step-19-test');
-      expect(nextRange.end_lesson_id).toBe('cm-step-19-test');
-      expect(nextRange.end_lesson_name).toContain('単元確認テスト');
+      expect(nextRange.start_lesson_id).toBe('cm-auto-sum3-算数-小5-小数のかけ算');
+      expect(nextRange.end_lesson_id).toBe('cm-auto-sum3-算数-小5-小数のかけ算');
+      expect(nextRange.end_lesson_name).not.toContain('単元確認テスト');
+      expect(nextRange.end_lesson_name).toContain('まとめテスト（３）');
     });
 
     it('該当の単元テストに「合格（passed）」の記録が存在する場合のみ、次の単元（STEP 20〜）がスケジュール対象としてアンロックされる', () => {

@@ -2632,7 +2632,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(testSelectsAll[0], { target: { value: 'grade' } });
     }
     
-    const hwSection = (screen.getByText('宿題:').closest('div[style*="marginTop"]') || screen.getByText('宿題:').parentElement!.parentElement)!;
+    const hwSection = screen.getByTestId('today-homeworks-container');
     const hwScopeSelect = hwSection.querySelector('select')!;
     fireEvent.change(hwScopeSelect, { target: { value: 'school' } });
 
@@ -2801,7 +2801,7 @@ describe('UI Components Render & Interaction Tests', () => {
       fireEvent.change(testSelects[1], { target: { value: 'level' } });
     }
 
-    const hwSection = (screen.getByText('宿題:').closest('div[style*="marginTop"]') || screen.getByText('宿題:').parentElement!.parentElement)!;
+    const hwSection = screen.getByTestId('today-homeworks-container');
     await waitFor(() => {
       expect(hwSection.querySelectorAll('select').length).toBeGreaterThanOrEqual(3);
     });

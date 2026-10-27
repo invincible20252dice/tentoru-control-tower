@@ -103,12 +103,11 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
       lessonProgressList: []
     });
 
-    // 1コマ目が単元確認テストになる
-    expect(slots[1].startLessonName).toContain('単元確認テスト');
-    expect(slots[1].endLessonName).toContain('単元確認テスト');
-    expect(slots[1].lessonRange).toContain('単元確認テスト');
-    expect(slots[1].startLessonId).toBe('cm-kazu-test');
-    expect(slots[1].endLessonId).toBe('cm-kazu-test');
+    // 1コマ目が単元確認テスト直前の通常レッスンになる（単元確認テストは授業コマには入らない）
+    expect(slots[1].startLessonName).not.toContain('単元確認テスト');
+    expect(slots[1].endLessonName).not.toContain('単元確認テスト');
+    expect(slots[1].lessonRange).not.toContain('単元確認テスト');
+    expect(slots[1].startLessonName).toContain('まとめテスト（３）');
 
     // 2コマ目もテスト合格前は新単元（いくつと いくつ）へ先入れされないこと
     expect(slots[2].startLessonName).not.toContain('第1講 かずの合成分解');
@@ -213,16 +212,17 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
       fireEvent.click(autoReschedBtn);
     });
 
-    // 1. From / To ドロップダウンの表示確認
+    // 1. From / To ドロップダウンの表示確認（単元確認テストは授業コマには入らず直前レッスンが割り当てられる）
     const fromSelect = container!.querySelector('select[data-testid="period-unit-select-1"]') as HTMLSelectElement;
     expect(fromSelect).toBeDefined();
-    expect(fromSelect.value).toBe('cm-kazu-test');
+    expect(fromSelect.value).not.toBe('cm-kazu-test');
+    expect(fromSelect.value).toBe('cm-auto-sum3-算数-小1-かずと すうじ');
     // 空欄（""）になっていないこと
     expect(fromSelect.value).not.toBe('');
 
     const toSelect = container!.querySelector('select[data-testid="period-end-lesson-select-1"]') as HTMLSelectElement;
     expect(toSelect).toBeDefined();
-    expect(toSelect.value).toBe('cm-kazu-test');
+    expect(toSelect.value).toBe('cm-auto-sum3-算数-小1-かずと すうじ');
     expect(toSelect.value).not.toBe('');
 
     // 2. 本日のテストへの自動登録・投入確認
@@ -299,9 +299,10 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
     });
 
     expect(slots[1].startLessonName).toContain('連立方程式');
-    expect(slots[1].startLessonName).toContain('単元確認テスト');
-    expect(slots[1].startLessonId).toBe('cm-jhs-eq-test');
-    expect(slots[1].endLessonId).toBe('cm-jhs-eq-test');
+    expect(slots[1].startLessonName).not.toContain('単元確認テスト');
+    expect(slots[1].startLessonName).toContain('連立方程式の解き方');
+    expect(slots[1].startLessonId).toBe('cm-jhs-eq-1');
+    expect(slots[1].endLessonId).toBe('cm-jhs-eq-1');
 
     // 2コマ目は一次関数へ先入れされないこと（当日の学習ストッパー）
     expect(slots[2].startLessonName).not.toContain('一次関数のグラフ');
@@ -330,14 +331,14 @@ describe('単元テスト時のコマ割りFrom/To表示・本日のテスト自
       fireEvent.click(autoReschedBtn);
     });
 
-    // ドロップダウンのFrom / To が空欄でないこと
+    // ドロップダウンのFrom / To が空欄でないこと（単元確認テストは授業コマに入らず直前レッスン）
     const fromSelect = container!.querySelector('select[data-testid="period-unit-select-1"]') as HTMLSelectElement;
     expect(fromSelect).toBeDefined();
-    expect(fromSelect.value).toBe('cm-jhs-eq-test');
+    expect(fromSelect.value).toBe('cm-jhs-eq-1');
 
     const toSelect = container!.querySelector('select[data-testid="period-end-lesson-select-1"]') as HTMLSelectElement;
     expect(toSelect).toBeDefined();
-    expect(toSelect.value).toBe('cm-jhs-eq-test');
+    expect(toSelect.value).toBe('cm-jhs-eq-1');
 
     // 本日のテストに自動投入されていること
     const savedMiniTests = db.getMiniTestResults().filter(t => t.student_id === jhsStudent.id);

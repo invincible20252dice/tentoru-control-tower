@@ -82,7 +82,8 @@ describe('Unit Test Score Input, Teacher Dashboard Realtime Sync, Remedial Flow 
       subject: '算数',
       curriculumMasters: processedMath
     });
-    expect(nextSlot.start_lesson_name).toContain('単元確認テスト');
+    expect(nextSlot.start_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSlot.start_lesson_name).toContain('まとめテスト（３）');
   });
 
   it('2. 英語: Check Testまでを同日授業内でやった場合、単元テストは同日に行わず次回授業に行う', () => {
@@ -138,7 +139,8 @@ describe('Unit Test Score Input, Teacher Dashboard Realtime Sync, Remedial Flow 
       subject: '英語',
       curriculumMasters: processedEng
     });
-    expect(nextSlotEng.start_lesson_name).toContain('単元確認テスト');
+    expect(nextSlotEng.start_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSlotEng.start_lesson_name).toContain('Check Test');
   });
 
   it('3. 単元テスト点数入力欄の表示、合格判定＆送信、講師ダッシュボード（小テスト結果管理）とのリアルタイム連動', async () => {
@@ -471,7 +473,8 @@ describe('Unit Test Score Input, Teacher Dashboard Realtime Sync, Remedial Flow 
       curriculumMasters: processedMath
     });
 
-    expect(slots[1].lessonRange).toContain('単元確認テスト');
+    expect(slots[1].lessonRange).not.toContain('単元確認テスト');
+    expect(slots[1].lessonRange).toContain('まとめテスト（３）');
     expect(slots[2].lessonRange).toContain('【定着演習】');
   });
 

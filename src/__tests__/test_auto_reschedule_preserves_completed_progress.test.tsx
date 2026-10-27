@@ -122,8 +122,9 @@ describe('Auto Reschedule Preserves Completed Lessons Specification', () => {
 
     expect(slots[1]).toBeDefined();
     expect(slots[1].startLessonId).not.toBe('cm-m-step1');
-    expect(slots[1].startLessonId).toBe('cm-m-test');
-    expect(slots[1].startLessonName).toContain('単元確認テスト');
+    expect(slots[1].startLessonId).toBe('cm-m-step4');
+    expect(slots[1].startLessonName).not.toContain('単元確認テスト');
+    expect(slots[1].startLessonName).toContain('まとめテスト（３）');
   });
 
   it('2. TeacherDashboard UI検証: 「遅れチェック ＆ 自動リスケ」ボタンをクリックした際、完了済み生徒のコマ割りが最初から（スタートライン）にならず正しい現在地から生成されること', async () => {

@@ -86,8 +86,9 @@ describe('Unit Test Flow: Session Separation, Remedial Task on Failure, and Cros
       curriculumMasters: processedMath
     });
 
-    expect(nextSessionSlot.start_lesson_name).toContain('単元確認テスト');
-    expect(nextSessionSlot.end_lesson_name).toContain('単元確認テスト');
+    expect(nextSessionSlot.start_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSessionSlot.end_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSessionSlot.start_lesson_name).toContain('まとめテスト（３）');
     expect(nextSessionSlot.end_lesson_name).not.toContain('分数のわり算');
   });
 
@@ -129,8 +130,9 @@ describe('Unit Test Flow: Session Separation, Remedial Task on Failure, and Cros
       curriculumMasters: processedEnglish
     });
 
-    expect(nextSessionSlot.start_lesson_name).toContain('単元確認テスト');
-    expect(nextSessionSlot.end_lesson_name).toContain('単元確認テスト');
+    expect(nextSessionSlot.start_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSessionSlot.end_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSessionSlot.start_lesson_name).toContain('Check Test');
     expect(nextSessionSlot.end_lesson_name).not.toContain('Lesson 2');
   });
 

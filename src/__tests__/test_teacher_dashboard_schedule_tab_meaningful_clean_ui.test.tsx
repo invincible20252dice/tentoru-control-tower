@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import TeacherDashboard, { extractUnitTestsFromPeriodSelections } from "../components/TeacherDashboard";
 import { db } from "../lib/db";
@@ -953,6 +953,154 @@ describe("TeacherDashboard Schedule Tab Meaningful Clean UI Tests", () => {
     });
 
     spySave.mockRestore();
+    unmount();
+  });
+
+  it("16. 単元確認テスト vs まとめテストの厳格な分離: 自動リスケジュール時に単元確認テストが授業コマのFrom/Toに混入せず本日のテスト枠のみに追加され、まとめテストは通常授業コマに入り本日のテスト枠に誤検知されないこと", async () => {
+    const studentTestStrict: Student = {
+      ...juniorHighStudent,
+      id: "st-strict-test-1",
+      name: "テスト厳格分離 生徒",
+      grade: "中2",
+      start_unit_id: "cm-math-jhs-1",
+      start_unit_math: "cm-math-jhs-1",
+      selected_subjects: ["数学", "英語"],
+      // 数学は一次関数の通常授業2コマが完了済み（一次関数 - 単元確認テスト cm-math-jhs-test 待ち）
+      completed_lesson_ids: [
+        "cm-math-jhs-1", "cm-math-jhs-2"
+      ],
+      period_count: 2,
+      default_slots: 2
+    };
+
+    const strictMasters: CurriculumMaster[] = [
+      ...sampleMasters,
+      {
+        id: "cm-eng-review",
+        grade: "中2",
+        grade_level: "中2",
+        subject: "英語",
+        unit_name: "助動詞",
+        lesson_name: "助動詞 - まとめテスト（１）",
+        sort_order: 20
+      }
+    ];
+
+    const todayStr = getDynamicToday();
+    await db.saveStudent(studentTestStrict);
+    await db.saveCurriculumMasters(strictMasters);
+
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId="st-strict-test-1"
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('japanese-date-badge')).toBeInTheDocument();
+    });
+
+    // 自動リスケジュール実行ボタンを押下
+    const rescheduleBtn = screen.getByText(/遅れチェック.*自動リスケ|自動リスケ/i);
+    await act(async () => {
+      fireEvent.click(rescheduleBtn);
+    });
+
+    await waitFor(() => {
+      // 1. コマ割り（授業コマ）の検証
+      // 1コマ目・2コマ目の From/To セレクトボックスを取得
+      const startSelect1 = screen.queryByTestId('period-unit-select-1') as HTMLSelectElement | null;
+      const endSelect1 = screen.queryByTestId('period-end-lesson-select-1') as HTMLSelectElement | null;
+      const startSelect2 = screen.queryByTestId('period-unit-select-2') as HTMLSelectElement | null;
+      const endSelect2 = screen.queryByTestId('period-end-lesson-select-2') as HTMLSelectElement | null;
+
+      // 授業コマの選択値（テキスト）に「単元確認テスト」は絶対に混入していないこと！
+      if (startSelect1) {
+        const selText = startSelect1.options[startSelect1.selectedIndex]?.text || '';
+        expect(selText).not.toContain('単元確認テスト');
+      }
+      if (endSelect1) {
+        const selText = endSelect1.options[endSelect1.selectedIndex]?.text || '';
+        expect(selText).not.toContain('単元確認テスト');
+      }
+      if (startSelect2) {
+        const selText = startSelect2.options[startSelect2.selectedIndex]?.text || '';
+        expect(selText).not.toContain('単元確認テスト');
+      }
+      if (endSelect2) {
+        const selText = endSelect2.options[endSelect2.selectedIndex]?.text || '';
+        expect(selText).not.toContain('単元確認テスト');
+      }
+
+      // 2. 本日のテスト枠の検証
+      const testsContainer = screen.getByTestId('today-tests-container');
+      expect(testsContainer).toBeDefined();
+
+      // 数学の「単元確認テスト」が本日のテスト枠に自動追加されていること
+      expect(within(testsContainer).getAllByText(/単元確認テスト/i).length).toBeGreaterThan(0);
+
+      // 英語の「まとめテスト」は本日のテスト枠には絶対に誤検知されて入っていないこと！
+      const summaryTestsInTestBox = within(testsContainer).queryAllByText(/まとめテスト/i);
+      expect(summaryTestsInTestBox.length).toBe(0);
+    });
+
+    unmount();
+  });
+
+  it("17. 教科選択文字見切れ解消（Flexbox幅拡張）および4大セクション見出しの洗練モダンUIデザイン（青背景・左アクセントボーダー・SVGアイコン）の検証", async () => {
+    const todayStr = getDynamicToday();
+    const { unmount } = render(
+      <TeacherDashboard
+        initialStudentId={juniorHighStudent.id}
+        teacherType="junior_high"
+        initialTab="schedule"
+        initialDate={todayStr}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('period-subject-select-1')).toBeDefined();
+    });
+
+    // 1. 文字見切れ解消の検証: 教科セレクトの親コンテナが width: 185px, minWidth: 185px、セレクトが minWidth: 145px に拡張されていること
+    const subjectSelect = screen.getByTestId('period-subject-select-1');
+    const subjectWrapper = subjectSelect.parentElement as HTMLElement;
+    expect(subjectWrapper.style.width).toBe('185px');
+    expect(subjectWrapper.style.minWidth).toBe('185px');
+    expect(subjectSelect.style.minWidth).toBe('145px');
+
+    // 2. 4大セクション見出しのモダンUIデザイン（青背景・左ボーダー・SVGアイコン）の検証
+    // ① コマ割り見出し
+    const dateBadge = screen.getByTestId('japanese-date-badge');
+    const dateHeaderWrapper = dateBadge.parentElement as HTMLElement;
+    expect(dateHeaderWrapper.style.backgroundColor).toContain('rgba(239, 246, 255');
+    expect(dateHeaderWrapper.style.borderLeft).toContain('4px solid');
+    expect(dateHeaderWrapper.querySelector('svg')).toBeDefined();
+
+    // ② 本日のテスト見出し
+    const testHeaderLabel = screen.getByText(/本日のテスト \(教科別 ＋ 単元テスト自動選択 ＋ 自由記述\):/i);
+    const testHeaderBlock = testHeaderLabel.closest('div[style*="border-left"]') || testHeaderLabel.parentElement?.parentElement as HTMLElement;
+    expect(testHeaderBlock.style.backgroundColor).toContain('rgba(239, 246, 255');
+    expect(testHeaderBlock.style.borderLeft).toContain('4px solid');
+    expect(testHeaderBlock.querySelector('svg')).toBeDefined();
+
+    // ③ 宿題見出し
+    const homeworkHeaderLabel = screen.getByText(/^宿題:$/i);
+    const homeworkHeaderBlock = homeworkHeaderLabel.closest('div[style*="border-left"]') || homeworkHeaderLabel.parentElement?.parentElement as HTMLElement;
+    expect(homeworkHeaderBlock.style.backgroundColor).toContain('rgba(239, 246, 255');
+    expect(homeworkHeaderBlock.style.borderLeft).toContain('4px solid');
+    expect(homeworkHeaderBlock.querySelector('svg')).toBeDefined();
+
+    // ④ 業務連絡見出し
+    const officeHeaderLabel = screen.getByText(/業務連絡 \(本日共通\):/i);
+    const officeHeaderBlock = officeHeaderLabel.closest('div[style*="border-left"]') || officeHeaderLabel.parentElement as HTMLElement;
+    expect(officeHeaderBlock.style.backgroundColor).toContain('rgba(239, 246, 255');
+    expect(officeHeaderBlock.style.borderLeft).toContain('4px solid');
+    expect(officeHeaderBlock.querySelector('svg')).toBeDefined();
+
     unmount();
   });
 });

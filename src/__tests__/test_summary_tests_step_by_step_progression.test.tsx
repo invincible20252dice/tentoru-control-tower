@@ -380,7 +380,7 @@ describe('Step-by-Step Summary Tests Progression & Auto Reschedule', () => {
 
       await waitFor(() => {
         const period1Select = screen.getByTestId('period-unit-select-1') as HTMLSelectElement;
-        expect(period1Select.value).toBe('cm-auto-ut-算数-小1-0の たしざんと ひきざん');
+        expect(period1Select.value).toBe('cm-auto-sum3-算数-小1-0の たしざんと ひきざん');
       });
     });
   });

@@ -151,7 +151,7 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
     expect(range.end_lesson_name).not.toContain('単元確認テスト');
     expect(range.end_lesson_name).not.toContain('小数のわり算');
 
-    // 次回（まとめテスト3完了後）は単元テスト単独で1コマ
+    // 次回（まとめテスト3完了後）: 単元確認テストは授業コマ（From〜To）には絶対に入れず直前のまとめテスト(3)等の定着演習が割り当てられ、新単元への抜け駆けを防止
     const studentAfterSummary3: Student = {
       ...studentNearTest,
       completed_lesson_ids: [
@@ -164,8 +164,10 @@ describe('Level-Based Lesson Range (From-To) & Estimated Pace Suite', () => {
       subject: '算数',
       curriculumMasters: sampleMasters
     });
-    expect(nextSlotRange.start_lesson_name).toContain('単元確認テスト');
-    expect(nextSlotRange.end_lesson_name).toContain('単元確認テスト');
+    expect(nextSlotRange.start_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSlotRange.end_lesson_name).not.toContain('単元確認テスト');
+    expect(nextSlotRange.start_lesson_name).toContain('まとめテスト（３）');
+    expect(nextSlotRange.end_lesson_name).not.toContain('小数のわり算');
   });
 
   it('renders elementary milestone timeline with level-based pace calculation in TeacherDashboard and hides level toggle buttons', async () => {

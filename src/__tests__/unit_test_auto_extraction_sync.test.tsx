@@ -34,6 +34,9 @@ describe('Unit Test Automatic Extraction & Real-time Dropdown Sync Tests', () =>
 
   it('automatically extracts unit test from schedule and displays in today tests section', async () => {
     const student = db.getStudents().find(s => s.id === 'std-1')!;
+    student.completed_lesson_ids = ['cm-sub-1'];
+    await db.saveStudent(student);
+
     const testDate = '2026-08-25';
 
     // 1コマ目に「ひきざん - 単元確認テスト」を設定
@@ -75,7 +78,9 @@ describe('Unit Test Automatic Extraction & Real-time Dropdown Sync Tests', () =>
     }
 
     // 検証: 本日のテスト欄に「ひきざん - 単元確認テスト」が自動抽出・反映されていること
-    expect(screen.getAllByText(/ひきざん - 単元確認テスト/i).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText(/ひきざん - 単元確認テスト/i).length).toBeGreaterThan(0);
+    });
   });
 
   it('supports multiple subjects unit tests in the same day (算数 & 英語)', async () => {

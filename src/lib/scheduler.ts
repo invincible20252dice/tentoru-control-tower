@@ -895,19 +895,21 @@ export function findNextUncompletedLessonForSubject(params: {
   if (startUnitId) {
     const { gradeText, unitName, cleanRaw } = parseStartUnitSetting(startUnitId);
 
-    let sIdx = masterLessons.findIndex(m => {
-      if (m.id === startUnitId || String(m.sort_order) === String(startUnitId)) return true;
-      if (m.name === startUnitId || m.name === cleanRaw) return true;
-      if (unitName && (m.name.includes(unitName) || cleanRaw.includes(m.name))) return true;
-      return false;
-    });
+    // 第1パス: ID または レッスン名 / 単元名の完全一致（最優先）
+    let sIdx = masterLessons.findIndex(m => 
+      m.id === startUnitId || 
+      String(m.sort_order) === String(startUnitId) || 
+      m.name === startUnitId || 
+      m.name === cleanRaw
+    );
 
-    if (sIdx < 0 && unitName && unitName.length >= 2) {
-      sIdx = masterLessons.findIndex(m => m.name.includes(unitName) || unitName.includes(m.name));
+    // 第2パス: 完全一致しない場合のみ、単元名（2文字以上かつ数字のみでない）での安全な部分一致
+    if (sIdx < 0 && unitName && unitName.length >= 2 && !/^\d+$/.test(unitName)) {
+      sIdx = masterLessons.findIndex(m => m.name.includes(unitName) || cleanRaw.includes(m.name));
     }
 
     if (sIdx >= 0) startThresholdIdx = sIdx;
-  } else if (isElem && student.grade) {
+  } else if (student.grade) {
     const studentGradeNorm = normalizeGrade(student.grade);
     if (studentGradeNorm) {
       const gradeStartIdx = masterLessons.findIndex(m => {
@@ -1355,9 +1357,12 @@ export function calculateLessonRangeForSlot(params: {
       if (step > 0) {
         // 通常授業やまとめテストから進んできた場合、単元テストの直前（まとめテスト(3)やCheck Test等）で終了する
         endIdx = startIdx + step - 1;
-      } else {
-        // 開始授業自体が単元テストの場合は、その単元テスト単独（1コマ単独）として受講する
-        endIdx = startIdx;
+      } else if (!hasFailed) {
+        // 開始授業自体が単元テスト（初回）の場合: 単元テストは授業コマ（From〜To）に入れず「本日のテスト」枠で実施するため、
+        // 授業コマ側は直前の通常レッスン（まとめテスト・Check Test・授業）または定着演習を割り当てる
+        const prevItemIdx = startIdx > 0 ? startIdx - 1 : 0;
+        startIdx = prevItemIdx;
+        endIdx = prevItemIdx;
       }
       break;
     }
@@ -1379,7 +1384,13 @@ export function calculateLessonRangeForSlot(params: {
     )
   );
 
+  // もし直前レッスンがなく startItem 自体が依然として単元テストの場合は【定着演習】として授業コマ名を設定（単元確認テストは授業コマに入れない）
   let startName = startItem?.name || null;
+  if (isStartUnitTest && !hasFailed) {
+    const rawLabel = startItem?.unit_name || startItem?.name || '';
+    const cleanUnit = normalizeUnitName(rawLabel) || rawLabel.replace(/^[^-]+-\s*/, '').trim();
+    startName = `【定着演習】${cleanUnit}`;
+  }
   let endName = isStartUnitTest ? startName : (endItem?.name || startName);
   let rangeStr = isStartUnitTest ? startName : formatLessonRange(startName, endName);
 

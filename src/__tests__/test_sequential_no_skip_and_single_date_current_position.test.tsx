@@ -82,15 +82,16 @@ describe('Emergency Bug Fixes: No-Skip Sequential Learning & Single-Date Current
       expect(next.lessonId).toBe('m-ut-1');
       expect(next.lessonName).toContain('単元確認テスト');
 
-      // generateSlotsForSelectedSubjects でも次単元に進まず単元確認テストが割り当てられること
+      // generateSlotsForSelectedSubjects でも次単元に進まず、授業コマのFrom/Toには単元確認テストを混入させず直前授業にとどまること
       const slots = generateSlotsForSelectedSubjects({
         student,
         periodCount: 1,
         selectedSubjects: ['算数'],
         curriculumMasters: mathMasters
       });
-      expect(slots[1].startLessonId).toBe('m-ut-1');
-      expect(slots[1].startLessonName).toContain('単元確認テスト');
+      expect(slots[1].startLessonId).toBe('m-5');
+      expect(slots[1].startLessonName).not.toContain('単元確認テスト');
+      expect(slots[1].startLessonName).not.toContain('小数のわり算');
     });
 
     it('3. 国語において中抜き（STEP 20〜24等）がある場合、最も小さい番号の未受講ステップが選択されること', () => {

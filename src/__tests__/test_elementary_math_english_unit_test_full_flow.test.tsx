@@ -205,8 +205,9 @@ describe('Elementary Math & English Unit Test Full Lifecycle & Progression Flow'
       curriculumMasters: processedEnglish,
       lessonsPerSlot: 2
     });
-    expect(slotRange.start_lesson_name).toContain('I am ~. - 単元確認テスト');
-    expect(slotRange.end_lesson_name).toContain('I am ~. - 単元確認テスト');
+    expect(slotRange.start_lesson_name).not.toContain('単元確認テスト');
+    expect(slotRange.start_lesson_name).toContain('I am ~. - Check Test');
+    expect(slotRange.end_lesson_name).toContain('I am ~. - Check Test');
     expect(slotRange.end_lesson_name).not.toContain('You are');
 
     // 合格後は STEP 7「You are ~.(1)」に進む

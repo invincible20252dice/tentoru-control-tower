@@ -62,6 +62,7 @@ import {
   generateAttendanceDates,
   calculateLessonRangeForSlot,
   formatLessonRange,
+  formatLessonTitle,
   findNextUncompletedLessonForSubject,
   inferStudentSubjectPace,
   getSortedSubjectsByProgressRate,
@@ -2142,13 +2143,12 @@ export function extractUnitTestsFromPeriodSelections(params: {
     for (const step of steps) {
       const stepName = step.name || '';
       const stepFull = step.fullTitle || '';
-      const isUnitTest = Boolean(
+      const isReviewOrCheck = isReviewOrCheckTest(stepName) || isReviewOrCheckTest(stepFull);
+      const isUnitTest = !isReviewOrCheck && Boolean(
         step.isUnitTest ||
+        (step as any).item_type === 'unit_test' ||
         stepName.includes('単元確認テスト') ||
         stepName.includes('単元テスト') ||
-        stepName.includes('まとめテスト') ||
-        stepName.includes('確認テスト') ||
-        stepName.toLowerCase().includes('check test') ||
         stepFull.includes('単元確認テスト') ||
         stepFull.includes('単元テスト')
       );
@@ -2184,11 +2184,12 @@ export function extractUnitTestsFromPeriodSelections(params: {
       }
     }
 
-    // startLessonName / endLessonName に単元確認テストが入っている場合のフォールバック
+    // startLessonName / endLessonName に単元確認テストが入っている場合のフォールバック（まとめテスト・Check Testは完全除外）
     const startName = config.startLessonName || '';
     const endName = config.endLessonName || '';
     for (const candidateName of [startName, endName]) {
-      if (candidateName && (candidateName.includes('単元確認テスト') || candidateName.includes('単元テスト') || candidateName.includes('まとめテスト'))) {
+      const isCandidateReview = isReviewOrCheckTest(candidateName);
+      if (!isCandidateReview && candidateName && (candidateName.includes('単元確認テスト') || candidateName.includes('単元テスト'))) {
         const matchedMaster = processedMasters.find(m => 
           m.lesson_name === candidateName || 
           (m.unit_name && `${m.unit_name} - ${m.lesson_name}` === candidateName) ||
@@ -3739,7 +3740,8 @@ export default function TeacherDashboard({
               curriculumMasters: listMasters,
               curriculumUnits: listUnits,
               schoolId: freshSt.school_id,
-              lessonProgressList: db.getStudentLessonProgressList(freshSt.id)
+              lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
+              miniTestResults: db.getMiniTestResults(freshSt.id)
             });
           }
         }
@@ -5359,9 +5361,10 @@ export default function TeacherDashboard({
   ) => {
     const nextAttDate = getNextAttendanceDateForStudent(dateStr, st);
 
-    // 1. 本日のテストの連動 (手動追加のカスタムテストのみ保持し、コマ割りから未完了テストを全教科スキャン抽出)
-    const updatedTests: typeof todayTests = existingTests.filter(t => t.testType === 'custom' && t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --');
-    const masters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+    // 1. 本日のテストの連動 (DB保存済みの有効なテストを保持し、コマ割りから未完了テストを全教科スキャン抽出)
+    const updatedTests: typeof todayTests = existingTests.filter(t => t.content && t.content.trim() !== '' && t.content !== '-- 単元テストマスタから選択 --' && !isReviewOrCheckTest(t.content));
+    const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+    const masters = ensureMathEnglishUnitTests(rawMasters);
     const autoTests = resolveAutoTestsFromPeriods(currentPeriods, st, masters, updatedTests, (s, title, subj) => isUnitTestCompleted(s as Student, title, subj));
     updatedTests.push(...autoTests as any);
 
@@ -5392,6 +5395,41 @@ export default function TeacherDashboard({
         });
       }
     }
+
+    // 本日のコマ割りに含まれる受講教科について、未合格の単元確認テストがあれば本日のテスト枠に自動追加
+    const todaySubjects = new Set(Object.values(currentPeriods).map((c: any) => c?.subject).filter(Boolean));
+    todaySubjects.forEach(sub => {
+      const nextUncompleted = findNextUncompletedLessonForSubject({
+        student: st,
+        subject: sub,
+        curriculumMasters: masters,
+        curriculumUnits: allCurriculumUnits,
+        miniTestResults: db.getMiniTestResults(st.id)
+      });
+      if (nextUncompleted && nextUncompleted.lessonName && isLessonUnitTest(nextUncompleted.lessonName)) {
+        const testContent = nextUncompleted.lessonName;
+        const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+        if (!isUnitTestCompleted(st, testContent, sub) && !isUnitTestCompleted(st, cleanContent, sub)) {
+          const alreadyAdded = updatedTests.some(t =>
+            (t.subject === sub || !t.subject) &&
+            (t.content === testContent || t.content === cleanContent)
+          );
+          if (!alreadyAdded) {
+            const matched = masters.find(m => m.id === nextUncompleted.lessonId || m.lesson_name === testContent);
+            const unitName = matched?.unit_name || extractUnitTestUnitName(testContent);
+            updatedTests.push({
+              id: `auto-test-${sub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+              subject: sub,
+              testType: 'unit_test',
+              unitName: unitName,
+              content: testContent,
+              passingLine: matched?.passing_line || '80%以上',
+              targetScope: 'individual'
+            });
+          }
+        }
+      }
+    });
 
     // 2. 算数・英語の2回目演習宿題の自動連動
     const updatedHomeworks = resolveAutoDrillHomeworks(currentPeriods, st.grade, nextAttDate, existingHomeworks);
@@ -5453,66 +5491,124 @@ export default function TeacherDashboard({
       // 1. 対象日付（scheduleDate）のコマ割りを最新進捗・選択教科・AI予測ペースで自動最適化生成
       const loadedPeriodCount = resolveSavedStudentPeriodCount((freshSt as any).default_slots, freshSt.period_count, periodCount, 3);
       const rawMasters = curriculumMastersList && curriculumMastersList.length > 0 ? curriculumMastersList : db.getCurriculumMasters();
+      const allMasters = ensureMathEnglishUnitTests(rawMasters);
       const optimizedPeriods = generateSlotsForSelectedSubjects({
         student: freshSt,
         periodCount: loadedPeriodCount,
         selectedSubjects: freshSt.selected_subjects,
         tasks: freshTasks,
         branchRules,
-        curriculumMasters: rawMasters,
+        curriculumMasters: allMasters,
         curriculumUnits: allCurriculumUnits,
         schoolId: freshSt.school_id,
         lessonProgressList: db.getStudentLessonProgressList(freshSt.id),
         miniTestResults: db.getMiniTestResults(freshSt.id)
       });
 
-      // 各コマの単元テスト To 固定チェック & 範囲補正
+      const extractedTodayTests: typeof todayTests = [];
+      const scheduledSubjects = new Set<string>();
+
+      // 各コマの単元確認テスト完全除外 & 本日のテスト枠への振り分け
       Object.keys(optimizedPeriods).forEach(pKey => {
         const p = parseInt(pKey);
         const sel = optimizedPeriods[p];
-        if (sel && sel.startLessonName) {
-          const isUnitTest = isLessonUnitTest(sel.startLessonName);
-          if (isUnitTest) {
-            sel.endLessonId = sel.startLessonId;
-            sel.endLessonName = sel.startLessonName;
-            sel.lessonRange = sel.startLessonName;
+        if (!sel || !sel.subject) return;
+        scheduledSubjects.add(sel.subject);
+
+        const isStartReviewOrCheck = isReviewOrCheckTest(sel.startLessonName);
+        const isEndReviewOrCheck = isReviewOrCheckTest(sel.endLessonName);
+        const isStartUnit = !isStartReviewOrCheck && isLessonUnitTest(sel.startLessonName);
+        const isEndUnit = !isEndReviewOrCheck && isLessonUnitTest(sel.endLessonName);
+
+        if (isStartUnit || isEndUnit) {
+          // 単元確認テストのテスト枠追加候補を抽出
+          const rawTestName = isStartUnit ? sel.startLessonName : sel.endLessonName;
+          const unitName = extractUnitTestUnitName(rawTestName);
+          const matchedMaster = allMasters.find(m =>
+            m.id === sel.startLessonId ||
+            m.lesson_name === rawTestName ||
+            (m.unit_name && `${m.unit_name} - ${m.lesson_name}` === rawTestName) ||
+            ((m.item_type === 'unit_test' || Boolean(m.lesson_name?.includes('単元確認テスト'))) && m.unit_name && m.unit_name === unitName)
+          );
+          const passingLine = matchedMaster?.passing_line || '80%以上';
+          const testContent = matchedMaster ? (matchedMaster.unit_name ? `${matchedMaster.unit_name} - ${matchedMaster.lesson_name.replace(/^[^-]+-\s*/, '')}` : matchedMaster.lesson_name) : rawTestName;
+          const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+
+          if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
+            const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
+            if (!exists) {
+              extractedTodayTests.push({
+                id: `test-auto-${freshSt.id}-${scheduleDate}-${pKey}-${Date.now()}`,
+                subject: sel.subject,
+                testType: 'unit_test',
+                unitName: unitName || matchedMaster?.unit_name || '',
+                content: testContent,
+                passingLine: passingLine,
+                targetScope: 'individual'
+              });
+            }
+          }
+
+          // 授業コマ（From〜To）からは単元確認テストを完全除外: 直前通常授業または定着演習に安全補正
+          const subjectMasters = allMasters.filter(m => isMatchingSubjectGroup(sel.subject, m.subject));
+          const utIdx = subjectMasters.findIndex(m => m.id === sel.startLessonId || m.lesson_name === rawTestName || (m.unit_name && m.unit_name === unitName && isLessonUnitTest(m.lesson_name)));
+          const prevLesson = utIdx > 0 ? subjectMasters[utIdx - 1] : null;
+
+          if (prevLesson && !isLessonUnitTest(prevLesson.lesson_name)) {
+            const prevTitle = formatLessonTitle(prevLesson.unit_name, prevLesson.lesson_name);
+            sel.startLessonId = prevLesson.id;
+            sel.endLessonId = prevLesson.id;
+            sel.startLessonName = prevTitle;
+            sel.endLessonName = prevTitle;
+            sel.lessonRange = prevTitle;
+          } else {
+            const cleanUnit = unitName || sel.subject;
+            const reviewTitle = `【定着演習】${cleanUnit}`;
+            sel.startLessonName = reviewTitle;
+            sel.endLessonName = reviewTitle;
+            sel.lessonRange = reviewTitle;
           }
         }
       });
 
-      // 2. コマ割り (optimizedPeriods) から単元テストを「本日のテスト」に自動連動・抽出 (State完全リセット＆完了済みテスト除外)
-      const extractedTodayTests: typeof todayTests = [];
-      const allMasters = ensureMathEnglishUnitTests(rawMasters);
-      Object.entries(optimizedPeriods).forEach(([pStr, sel]) => {
-        if (!sel || !sel.subject || !sel.startLessonName) return;
-        const isReviewOrCheck = isReviewOrCheckTest(sel.startLessonName) || isReviewOrCheckTest(sel.endLessonName);
-        const isTest = !isReviewOrCheck && (isLessonUnitTest(sel.startLessonName) || isLessonUnitTest(sel.endLessonName));
-        if (isTest) {
-          const testContent = resolveLessonTestContent(sel.startLessonName, sel.endLessonName, sel.lessonRange);
-          const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
-          
-          // 完了済み(合格済み)テストの除外判定
-          if (!isUnitTestCompleted(freshSt, testContent, sel.subject) && !isUnitTestCompleted(freshSt, cleanContent, sel.subject)) {
-            const exists = extractedTodayTests.some(t => t.subject === sel.subject && (t.content === testContent || t.content === cleanContent));
-            if (!exists) {
-              let unitName = extractUnitTestUnitName(sel.startLessonName);
-              const matchedMaster = allMasters.find(m =>
-                m.id === sel.startLessonId ||
-                m.id === sel.unitId ||
-                m.lesson_name === cleanContent ||
-                m.lesson_name === testContent ||
-                `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent ||
-                ((m.item_type === 'unit_test' || (m.lesson_name.includes('テスト') && !m.lesson_name.includes('まとめテスト'))) && m.unit_name && (m.unit_name === unitName || testContent.includes(m.unit_name)))
-              );
-              const passingLine = matchedMaster?.passing_line || '80%以上';
+      // 2. 本日割り当てられた教科について、未合格の単元確認テストがある場合は「本日のテスト」枠に自動追加
+      scheduledSubjects.forEach(sub => {
+        const utStatus = getLatestUnitTestStatusForSubject({
+          studentId: freshSt.id,
+          subject: sub,
+          miniTestResults: db.getMiniTestResults(freshSt.id)
+        });
 
+        // 単元確認テスト未合格または未受験の単元テストがある場合
+        const targetSubMasters = allMasters.filter(m => isMatchingSubjectGroup(sub, m.subject));
+        const nextUncompleted = findNextUncompletedLessonForSubject({
+          student: freshSt,
+          subject: sub,
+          curriculumMasters: allMasters,
+          curriculumUnits: allCurriculumUnits,
+          miniTestResults: db.getMiniTestResults(freshSt.id)
+        });
+
+        if (nextUncompleted && nextUncompleted.lessonName && isLessonUnitTest(nextUncompleted.lessonName)) {
+          const testContent = nextUncompleted.lessonName;
+          const cleanContent = testContent.replace(/^[^-]+-\s*/, '').trim();
+          if (!isUnitTestCompleted(freshSt, testContent, sub) && !isUnitTestCompleted(freshSt, cleanContent, sub)) {
+            const exists = extractedTodayTests.some(t => t.subject === sub && (t.content === testContent || t.content === cleanContent));
+            if (!exists) {
+              const matchedMaster = targetSubMasters.find(m =>
+                m.id === nextUncompleted.lessonId ||
+                m.lesson_name === testContent ||
+                m.lesson_name === cleanContent ||
+                (m.unit_name && `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` === testContent)
+              );
+              const unitName = matchedMaster?.unit_name || extractUnitTestUnitName(testContent);
               extractedTodayTests.push({
-                id: `test-auto-${freshSt.id}-${scheduleDate}-${pStr}-${Date.now()}`,
-                subject: sel.subject,
+                id: `test-auto-${freshSt.id}-${scheduleDate}-${sub}-${Date.now()}`,
+                subject: sub,
                 testType: 'unit_test',
                 unitName: unitName,
                 content: testContent,
-                passingLine: passingLine,
+                passingLine: matchedMaster?.passing_line || '80%以上',
                 targetScope: 'individual'
               });
             }
@@ -5520,8 +5616,12 @@ export default function TeacherDashboard({
         }
       });
 
-      // 「-- 単元テストマスタから選択 --」などの空行および無効行を完全除外
-      const cleanedTests = extractedTodayTests.filter(t => t.content && t.content.trim() !== '' && !t.content.includes('-- 単元テストマスタから選択 --'));
+      // 「-- 単元テストマスタから選択 --」などの空行および無効行を完全除外（まとめテスト・Check Testは本日のテストには入らない）
+      const cleanedTests = extractedTodayTests.filter(t => {
+        if (!t.content || t.content.trim() === '' || t.content.includes('-- 単元テストマスタから選択 --')) return false;
+        if (isReviewOrCheckTest(t.content) || (t.unitName && isReviewOrCheckTest(t.unitName))) return false;
+        return true;
+      });
 
       // DBへの保存 (本日のテスト)
       try {
@@ -7411,17 +7511,30 @@ export default function TeacherDashboard({
                           const days = ['日', '月', '火', '水', '木', '金', '土'];
                           const dayOfWeek = days[d.getDay()];
                           return (
-                            <h3 
-                              data-testid="japanese-date-badge" 
-                              style={{ 
-                                margin: 0, 
-                                fontSize: '1.05rem', 
-                                fontWeight: 700, 
-                                color: '#1e293b' 
-                              }}
-                            >
-                              {month}月{date}日({dayOfWeek}) のコマ割り
-                            </h3>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              backgroundColor: 'rgba(239, 246, 255, 0.75)',
+                              borderLeft: '4px solid #3b82f6',
+                              borderRadius: '4px 8px 8px 4px',
+                              padding: '6px 12px'
+                            }}>
+                              <svg style={{ width: '18px', height: '18px', color: '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                              </svg>
+                              <h3 
+                                data-testid="japanese-date-badge" 
+                                style={{ 
+                                  margin: 0, 
+                                  fontSize: '1rem', 
+                                  fontWeight: 700, 
+                                  color: '#1e293b' 
+                                }}
+                              >
+                                {month}月{date}日({dayOfWeek}) のコマ割り
+                              </h3>
+                            </div>
                           );
                         })()}
                         <button
@@ -7485,7 +7598,7 @@ export default function TeacherDashboard({
                                 boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '130px', flexShrink: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '185px', minWidth: '185px', flexShrink: 0 }}>
                                 <span 
                                   className={styles.cellNum} 
                                   style={{ 
@@ -7509,7 +7622,7 @@ export default function TeacherDashboard({
                                   value={currentConfig.subject || ''}
                                   onChange={e => handleSubjectChange(p, e.target.value)}
                                   className={styles.select}
-                                  style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '96px', flex: 1 }}
+                                  style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', minWidth: '145px', flex: 1 }}
                                 >
                                   <option value="">-- コマ割りなし --</option>
                                   {(() => {
@@ -7589,7 +7702,7 @@ export default function TeacherDashboard({
                                             <option value="">-- 開始授業を選択 --</option>
                                             {selectedStartId && !hasStartInList && (
                                               <option key={selectedStartId} value={selectedStartId}>
-                                                {currentConfig.startLessonName || '単元確認テスト'}
+                                                {currentConfig.startLessonName || '開始授業'}
                                               </option>
                                             )}
                                             {selectableLessons.map(l => (
@@ -7752,8 +7865,22 @@ export default function TeacherDashboard({
 
                       {/* 本日のテスト (教科選択 ＋ 自動セット ＋ 自由記述) */}
                       <div data-testid="today-tests-container" style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>本日のテスト (教科別 ＋ 単元テスト自動選択 ＋ 自由記述):</label>
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '10px',
+                          backgroundColor: 'rgba(239, 246, 255, 0.75)',
+                          borderLeft: '4px solid #3b82f6',
+                          borderRadius: '4px 8px 8px 4px',
+                          padding: '6px 12px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg style={{ width: '18px', height: '18px', color: '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1e293b', cursor: 'default' }}>本日のテスト (教科別 ＋ 単元テスト自動選択 ＋ 自由記述):</label>
+                          </div>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>単元完了時・手動登録対応</span>
                         </div>
                         {todayTests.length === 0 ? (
@@ -7899,9 +8026,23 @@ export default function TeacherDashboard({
                       </div>
 
                       {/* 宿題 (教科選択 ＋ 種別選択 ＋ 2回目演習自動生成/自由記述 ＋ 期限 ＋ 対象) */}
-                      <div style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>宿題:</label>
+                      <div data-testid="today-homeworks-container" style={{ marginTop: '16px', padding: '14px 16px', background: 'rgba(248, 250, 252, 0.85)', borderRadius: '12px', border: 'none' }}>
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '10px',
+                          backgroundColor: 'rgba(239, 246, 255, 0.75)',
+                          borderLeft: '4px solid #3b82f6',
+                          borderRadius: '4px 8px 8px 4px',
+                          padding: '6px 12px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg style={{ width: '18px', height: '18px', color: '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                            </svg>
+                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1e293b', cursor: 'default' }}>宿題:</label>
+                          </div>
                           <span style={{ fontSize: '0.7rem', color: '#64748b' }}>自動生成・手動編集対応</span>
                         </div>
                         {todayHomeworks.length === 0 ? (
@@ -8017,7 +8158,21 @@ export default function TeacherDashboard({
                       </div>
 
                       <div style={{ marginTop: '16px' }}>
-                        <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>業務連絡 (本日共通):</label>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          marginBottom: '8px',
+                          backgroundColor: 'rgba(239, 246, 255, 0.75)',
+                          borderLeft: '4px solid #3b82f6',
+                          borderRadius: '4px 8px 8px 4px',
+                          padding: '6px 12px'
+                        }}>
+                          <svg style={{ width: '18px', height: '18px', color: '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                          </svg>
+                          <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#1e293b', cursor: 'default' }}>業務連絡 (本日共通):</label>
+                        </div>
                         <textarea
                           value={commonOfficeNote}
                           onChange={e => setCommonOfficeNote(e.target.value)}
