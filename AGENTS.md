@@ -17,4 +17,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **カリキュラムデータ**: 公式CSV小学生テントルカリキュラム（全955件: 算数587, 国語98, 英語133, 理科139, 社会38）完全同期済み
 - **本部統括管理者アカウント**: `admin@tentoru.jp` / `tentoru2026`
 - **校舎アカウント**: 恵比寿（`ebisu@tentoru.jp`）、渋谷（`shibuya@tentoru.jp`）、新宿（`shinjuku@tentoru.jp`） / `tentoru2026`
+- **自動デプロイ運用**:
+  Mac のキーチェーン（`osxkeychain`）に GitHub 認証情報が登録済みのため、エージェント側で `git push origin main` を自動実行可能です。ユーザーからデプロイ指示があった際は、実装・ビルド・テスト完了後に自動で `git push` を行い、Vercel へのデプロイまで自律完結させてください。
+
 
