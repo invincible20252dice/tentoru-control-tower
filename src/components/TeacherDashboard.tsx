@@ -2106,6 +2106,105 @@ export interface AutoExtractedUnitTest {
   passingLine: string;
 }
 
+export function findPendingUnitTestForPeriodOrSubject(params: {
+  subject: string;
+  unitName?: string | null;
+  lessonIdOrName?: string | null;
+  student?: Partial<Student> | null;
+  curriculumMasters: CurriculumMaster[];
+  isCompletedFn?: (st: Partial<Student> | null | undefined, testTitle: string, subject?: string) => boolean;
+}): {
+  unitName: string;
+  content: string;
+  passingLine: string;
+  masterId?: string;
+} | null {
+  const { subject, unitName, lessonIdOrName, student, curriculumMasters, isCompletedFn } = params;
+  const processedMasters = ensureMathEnglishUnitTests(curriculumMasters);
+  const subjectMasters = processedMasters.filter(m => (!m.subject || m.subject === subject || isMatchingSubjectGroup(subject, m.subject)));
+
+  const checkCompleted = isCompletedFn || ((s, title, subj) => isUnitTestCompletedForStudent(s, title, subj, processedMasters));
+
+  // 1. unitName が指定されている場合: その単元の単元確認テストを探す
+  if (unitName) {
+    const cleanUnit = normalizeUnitName(unitName);
+    const matchedUT = subjectMasters.find(m => 
+      (m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))) &&
+      !isReviewOrCheckTest(m.lesson_name) &&
+      (m.unit_name === unitName || normalizeUnitName(m.unit_name) === cleanUnit || isMatchingUnitOrTest(m.unit_name, unitName) || (m.lesson_name && isMatchingUnitOrTest(m.lesson_name, unitName)))
+    );
+
+    if (matchedUT) {
+      const utContent = matchedUT.lesson_name.includes(matchedUT.unit_name || unitName)
+        ? matchedUT.lesson_name
+        : `${matchedUT.unit_name || unitName} - ${matchedUT.lesson_name.replace(/^[^-]+-\s*/, '')}`;
+      if (!checkCompleted(student, utContent, subject) && !checkCompleted(student, matchedUT.lesson_name, subject)) {
+        return {
+          unitName: matchedUT.unit_name || unitName,
+          content: utContent,
+          passingLine: matchedUT.passing_line || '80%以上',
+          masterId: matchedUT.id
+        };
+      }
+    }
+  }
+
+  // 2. lessonIdOrName から単元を特定して単元確認テストを探す
+  if (lessonIdOrName) {
+    const matchedLesson = subjectMasters.find(m => m.id === lessonIdOrName || m.lesson_name === lessonIdOrName || (m.unit_name && `${m.unit_name} - ${m.lesson_name}` === lessonIdOrName));
+    const targetUnit = matchedLesson?.unit_name;
+    if (targetUnit && targetUnit !== unitName) {
+      const cleanTarget = normalizeUnitName(targetUnit);
+      const matchedUT = subjectMasters.find(m =>
+        (m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))) &&
+        !isReviewOrCheckTest(m.lesson_name) &&
+        (m.unit_name === targetUnit || normalizeUnitName(m.unit_name) === cleanTarget || isMatchingUnitOrTest(m.unit_name, targetUnit))
+      );
+      if (matchedUT) {
+        const utContent = matchedUT.lesson_name.includes(targetUnit)
+          ? matchedUT.lesson_name
+          : `${targetUnit} - ${matchedUT.lesson_name.replace(/^[^-]+-\s*/, '')}`;
+        if (!checkCompleted(student, utContent, subject) && !checkCompleted(student, matchedUT.lesson_name, subject)) {
+          return {
+            unitName: targetUnit,
+            content: utContent,
+            passingLine: matchedUT.passing_line || '80%以上',
+            masterId: matchedUT.id
+          };
+        }
+      }
+    }
+  }
+
+  // 3. 生徒が受講している教科について、スタート位置以降で最初の未合格単元確認テストを探す
+  const startUnitId = student ? getStudentStartUnitIdForSubject(student as Student, subject) : null;
+  let startIdx = 0;
+  if (startUnitId) {
+    const sIdx = subjectMasters.findIndex(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId) || m.unit_name === startUnitId || m.lesson_name === startUnitId);
+    if (sIdx >= 0) startIdx = sIdx;
+  }
+
+  for (let i = startIdx; i < subjectMasters.length; i++) {
+    const m = subjectMasters[i];
+    const isUT = (m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))) && !isReviewOrCheckTest(m.lesson_name);
+    if (isUT) {
+      const utContent = (m.unit_name && !m.lesson_name.includes(m.unit_name))
+        ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}`
+        : m.lesson_name;
+      if (!checkCompleted(student, utContent, subject) && !checkCompleted(student, m.lesson_name, subject)) {
+        return {
+          unitName: m.unit_name || extractUnitTestUnitName(utContent),
+          content: utContent,
+          passingLine: m.passing_line || '80%以上',
+          masterId: m.id
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function extractUnitTestsFromPeriodSelections(params: {
   periodSelections: { [key: number]: any };
   periodCount: number;
@@ -2215,6 +2314,33 @@ export function extractUnitTestsFromPeriodSelections(params: {
             passingLine
           });
         }
+      }
+    }
+
+    // コマ割りで選択されている単元に対応する未合格の単元確認テストを自動抽出
+    const rawTargetUnit = config.customTheme || 
+      processedMasters.find(m => m.id === (config.endLessonId || config.startLessonId || config.unitId))?.unit_name ||
+      steps.find(s => s.unit_name)?.unit_name ||
+      extractUnitTestUnitName(config.endLessonName || config.startLessonName);
+
+    const pendingUT = findPendingUnitTestForPeriodOrSubject({
+      subject: subj,
+      unitName: rawTargetUnit,
+      lessonIdOrName: config.endLessonId || config.startLessonId || config.unitId || config.endLessonName,
+      student,
+      curriculumMasters: processedMasters
+    });
+
+    if (pendingUT) {
+      const key = `${subj}::${pendingUT.content}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        results.push({
+          subject: subj,
+          unitName: pendingUT.unitName,
+          content: pendingUT.content,
+          passingLine: pendingUT.passingLine
+        });
       }
     }
   }
@@ -5429,6 +5555,35 @@ export default function TeacherDashboard({
           }
         }
       }
+
+      // コマ割りの単元または当該教科のカリキュラムに対応する未合格単元確認テストの自動抽出
+      const periodForSub = Object.values(currentPeriods).find((c: any) => c?.subject === sub) as any;
+      const pendingUT = findPendingUnitTestForPeriodOrSubject({
+        subject: sub,
+        unitName: periodForSub?.customTheme || periodForSub?.unitName,
+        lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
+        student: st,
+        curriculumMasters: masters
+      });
+
+      if (pendingUT) {
+        const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
+        const alreadyAdded = updatedTests.some(t =>
+          (t.subject === sub || !t.subject) &&
+          (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
+        );
+        if (!alreadyAdded && !isUnitTestCompleted(st, pendingUT.content, sub) && !isUnitTestCompleted(st, cleanContent, sub)) {
+          updatedTests.push({
+            id: `auto-test-${sub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+            subject: sub,
+            testType: 'unit_test',
+            unitName: pendingUT.unitName,
+            content: pendingUT.content,
+            passingLine: pendingUT.passingLine || '80%以上',
+            targetScope: 'individual'
+          });
+        }
+      }
     });
 
     // 2. 算数・英語の2回目演習宿題の自動連動
@@ -5612,6 +5767,35 @@ export default function TeacherDashboard({
                 targetScope: 'individual'
               });
             }
+          }
+        }
+
+        // コマ割りの単元または当該教科のカリキュラムに対応する未合格単元確認テストの自動抽出
+        const periodForSub = Object.values(optimizedPeriods).find((c: any) => c?.subject === sub) as any;
+        const pendingUT = findPendingUnitTestForPeriodOrSubject({
+          subject: sub,
+          unitName: periodForSub?.customTheme || periodForSub?.unitName,
+          lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
+          student: freshSt,
+          curriculumMasters: allMasters
+        });
+
+        if (pendingUT) {
+          const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
+          const exists = extractedTodayTests.some(t =>
+            (t.subject === sub || !t.subject) &&
+            (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
+          );
+          if (!exists && !isUnitTestCompleted(freshSt, pendingUT.content, sub) && !isUnitTestCompleted(freshSt, cleanContent, sub)) {
+            extractedTodayTests.push({
+              id: `test-auto-${freshSt.id}-${scheduleDate}-${sub}-${Date.now()}`,
+              subject: sub,
+              testType: 'unit_test',
+              unitName: pendingUT.unitName,
+              content: pendingUT.content,
+              passingLine: pendingUT.passingLine || '80%以上',
+              targetScope: 'individual'
+            });
           }
         }
       });
