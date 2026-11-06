@@ -2176,28 +2176,24 @@ export function findPendingUnitTestForPeriodOrSubject(params: {
     }
   }
 
-  // 3. 生徒が受講している教科について、スタート位置以降で最初の未合格単元確認テストを探す
-  const startUnitId = student ? getStudentStartUnitIdForSubject(student as Student, subject) : null;
-  let startIdx = 0;
-  if (startUnitId) {
-    const sIdx = subjectMasters.findIndex(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId) || m.unit_name === startUnitId || m.lesson_name === startUnitId);
-    if (sIdx >= 0) startIdx = sIdx;
-  }
-
-  for (let i = startIdx; i < subjectMasters.length; i++) {
-    const m = subjectMasters[i];
-    const isUT = (m.item_type === 'unit_test' || Boolean(m.lesson_name && (m.lesson_name.includes('単元確認テスト') || m.lesson_name.includes('単元テスト')))) && !isReviewOrCheckTest(m.lesson_name);
-    if (isUT) {
-      const utContent = (m.unit_name && !m.lesson_name.includes(m.unit_name))
-        ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}`
-        : m.lesson_name;
-      if (!checkCompleted(student, utContent, subject) && !checkCompleted(student, m.lesson_name, subject)) {
-        return {
-          unitName: m.unit_name || extractUnitTestUnitName(utContent),
-          content: utContent,
-          passingLine: m.passing_line || '80%以上',
-          masterId: m.id
-        };
+  // 3. unitName も lessonIdOrName も指定されていない場合: 生徒の現在地が単元確認テストそのものである場合にのみ探す
+  if (!unitName && !lessonIdOrName && student) {
+    const startUnitId = getStudentStartUnitIdForSubject(student as Student, subject);
+    if (startUnitId) {
+      const sMaster = subjectMasters.find(m => m.id === startUnitId || String(m.sort_order) === String(startUnitId) || m.unit_name === startUnitId || m.lesson_name === startUnitId);
+      const isStartUT = sMaster && (sMaster.item_type === 'unit_test' || Boolean(sMaster.lesson_name && (sMaster.lesson_name.includes('単元確認テスト') || sMaster.lesson_name.includes('単元テスト')))) && !isReviewOrCheckTest(sMaster.lesson_name);
+      if (isStartUT) {
+        const utContent = (sMaster.unit_name && !sMaster.lesson_name.includes(sMaster.unit_name))
+          ? `${sMaster.unit_name} - ${sMaster.lesson_name.replace(/^[^-]+-\s*/, '')}`
+          : sMaster.lesson_name;
+        if (!checkCompleted(student, utContent, subject) && !checkCompleted(student, sMaster.lesson_name, subject)) {
+          return {
+            unitName: sMaster.unit_name || extractUnitTestUnitName(utContent),
+            content: utContent,
+            passingLine: sMaster.passing_line || '80%以上',
+            masterId: sMaster.id
+          };
+        }
       }
     }
   }
@@ -2317,30 +2313,43 @@ export function extractUnitTestsFromPeriodSelections(params: {
       }
     }
 
-    // コマ割りで選択されている単元に対応する未合格の単元確認テストを自動抽出
-    const rawTargetUnit = config.customTheme || 
-      processedMasters.find(m => m.id === (config.endLessonId || config.startLessonId || config.unitId))?.unit_name ||
-      steps.find(s => s.unit_name)?.unit_name ||
-      extractUnitTestUnitName(config.endLessonName || config.startLessonName);
+    // コマ割りで選択されている単元がまとめテスト・Check Test・単元確認テストに到達している場合に対応する未合格の単元確認テストを自動抽出
+    const isUnitTestOrSummaryPeriod = Boolean(
+      isReviewOrCheckTest(endName) ||
+      isReviewOrCheckTest(startName) ||
+      endName.includes('まとめ') ||
+      endName.includes('Check Test') ||
+      endName.includes('単元確認テスト') ||
+      endName.includes('単元テスト') ||
+      startName.includes('単元確認テスト') ||
+      startName.includes('単元テスト')
+    );
 
-    const pendingUT = findPendingUnitTestForPeriodOrSubject({
-      subject: subj,
-      unitName: rawTargetUnit,
-      lessonIdOrName: config.endLessonId || config.startLessonId || config.unitId || config.endLessonName,
-      student,
-      curriculumMasters: processedMasters
-    });
+    if (isUnitTestOrSummaryPeriod) {
+      const rawTargetUnit = config.customTheme || 
+        processedMasters.find(m => m.id === (config.endLessonId || config.startLessonId || config.unitId))?.unit_name ||
+        steps.find(s => s.unit_name)?.unit_name ||
+        extractUnitTestUnitName(config.endLessonName || config.startLessonName);
 
-    if (pendingUT) {
-      const key = `${subj}::${pendingUT.content}`;
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
-        results.push({
-          subject: subj,
-          unitName: pendingUT.unitName,
-          content: pendingUT.content,
-          passingLine: pendingUT.passingLine
-        });
+      const pendingUT = findPendingUnitTestForPeriodOrSubject({
+        subject: subj,
+        unitName: rawTargetUnit,
+        lessonIdOrName: config.endLessonId || config.startLessonId || config.unitId || config.endLessonName,
+        student,
+        curriculumMasters: processedMasters
+      });
+
+      if (pendingUT) {
+        const key = `${subj}::${pendingUT.content}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          results.push({
+            subject: subj,
+            unitName: pendingUT.unitName,
+            content: pendingUT.content,
+            passingLine: pendingUT.passingLine
+          });
+        }
       }
     }
   }
@@ -2384,6 +2393,7 @@ export interface ResolveLessonsForSubjectParams {
   allCurriculumUnits?: CurriculumUnit[];
   curriculumMastersList?: CurriculumMaster[];
   periodSelections?: Record<string, any> | null;
+  includeUnitTests?: boolean;
 }
 
 export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams): Array<{
@@ -2392,13 +2402,15 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
   sort_order: number;
   isStartUnit: boolean;
   item_type?: string;
+  isUnitTest?: boolean;
 }> {
   const {
     subject: subj,
     selectedStudent,
     allCurriculumUnits = [],
     curriculumMastersList = [],
-    periodSelections = null
+    periodSelections = null,
+    includeUnitTests = false
   } = params;
 
   // 教科のマッチング判定関数（他教科のカリキュラム混入を完全防ぐ）
@@ -2409,7 +2421,8 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
 
   const matchingSchoolUnits = allCurriculumUnits.filter(u => 
     (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-    matchSubject(u.subject)
+    matchSubject(u.subject) &&
+    (includeUnitTests || !isUnitTestItem(u))
   );
 
   const rawMasters = (curriculumMastersList && curriculumMastersList.length > 0) ? curriculumMastersList : db.getCurriculumMasters();
@@ -2426,6 +2439,7 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
   }));
 
   const masterUnits = ensuredMasters
+    .filter(m => includeUnitTests || !isUnitTestItem(m))
     .map(m => {
       const isUT = isUnitTestItem(m);
       const cleanName = m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name;
@@ -2445,7 +2459,8 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
 
   const fallbackUnits = allCurriculumUnits.filter(u => 
     (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-    matchSubject(u.subject)
+    matchSubject(u.subject) &&
+    (includeUnitTests || !isUnitTestItem(u))
   ).map(u => ({
     id: u.id,
     name: u.name,
@@ -2462,9 +2477,10 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
   });
 
   // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完
-  resolveCandidateUnitsFromPeriodSelections(combinedMap, periodSelections, matchSubject, () => false);
+  resolveCandidateUnitsFromPeriodSelections(combinedMap, periodSelections, matchSubject, includeUnitTests ? (() => false) : isUnitTestItem);
 
   return Array.from(combinedMap.values())
+    .filter(item => includeUnitTests || !isUnitTestItem(item))
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 }
 
@@ -5144,7 +5160,8 @@ export default function TeacherDashboard({
       currentTeacherType,
       allCurriculumUnits,
       curriculumMastersList,
-      periodSelections
+      periodSelections,
+      includeUnitTests: true
     });
   };
 
@@ -5565,32 +5582,47 @@ export default function TeacherDashboard({
         }
       }
 
-      // コマ割りの単元または当該教科のカリキュラムに対応する未合格単元確認テストの自動抽出
+      // コマ割りの単元がまとめテスト・Check Test・単元確認テストに到達している場合に対応する未合格単元確認テストの自動抽出
       const periodForSub = Object.values(currentPeriods).find((c: any) => c?.subject === sub) as any;
-      const pendingUT = findPendingUnitTestForPeriodOrSubject({
-        subject: sub,
-        unitName: periodForSub?.customTheme || periodForSub?.unitName,
-        lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
-        student: st,
-        curriculumMasters: masters
-      });
+      const periodEndName = periodForSub?.endLessonName || '';
+      const periodStartName = periodForSub?.startLessonName || '';
+      const isPeriodUTOrSummary = Boolean(
+        isReviewOrCheckTest(periodEndName) ||
+        isReviewOrCheckTest(periodStartName) ||
+        periodEndName.includes('まとめ') ||
+        periodEndName.includes('Check Test') ||
+        periodEndName.includes('単元確認テスト') ||
+        periodEndName.includes('単元テスト') ||
+        periodStartName.includes('単元確認テスト') ||
+        periodStartName.includes('単元テスト')
+      );
 
-      if (pendingUT) {
-        const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
-        const alreadyAdded = updatedTests.some(t =>
-          (t.subject === sub || !t.subject) &&
-          (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
-        );
-        if (!alreadyAdded && !isUnitTestCompleted(st, pendingUT.content, sub) && !isUnitTestCompleted(st, cleanContent, sub)) {
-          updatedTests.push({
-            id: `auto-test-${sub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-            subject: sub,
-            testType: 'unit_test',
-            unitName: pendingUT.unitName,
-            content: pendingUT.content,
-            passingLine: pendingUT.passingLine || '80%以上',
-            targetScope: 'individual'
-          });
+      if (isPeriodUTOrSummary) {
+        const pendingUT = findPendingUnitTestForPeriodOrSubject({
+          subject: sub,
+          unitName: periodForSub?.customTheme || periodForSub?.unitName,
+          lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
+          student: st,
+          curriculumMasters: masters
+        });
+
+        if (pendingUT) {
+          const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
+          const alreadyAdded = updatedTests.some(t =>
+            (t.subject === sub || !t.subject) &&
+            (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
+          );
+          if (!alreadyAdded && !isUnitTestCompleted(st, pendingUT.content, sub) && !isUnitTestCompleted(st, cleanContent, sub)) {
+            updatedTests.push({
+              id: `auto-test-${sub}-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+              subject: sub,
+              testType: 'unit_test',
+              unitName: pendingUT.unitName,
+              content: pendingUT.content,
+              passingLine: pendingUT.passingLine || '80%以上',
+              targetScope: 'individual'
+            });
+          }
         }
       }
     });
@@ -5779,32 +5811,47 @@ export default function TeacherDashboard({
           }
         }
 
-        // コマ割りの単元または当該教科のカリキュラムに対応する未合格単元確認テストの自動抽出
+        // コマ割りの単元がまとめテスト・Check Test・単元確認テストに到達している場合に対応する未合格単元確認テストの自動抽出
         const periodForSub = Object.values(optimizedPeriods).find((c: any) => c?.subject === sub) as any;
-        const pendingUT = findPendingUnitTestForPeriodOrSubject({
-          subject: sub,
-          unitName: periodForSub?.customTheme || periodForSub?.unitName,
-          lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
-          student: freshSt,
-          curriculumMasters: allMasters
-        });
+        const periodEndName = periodForSub?.endLessonName || '';
+        const periodStartName = periodForSub?.startLessonName || '';
+        const isPeriodUTOrSummary = Boolean(
+          isReviewOrCheckTest(periodEndName) ||
+          isReviewOrCheckTest(periodStartName) ||
+          periodEndName.includes('まとめ') ||
+          periodEndName.includes('Check Test') ||
+          periodEndName.includes('単元確認テスト') ||
+          periodEndName.includes('単元テスト') ||
+          periodStartName.includes('単元確認テスト') ||
+          periodStartName.includes('単元テスト')
+        );
 
-        if (pendingUT) {
-          const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
-          const exists = extractedTodayTests.some(t =>
-            (t.subject === sub || !t.subject) &&
-            (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
-          );
-          if (!exists && !isUnitTestCompleted(freshSt, pendingUT.content, sub) && !isUnitTestCompleted(freshSt, cleanContent, sub)) {
-            extractedTodayTests.push({
-              id: `test-auto-${freshSt.id}-${scheduleDate}-${sub}-${Date.now()}`,
-              subject: sub,
-              testType: 'unit_test',
-              unitName: pendingUT.unitName,
-              content: pendingUT.content,
-              passingLine: pendingUT.passingLine || '80%以上',
-              targetScope: 'individual'
-            });
+        if (isPeriodUTOrSummary) {
+          const pendingUT = findPendingUnitTestForPeriodOrSubject({
+            subject: sub,
+            unitName: periodForSub?.customTheme || periodForSub?.unitName,
+            lessonIdOrName: periodForSub?.endLessonId || periodForSub?.startLessonId || periodForSub?.unitId || periodForSub?.endLessonName,
+            student: freshSt,
+            curriculumMasters: allMasters
+          });
+
+          if (pendingUT) {
+            const cleanContent = pendingUT.content.replace(/^[^-]+-\s*/, '').trim();
+            const exists = extractedTodayTests.some(t =>
+              (t.subject === sub || !t.subject) &&
+              (t.content === pendingUT.content || t.content === cleanContent || (pendingUT.unitName && t.content.includes(pendingUT.unitName)))
+            );
+            if (!exists && !isUnitTestCompleted(freshSt, pendingUT.content, sub) && !isUnitTestCompleted(freshSt, cleanContent, sub)) {
+              extractedTodayTests.push({
+                id: `test-auto-${freshSt.id}-${scheduleDate}-${sub}-${Date.now()}`,
+                subject: sub,
+                testType: 'unit_test',
+                unitName: pendingUT.unitName,
+                content: pendingUT.content,
+                passingLine: pendingUT.passingLine || '80%以上',
+                targetScope: 'individual'
+              });
+            }
           }
         }
       });

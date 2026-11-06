@@ -62,6 +62,28 @@ describe('TeacherDashboard Two-Way and Three-Way Interview Perfection Suite', ()
         custom_fields: [{ id: 'cf-old-1', label: '睡眠時間', value: '7時間' }],
         ai_coaching_advice: '既存AI要約です',
         audio_transcript: '既存文字起こし'
+      },
+      {
+        id: 'int2-empty-fields',
+        student_id: mockStudent.id,
+        interviewer: null,
+        interview_date: null,
+        target_school: null,
+        dream_goal: null,
+        club_activity: null,
+        club_members_count: null,
+        close_friends: null,
+        target_rank: null,
+        target_score: null,
+        study_anxiety: null,
+        self_evaluation: null,
+        student_challenges: null,
+        required_actions: null,
+        expectations: null,
+        notes: null,
+        custom_fields: null,
+        ai_coaching_advice: null,
+        audio_transcript: null
       }
     ];
 
@@ -126,6 +148,14 @@ describe('TeacherDashboard Two-Way and Three-Way Interview Perfection Suite', ()
     // Check fields loaded
     const targetSchoolInput = screen.getByTestId('interview2-target-school') as HTMLInputElement;
     expect(targetSchoolInput.value).toBe('トップ県立高校');
+
+    // 1-b. Select interview with empty fields to trigger lines 2824-2841 fallbacks
+    const itemEmptyBtn2 = screen.getByTestId(`interview2-item-${initialInterviews2[1].id}`);
+    await act(async () => {
+      fireEvent.click(itemEmptyBtn2);
+    });
+    expect((screen.getByTestId('interview2-target-school') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('interview2-interviewer') as HTMLInputElement).value).toBe('');
 
     // 2. Click "新規作成" button to reset form
     const newBtn = screen.getByTestId('interview2-new-btn');
@@ -368,6 +398,20 @@ describe('TeacherDashboard Two-Way and Three-Way Interview Perfection Suite', ()
         custom_fields: [{ id: 'cf3-1', label: '季節講習', value: '夏期20コマ' }],
         ai_coaching_advice: '三者面談要約既存',
         audio_transcript: '三者面談文字起こし'
+      },
+      {
+        id: 'int3-empty-fields',
+        student_id: mockStudent.id,
+        interviewer: null,
+        interview_date: null,
+        parent_type: null,
+        parent_anxieties: null,
+        discussed_content: null,
+        future_direction_agreed: 'no',
+        notes: null,
+        custom_fields: null,
+        interview_summary: null,
+        audio_transcript: null
       }
     ];
 
@@ -422,6 +466,14 @@ describe('TeacherDashboard Two-Way and Three-Way Interview Perfection Suite', ()
     // Check parent_type
     const parentTypeSelect = screen.getByTestId('interview3-parent-type') as HTMLSelectElement;
     expect(parentTypeSelect.value).toBe('both');
+
+    // 1-b. Select interview with null fields to trigger lines 3052-3061 fallbacks
+    const itemEmptyBtn = screen.getByTestId(`interview3-item-${initialInterviews3[1].id}`);
+    await act(async () => {
+      fireEvent.click(itemEmptyBtn);
+    });
+    expect((screen.getByTestId('interview3-interviewer') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('interview3-direction-no') as HTMLInputElement).checked).toBe(true);
 
     // 2. Click "新規作成"
     const newBtn3 = screen.getByTestId('interview3-new-btn');
@@ -586,5 +638,95 @@ describe('TeacherDashboard Two-Way and Three-Way Interview Perfection Suite', ()
       fireEvent.click(recordBtn3);
     });
     expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Web Speech APIによる音声認識がサポートされていません'));
+  });
+
+  it('covers transcript parsing error branches, force sync error handling, and interview date validation', async () => {
+    const mockStudent = {
+      id: 'st-err-1',
+      student_id: 'std_err',
+      name: 'エラー面談生徒',
+      grade: '中3'
+    };
+    vi.spyOn(db, 'getStudents').mockReturnValue([mockStudent as any]);
+    vi.spyOn(db, 'fetchStudents').mockResolvedValue([mockStudent as any]);
+    vi.spyOn(db, 'getStudentInterviews2').mockReturnValue([]);
+    vi.spyOn(db, 'getStudentInterviews3').mockReturnValue([]);
+    vi.spyOn(geminiModule, 'parseInterviewTranscriptToFields').mockRejectedValue(new Error('AI解析通信エラー'));
+
+    render(
+      <TeacherDashboard
+        students={[mockStudent as any]}
+        initialStudentId="st-err-1"
+        initialTab="two-way-interview"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('interview2-save-btn')).toBeDefined();
+    });
+
+    // 1. Missing interviewDate2 validation (line 2850)
+    const dateInput2 = screen.getByTestId('interview2-date');
+    const saveBtn2 = screen.getByTestId('interview2-save-btn');
+    await act(async () => {
+      fireEvent.change(dateInput2, { target: { value: '' } });
+      fireEvent.click(saveBtn2);
+    });
+    expect(window.alert).toHaveBeenCalledWith('実施日を入力してください。');
+
+    // 2. Interview2 parse error (line 2967)
+    const transcriptInput2 = screen.getByTestId('interview2-transcript');
+    await act(async () => {
+      fireEvent.change(transcriptInput2, { target: { value: '面談テキスト' } });
+    });
+    const parseBtn2 = screen.getByTestId('interview2-parse-transcript-btn');
+    await act(async () => {
+      fireEvent.click(parseBtn2);
+    });
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('自動入力でエラーが発生しました: AI解析通信エラー'));
+
+    // 3. Switch to Interview3 and test missing date and parse error
+    const tab3Btn2 = screen.getByRole('button', { name: /三者面談/i });
+    await act(async () => {
+      fireEvent.click(tab3Btn2);
+    });
+
+    const dateInput3 = screen.getByTestId('interview3-date');
+    const saveBtn3 = screen.getByTestId('interview3-save-btn');
+    await act(async () => {
+      fireEvent.change(dateInput3, { target: { value: '' } });
+      fireEvent.click(saveBtn3);
+    });
+    expect(window.alert).toHaveBeenCalledWith('実施日を入力してください。');
+
+    const transcriptInput3 = screen.getByTestId('interview3-transcript');
+    await act(async () => {
+      fireEvent.change(transcriptInput3, { target: { value: '三者面談テキスト' } });
+    });
+    const parseBtn3 = screen.getByTestId('interview3-parse-transcript-btn');
+    await act(async () => {
+      fireEvent.click(parseBtn3);
+    });
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('自動入力でエラーが発生しました: AI解析通信エラー'));
+
+    // 4. generateInterviewSummary error in Interview3 (line 3149)
+    vi.spyOn(geminiModule, 'generateInterviewSummary').mockRejectedValueOnce(new Error('三者要約APIクォータ超過'));
+    const aiSummaryBtn3 = screen.getByTestId('interview3-generate-ai-btn');
+    await act(async () => {
+      fireEvent.click(aiSummaryBtn3);
+    });
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('面談の要約生成でエラーが発生しました: 三者要約APIクォータ超過'));
+
+    // 5. generateInterviewSummary error in Interview2 (line 3020)
+    const tab2Btn = screen.getByRole('button', { name: /二者面談/i });
+    await act(async () => {
+      fireEvent.click(tab2Btn);
+    });
+    vi.spyOn(geminiModule, 'generateInterviewSummary').mockRejectedValueOnce(new Error('要約APIクォータ超過'));
+    const aiSummaryBtn2 = screen.getByTestId('interview2-generate-ai-btn');
+    await act(async () => {
+      fireEvent.click(aiSummaryBtn2);
+    });
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('面談の要約生成でエラーが発生しました: 要約APIクォータ超過'));
   });
 });

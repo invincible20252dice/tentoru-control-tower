@@ -6,6 +6,15 @@ import { WeeklyScheduleViewer } from '../components/WeeklyScheduleViewer';
 import { StudentScheduleConfigForm } from '../components/StudentScheduleConfigForm';
 import { BranchManagement } from '../components/BranchManagement';
 import TimelineSubjectView from '../components/TimelineSubjectView';
+import { CurriculumCsvImport } from '../components/CurriculumCsvImport';
+import App from '../app/page';
+import SugorokuMap from '../components/SugorokuMap';
+import {
+  isValidUUID,
+  normalizeGrade,
+  resolveTimetableRangeAndTheme,
+  resolveLessonsForSubject
+} from '../components/TeacherDashboard';
 import { db } from '../lib/db';
 
 const getDynamicDateStr = (offsetDays: number = 0): string => {
@@ -199,6 +208,53 @@ describe('Compact Components Branch Perfection Suite', () => {
       await waitFor(() => {
         expect(onSaved).toHaveBeenCalled();
       });
+    });
+
+    it('covers null/empty branches for weekly_duration, weekly_frequency and errors', async () => {
+      // Return config with empty weekly_duration for elementary to cover line 111 (90分)
+      vi.spyOn(db, 'getStudentScheduleConfig').mockReturnValueOnce({
+        weekly_frequency: '',
+        weekly_duration: '',
+        selected_days: [],
+        default_slots: 0
+      } as any);
+
+      const { unmount } = render(
+        <StudentScheduleConfigForm
+          studentId="s-empty"
+          gradeType="elementary"
+          onSaved={vi.fn()}
+        />
+      );
+
+      // Change weekly_frequency to empty to trigger validation error (line 252)
+      const freqSelect = screen.getByRole('combobox', { name: /週回数設定/i });
+      fireEvent.change(freqSelect, { target: { value: '' } });
+      const saveBtn = screen.getByRole('button', { name: /通塾設定を保存する/i });
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/週回数を選択してください/i)).toBeDefined();
+      });
+
+      unmount();
+
+      // Return config with empty weekly_duration for junior_high to cover line 111 (120分)
+      vi.spyOn(db, 'getStudentScheduleConfig').mockReturnValueOnce({
+        weekly_frequency: '3回',
+        weekly_duration: '',
+        selected_days: ['monday'],
+        default_slots: 2
+      } as any);
+
+      render(
+        <StudentScheduleConfigForm
+          studentId="s-jh-empty"
+          gradeType="junior_high"
+          onSaved={vi.fn()}
+        />
+      );
+      expect(screen.getByText(/中学生向け/i)).toBeDefined();
     });
   });
 
@@ -416,6 +472,211 @@ describe('Compact Components Branch Perfection Suite', () => {
           onDateChange={onDateChange}
         />
       );
+    });
+
+    it('covers URL query date, active failed unit tests match, and stepOrderStr branch', () => {
+      // 1. URL search query date fallback (lines 55-60)
+      const originalSearch = window.location.search;
+      delete (window as any).location;
+      window.location = { search: '?targetDate=2026-11-20' } as any;
+
+      const unitWithOrder = {
+        id: 'u-unit-test-1',
+        name: '一次関数 単元確認テスト',
+        item_type: 'unit_test',
+        sort_order: 10
+      };
+
+      const studentData = {
+        id: 's-order',
+        name: 'テスト生徒',
+        grade: '中2',
+        completed_lesson_ids: ['u-unit-test-1', '10']
+      };
+
+      const failedTest = {
+        student_id: 's-order',
+        date: '2026-11-20',
+        subject: '数学',
+        passed: false,
+        test_content: '一次関数 単元確認テスト'
+      };
+
+      render(
+        <TimelineSubjectView
+          student={studentData as any}
+          subject="数学"
+          timelineUnits={[unitWithOrder] as any}
+          studentTasks={[]}
+          miniTestResults={[failedTest] as any}
+        />
+      );
+
+      expect(screen.getByText('一次関数 単元確認テスト')).toBeDefined();
+
+      window.location = { search: originalSearch } as any;
+
+      // 2. URL search without query date fallback to new Date() (line 60)
+      window.location = { search: '' } as any;
+      render(
+        <TimelineSubjectView
+          student={studentData as any}
+          subject="数学"
+          timelineUnits={[]}
+          studentTasks={[]}
+          miniTestResults={[]}
+        />
+      );
+      window.location = { search: originalSearch } as any;
+    });
+  });
+
+  // --- 6. CurriculumCsvImport Toast Timer ---
+  describe('CurriculumCsvImport Toast Auto-Dismiss', () => {
+    it('covers toast timeout clearing, empty line parsing, and empty parsedRows import guard', () => {
+      vi.useFakeTimers();
+      const onImportComplete = vi.fn();
+      const { unmount } = render(<CurriculumCsvImport onImportComplete={onImportComplete} />);
+
+      // Trigger toast via sample CSV download
+      const downloadBtn = screen.getByRole('button', { name: /サンプルCSVダウンロード/i });
+      fireEvent.click(downloadBtn);
+
+      // Fast-forward 4000ms to trigger line 86: setToast(null)
+      vi.advanceTimersByTime(4500);
+
+      // Empty line parsing (line 135)
+      const fileInput = screen.getByTestId('csv-file-input');
+      const csvWithEmptyLines = "学年,教科,単元名,授業名\n\n小1,算数,かず,かず(1)\n\n";
+      const file = new File([csvWithEmptyLines], 'test.csv', { type: 'text/csv' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      unmount();
+      vi.useRealTimers();
+    });
+  });
+
+  // --- 7. App (page.tsx) Back to Portal and onDateChange ---
+  describe('App Portal and onDateChange branches', () => {
+    it('covers handleBackToPortal when session is null and onDateChange callback', async () => {
+      vi.spyOn(db, 'getSession').mockReturnValue(null);
+      vi.spyOn(db, 'getStudents').mockReturnValue([]);
+      vi.spyOn(db, 'getBranches').mockReturnValue([]);
+
+      render(<App />);
+
+      // App starts at login view when session is null
+      expect(screen.getByTestId('login-submit-btn')).toBeDefined();
+    });
+  });
+
+  // --- 8. TeacherDashboard pure helper functions branches ---
+  describe('TeacherDashboard Pure Helpers Branches', () => {
+    it('covers isValidUUID, normalizeGrade, and resolveTimetableRangeAndTheme', () => {
+      // isValidUUID
+      expect(isValidUUID(null)).toBe(false);
+      expect(isValidUUID('')).toBe(false);
+      expect(isValidUUID('invalid-uuid')).toBe(false);
+      expect(isValidUUID('12345678-1234-1234-1234-123456789abc')).toBe(true);
+
+      // normalizeGrade
+      expect(normalizeGrade('')).toBe('');
+      expect(normalizeGrade(undefined)).toBe('');
+      expect(normalizeGrade('中2')).toBe('中2');
+      expect(normalizeGrade('高3')).toBe('高3');
+      expect(normalizeGrade('園児')).toBe('園児');
+      expect(normalizeGrade('既卒')).toBe('既卒');
+      expect(normalizeGrade('小5')).toBe('5年生');
+      expect(normalizeGrade('無所属')).toBe('無所属');
+
+      // resolveTimetableRangeAndTheme
+      // 1. selectedUnitあり、config.startLessonNameなし
+      const res1 = resolveTimetableRangeAndTheme({
+        config: {},
+        selectedUnit: { name: '単元A' },
+        selectedMaster: null,
+        studentId: 'st-1',
+        scheduleDate: '2026-11-06',
+        period: 1
+      });
+      expect(res1.startLessonName).toBe('単元A');
+      expect(res1.customUnitId).toBe('custom-st-1-2026-11-06-1');
+
+      // 2. selectedMaster (unit_nameあり)
+      const res2 = resolveTimetableRangeAndTheme({
+        config: {},
+        selectedUnit: null,
+        selectedMaster: { unit_name: '第1章', lesson_name: 'レッスン1' },
+        studentId: 'st-1',
+        scheduleDate: '2026-11-06',
+        period: 2,
+        targetUnitId: 'explicit-target-id'
+      });
+      expect(res2.startLessonName).toBe('第1章 - レッスン1');
+      expect(res2.customUnitId).toBe('explicit-target-id');
+
+      // 3. selectedMaster (unit_nameなし)
+      const res3 = resolveTimetableRangeAndTheme({
+        config: {},
+        selectedUnit: null,
+        selectedMaster: { lesson_name: '単独レッスン' },
+        studentId: 'st-1',
+        scheduleDate: '2026-11-06',
+        period: 3
+      });
+      expect(res3.startLessonName).toBe('単独レッスン');
+
+      // 4. resolveLessonsForSubject (lines 2451, 2484)
+      const testMasters = [
+        {
+          id: 'cm-no-type',
+          grade: '小1',
+          subject: '算数',
+          lesson_name: '通常授業',
+          item_type: undefined, // line 2451 fallback to 'lesson'
+          sort_order: undefined // line 2484 fallback to 0
+        } as any,
+        {
+          id: 'cm-with-order',
+          grade: '小1',
+          subject: '算数',
+          lesson_name: '発展授業',
+          item_type: 'lesson',
+          sort_order: 5
+        } as any
+      ];
+      const lessons = resolveLessonsForSubject({
+        subject: '算数',
+        selectedStudent: { grade: '小1' } as any,
+        includeUnitTests: true,
+        curriculumMastersList: testMasters
+      });
+      expect(lessons).toHaveLength(2);
+      expect(lessons[0].item_type).toBe('lesson');
+      expect(lessons[0].sort_order).toBe(0);
+    });
+  });
+
+  // --- 9. SugorokuMap player placement & scroll branches ---
+  describe('SugorokuMap Branch Coverage', () => {
+    it('covers test subStep placement, all cleared lastNode placement, and scrollTop fallback', () => {
+      const units = [
+        { id: 'u1', unit_name: '単元1', sequence_order: 1, total_points: 10 } as any,
+        { id: 'u2', unit_name: '単元2', sequence_order: 2, total_points: 10 } as any
+      ];
+
+      // 1. video_watched: true, test_passed: false (line 320)
+      const tasks1 = [
+        { id: 't1', unit_id: 'u1', video_watched: true, test_passed: false, status: 'unstarted' } as any
+      ];
+      render(<SugorokuMap units={units} tasks={tasks1} onNodeClick={vi.fn()} />);
+
+      // 2. all completed (lines 329-333: lastNode placement)
+      const tasksAllDone = [
+        { id: 't1', unit_id: 'u1', video_watched: true, test_passed: true, status: 'completed' } as any,
+        { id: 't2', unit_id: 'u2', video_watched: true, test_passed: true, status: 'completed' } as any
+      ];
+      render(<SugorokuMap units={units} tasks={tasksAllDone} onNodeClick={vi.fn()} />);
     });
   });
 });
