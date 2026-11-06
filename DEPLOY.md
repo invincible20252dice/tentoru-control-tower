@@ -1,5 +1,19 @@
 # Supabase & Vercel デプロイ手順書
 
+## 🌐 最新・正式本番環境情報（現在稼働中）
+* **最新本番環境URL (Production)**:  
+  👉 **[https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app](https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app)**
+* **連携先 Supabase プロジェクト**:  
+  `https://oqwnciwyzstiqszdgekr.supabase.co`
+* **最新カリキュラムマスター**:  
+  公式CSV「小学生テントルカリキュラム」（計955レッスン: 算数587, 国語98, 英語133, 理科139, 社会38）DB完全同期済み
+* **生徒・年間計画**:  
+  全生徒の所属学校名（佐藤B: 川尻小、中尾: 飽田南小 等）、教科別スタート位置、個性タグ、進捗タイムライン完全同期済み
+* **ログイン情報**:  
+  本部管理者: `admin@tentoru.jp` / `tentoru2026`
+
+---
+
 本システム（Tentoru Control Tower）をローカル環境から本番環境（インターネット公開）へ移行し、Supabaseと連携させるための詳細な手順書です。
 
 ---

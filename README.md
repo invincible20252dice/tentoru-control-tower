@@ -1,4 +1,13 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tentoru Control Tower (学習管理 司令塔システム)
+
+## 🌐 最新・正式本番環境URL
+👉 **[https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app](https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app)**
+
+* **データベース (Supabase)**: `https://oqwnciwyzstiqszdgekr.supabase.co`
+* **カリキュラムデータ**: 公式CSV小学生テントルカリキュラム（全955件）DB完全同期済み
+* **本部管理者アカウント**: `admin@tentoru.jp` / `tentoru2026`
+
+---
 
 ## Getting Started
 
