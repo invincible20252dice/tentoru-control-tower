@@ -120,4 +120,49 @@ describe('小学生カリキュラムにおける単元確認テストの「本�
       expect(screen.getAllByText(/かずと.*すうじ.*単元確認テスト/i).length).toBeGreaterThan(0);
     });
   });
+
+  it('4. UIテスト: コマ割りのドロップダウンに単元確認テストが表示され、選択時に専用スタイル・バッジが適用されること', async () => {
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    await act(async () => {
+      render(
+        <TeacherDashboard 
+          initialStudentId={sampleStudent.id} 
+          teacherType="elementary" 
+          initialTab="schedule" 
+        />
+      );
+    });
+
+    // 1コマ目の教科を「算数」に変更
+    const subjSelect = await screen.findByTestId('period-subject-select-1');
+    await act(async () => {
+      fireEvent.change(subjSelect, { target: { value: '算数' } });
+    });
+
+    // 開始授業のドロップダウンに単元確認テストが含まれていること
+    const startSelect = await screen.findByTestId('period-unit-select-1');
+    const options = Array.from(startSelect.querySelectorAll('option')).map(o => o.textContent || '');
+    const hasUnitTestOption = options.some(opt => opt.includes('単元確認テスト') || opt.includes('単元テスト'));
+    expect(hasUnitTestOption).toBe(true);
+
+    // 単元確認テストのoptionのvalueを取得して選択
+    const utOption = Array.from(startSelect.querySelectorAll('option')).find(o => o.textContent?.includes('単元確認テスト'));
+    expect(utOption).toBeDefined();
+
+    if (utOption) {
+      await act(async () => {
+        fireEvent.change(startSelect, { target: { value: utOption.value } });
+      });
+
+      // 単元確認テスト実施コマバッジが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('period-unittest-badge-1')).toBeInTheDocument();
+      });
+
+      // コマ割り行（period-row-1）にパープル背景が適用されていること
+      const row = screen.getByTestId('period-row-1');
+      expect(row.style.backgroundColor).toBe('rgb(250, 245, 255)');
+    }
+  });
 });

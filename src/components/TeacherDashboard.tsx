@@ -2404,13 +2404,12 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
   // 教科のマッチング判定関数（他教科のカリキュラム混入を完全防ぐ）
   const matchSubject = (targetSubject?: string) => isMatchingSubjectGroup(subj, targetSubject);
 
-  // 単元確認テスト（is_unit_test）判定関数: 通常授業およびまとめテスト（Check Test）のみを許可し、単元確認テストを完全に除外
+  // 単元確認テスト（is_unit_test）判定関数
   const isUnitTestItem = (item: any) => isUnitTestCurriculumItem(item);
 
   const matchingSchoolUnits = allCurriculumUnits.filter(u => 
     (selectedStudent?.school_id ? u.school_id === selectedStudent.school_id : false) &&
-    matchSubject(u.subject) &&
-    !isUnitTestItem(u)
+    matchSubject(u.subject)
   );
 
   const rawMasters = (curriculumMastersList && curriculumMastersList.length > 0) ? curriculumMastersList : db.getCurriculumMasters();
@@ -2422,33 +2421,38 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
     name: u.name,
     sort_order: u.sequence_order ?? 0,
     isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
-    item_type: (u as any).item_type
+    item_type: (u as any).item_type,
+    isUnitTest: isUnitTestItem(u)
   }));
 
   const masterUnits = ensuredMasters
-    .filter(m => !isUnitTestItem(m))
-    .map(m => ({
-      id: m.id,
-      name: m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name,
-      sort_order: m.sort_order ?? 0,
-      isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj)),
-      item_type: m.item_type
-    }));
+    .map(m => {
+      const isUT = isUnitTestItem(m);
+      const cleanName = m.unit_name ? `${m.unit_name} - ${m.lesson_name.replace(/^[^-]+-\s*/, '')}` : m.lesson_name;
+      return {
+        id: m.id,
+        name: cleanName,
+        sort_order: m.sort_order ?? 0,
+        isStartUnit: m.id === getStudentStartUnitIdForSubject(selectedStudent, subj) || String(m.sort_order) === String(getStudentStartUnitIdForSubject(selectedStudent, subj)),
+        item_type: m.item_type || (isUT ? 'unit_test' : 'lesson'),
+        isUnitTest: isUT
+      };
+    });
 
-  const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean; item_type?: string }>();
+  const combinedMap = new Map<string, { id: string; name: string; sort_order: number; isStartUnit: boolean; item_type?: string; isUnitTest?: boolean }>();
   masterUnits.forEach(item => combinedMap.set(item.id, item));
   schoolUnits.forEach(item => combinedMap.set(item.id, item));
 
   const fallbackUnits = allCurriculumUnits.filter(u => 
     (u.school_id === selectedStudent?.school_id || !u.school_id) && 
-    matchSubject(u.subject) &&
-    !isUnitTestItem(u)
+    matchSubject(u.subject)
   ).map(u => ({
     id: u.id,
     name: u.name,
     sort_order: u.sequence_order ?? 0,
     isStartUnit: u.id === getStudentStartUnitIdForSubject(selectedStudent, subj),
-    item_type: (u as any).item_type
+    item_type: (u as any).item_type,
+    isUnitTest: isUnitTestItem(u)
   }));
 
   fallbackUnits.forEach(item => {
@@ -2457,11 +2461,10 @@ export function resolveLessonsForSubject(params: ResolveLessonsForSubjectParams)
     }
   });
 
-  // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完（単元テストは除外）
-  resolveCandidateUnitsFromPeriodSelections(combinedMap, periodSelections, matchSubject, isUnitTestItem);
+  // 現在選択されているコマ設定に存在し、リストにまだないID/名称があれば安全に補完
+  resolveCandidateUnitsFromPeriodSelections(combinedMap, periodSelections, matchSubject, () => false);
 
   return Array.from(combinedMap.values())
-    .filter(item => !isUnitTestItem(item))
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 }
 
@@ -5321,7 +5324,13 @@ export default function TeacherDashboard({
 
     const endLesson = findLessonById(endId, currentConfig.subject);
     const endName = endLesson?.name || '';
-    const startId = currentConfig.startLessonId || endId;
+    const isEndUT = isLessonUnitTest(endName) || (endLesson as any)?.item_type === 'unit_test';
+
+    let startId = currentConfig.startLessonId || endId;
+    if (isEndUT && (!currentConfig.startLessonName || !isLessonUnitTest(currentConfig.startLessonName))) {
+      startId = endId;
+    }
+
     const startLesson = findLessonById(startId, currentConfig.subject);
     const startName = startLesson?.name || endName;
     const rangeStr = formatLessonRange(startName, endName);
@@ -7765,21 +7774,29 @@ export default function TeacherDashboard({
                         {Array.from({ length: periodCount }, (_, i) => i + 1).map(p => {
                           const currentConfig = periodSelections[p] || { subject: '', unitId: '', startLessonId: '', endLessonId: '', customTheme: '', pace: 2 };
                           const isElementary = selectedStudent.grade.startsWith('小') || selectedStudent.grade === '園児';
+                          const isUnitTestPeriod = Boolean(
+                            currentConfig.subject === 'テスト' ||
+                            (currentConfig.startLessonName && isLessonUnitTest(currentConfig.startLessonName)) ||
+                            (currentConfig.endLessonName && isLessonUnitTest(currentConfig.endLessonName)) ||
+                            (currentConfig.lessonRange && isLessonUnitTest(currentConfig.lessonRange))
+                          );
 
                           return (
                             <div 
                               key={p} 
                               data-testid={`period-row-${p}`}
                               style={{ 
-                                backgroundColor: '#ffffff', 
+                                backgroundColor: isUnitTestPeriod ? '#faf5ff' : '#ffffff', 
                                 borderRadius: '8px', 
                                 padding: '6px 10px', 
-                                border: '1px solid #e2e8f0',
+                                border: isUnitTestPeriod ? '1.5px solid #c084fc' : '1px solid #e2e8f0',
+                                borderLeft: isUnitTestPeriod ? '4px solid #9333ea' : '1px solid #e2e8f0',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '8px',
                                 minHeight: '42px',
-                                boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                                boxShadow: isUnitTestPeriod ? '0 2px 6px rgba(147, 51, 234, 0.1)' : '0 1px 2px rgba(0,0,0,0.02)',
+                                transition: 'all 0.2s ease'
                               }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '215px', minWidth: '215px', flexShrink: 0 }}>
@@ -7789,8 +7806,8 @@ export default function TeacherDashboard({
                                     width: '22px', 
                                     height: '22px', 
                                     borderRadius: '50%', 
-                                    background: '#e2e8f0', 
-                                    color: '#334155', 
+                                    background: isUnitTestPeriod ? '#9333ea' : '#e2e8f0', 
+                                    color: isUnitTestPeriod ? '#ffffff' : '#334155', 
                                     fontWeight: 700, 
                                     fontSize: '0.75rem', 
                                     display: 'inline-flex', 
@@ -7861,12 +7878,7 @@ export default function TeacherDashboard({
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
                                   {/* カリキュラム単元・授業進捗範囲設定 */}
                                   {['数学', '算数', '英語', '理科', '社会', '国語', '物理', '化学', '生物', '日本史', '世界史', '地理', '現代社会'].includes(currentConfig.subject) && (() => {
-                                    const lessons = getLessonsForSubject(currentConfig.subject);
-                                    const selectableLessons = lessons.filter(l => {
-                                      const name = l.name || '';
-                                      const isReview = name.includes('まとめテスト') || name.toLowerCase().includes('check test');
-                                      return isReview || (!l.name?.includes('単元確認テスト') && !l.name?.includes('単元テスト') && (l as any).item_type !== 'unit_test');
-                                    });
+                                    const selectableLessons = getLessonsForSubject(currentConfig.subject);
                                     const selectedStartId = currentConfig.startLessonId || currentConfig.unitId || '';
                                     const selectedEndId = currentConfig.endLessonId || currentConfig.startLessonId || currentConfig.unitId || '';
                                     const hasStartInList = selectableLessons.some(l => l.id === selectedStartId);
@@ -7882,7 +7894,7 @@ export default function TeacherDashboard({
                                             value={selectedStartId}
                                             onChange={e => handleStartLessonChange(p, e.target.value)}
                                             className={styles.select}
-                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis' }}
+                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: isUnitTestPeriod ? '1px solid #c084fc' : '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis', backgroundColor: isUnitTestPeriod ? '#ffffff' : '#ffffff' }}
                                           >
                                             <option value="">-- 開始授業を選択 --</option>
                                             {selectedStartId && !hasStartInList && (
@@ -7890,14 +7902,21 @@ export default function TeacherDashboard({
                                                 {currentConfig.startLessonName || '開始授業'}
                                               </option>
                                             )}
-                                            {selectableLessons.map(l => (
-                                              <option key={l.id} value={l.id}>
-                                                {l.isStartUnit ? '★ [スタートライン] ' : ''}{l.name}
-                                              </option>
-                                            ))}
+                                            {selectableLessons.map(l => {
+                                              const isUT = (l as any).isUnitTest || l.item_type === 'unit_test' || l.name?.includes('単元確認テスト') || l.name?.includes('単元テスト');
+                                              return (
+                                                <option 
+                                                  key={l.id} 
+                                                  value={l.id}
+                                                  style={isUT ? { color: '#7c3aed', fontWeight: 700 } : {}}
+                                                >
+                                                  {l.isStartUnit ? '★ [スタートライン] ' : ''}{isUT ? '📝 [単元テスト] ' : ''}{l.name}
+                                                </option>
+                                              );
+                                            })}
                                           </select>
                                         </div>
-                                        <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: '0.8rem', userSelect: 'none', flexShrink: 0 }}>→</span>
+                                        <span style={{ color: isUnitTestPeriod ? '#a855f7' : '#94a3b8', fontWeight: 700, fontSize: '0.8rem', userSelect: 'none', flexShrink: 0 }}>→</span>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 0px', minWidth: 0 }}>
                                           <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>終了:</span>
                                           <select
@@ -7906,7 +7925,7 @@ export default function TeacherDashboard({
                                             value={selectedEndId}
                                             onChange={e => handleEndLessonChange(p, e.target.value)}
                                             className={styles.select}
-                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis' }}
+                                            style={{ fontSize: '0.75rem', borderRadius: '8px', border: isUnitTestPeriod ? '1px solid #c084fc' : '1px solid #e2e8f0', padding: '4px 6px', width: '100%', minWidth: 0, textOverflow: 'ellipsis', backgroundColor: isUnitTestPeriod ? '#ffffff' : '#ffffff' }}
                                           >
                                             <option value="">-- 終了目標授業を選択 --</option>
                                             {selectedEndId && !hasEndInList && (
@@ -7914,13 +7933,41 @@ export default function TeacherDashboard({
                                                 {formatTaskConfigDisplayName(currentConfig.startLessonName, currentConfig.endLessonName)}
                                               </option>
                                             )}
-                                            {selectableLessons.map(l => (
-                                              <option key={l.id} value={l.id}>
-                                                {l.name}
-                                              </option>
-                                            ))}
+                                            {selectableLessons.map(l => {
+                                              const isUT = (l as any).isUnitTest || l.item_type === 'unit_test' || l.name?.includes('単元確認テスト') || l.name?.includes('単元テスト');
+                                              return (
+                                                <option 
+                                                  key={l.id} 
+                                                  value={l.id}
+                                                  style={isUT ? { color: '#7c3aed', fontWeight: 700 } : {}}
+                                                >
+                                                  {isUT ? '📝 [単元テスト] ' : ''}{l.name}
+                                                </option>
+                                              );
+                                            })}
                                           </select>
                                         </div>
+                                        {isUnitTestPeriod && (
+                                          <span
+                                            data-testid={`period-unittest-badge-${p}`}
+                                            style={{
+                                              fontSize: '0.7rem',
+                                              fontWeight: 800,
+                                              padding: '2px 8px',
+                                              borderRadius: '6px',
+                                              backgroundColor: '#f3e8ff',
+                                              color: '#7c3aed',
+                                              border: '1px solid #d8b4fe',
+                                              whiteSpace: 'nowrap',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '3px',
+                                              flexShrink: 0
+                                            }}
+                                          >
+                                            📝 単元確認テスト実施コマ
+                                          </span>
+                                        )}
                                       </>
                                     );
                                   })()}
