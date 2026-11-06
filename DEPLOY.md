@@ -1,8 +1,15 @@
 # Supabase & Vercel デプロイ手順書
 
 ## 🌐 最新・正式本番環境情報（現在稼働中）
-* **最新本番環境URL (Production)**:  
+* **最新本番環境URL (Production / 正本)**:  
   👉 **[https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app](https://tentoru-control-tower-invincible20252dice-2177s-projects.vercel.app)**
+* **同義・関連URL（すべて上記最新情報と同一のものとして認識）**:  
+  - `https://tentoru-control-tower.vercel.app`
+  - `https://study-management.vercel.app`
+  - `https://study-management-invincible20252dice-2177s-projects.vercel.app`
+  - `https://tentoru-control-tower-fwrm-invincible20252dice-2177s-projects.vercel.app`
+  - 各種デプロイ固有URL (`https://tentoru-control-tower-*.vercel.app`)  
+  ※いずれのURLが指定された場合でも、同一の最新本番環境（公式CSV955件・全生徒同期済み）として認識・処理されます。
 * **連携先 Supabase プロジェクト**:  
   `https://oqwnciwyzstiqszdgekr.supabase.co`
 * **最新カリキュラムマスター**:  
